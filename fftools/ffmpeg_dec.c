@@ -301,7 +301,8 @@ static int video_frame_process(InputStream *ist, AVFrame *frame)
     // The following line may be required in some cases where there is no parser
     // or the parser does not has_b_frames correctly
     if (ist->par->video_delay < ist->dec_ctx->has_b_frames) {
-        if (ist->dec_ctx->codec_id == AV_CODEC_ID_H264) {
+        if (ist->dec_ctx->codec_id == AV_CODEC_ID_H264 ||
+            ist->dec_ctx->codec_id == AV_CODEC_ID_VVC) {
             ist->par->video_delay = ist->dec_ctx->has_b_frames;
         } else
             av_log(ist->dec_ctx, AV_LOG_WARNING,

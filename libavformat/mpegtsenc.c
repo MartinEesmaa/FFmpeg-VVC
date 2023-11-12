@@ -368,6 +368,9 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_HEVC:
         stream_type = STREAM_TYPE_VIDEO_HEVC;
         break;
+    case AV_CODEC_ID_VVC:
+        stream_type = STREAM_TYPE_VIDEO_VVC;
+        break;
     case AV_CODEC_ID_CAVS:
         stream_type = STREAM_TYPE_VIDEO_CAVS;
         break;
@@ -466,6 +469,11 @@ static int get_m2ts_stream_type(AVFormatContext *s, AVStream *st)
         break;
     case AV_CODEC_ID_HEVC:
         stream_type = STREAM_TYPE_VIDEO_HEVC;
+        break;
+    case AV_CODEC_ID_VVC:
+        av_log(s, AV_LOG_ERROR,
+                "MPEGTS VVC %s.\n", avcodec_get_name(st->codecpar->codec_id));
+        stream_type = STREAM_TYPE_VIDEO_VVC;
         break;
     case AV_CODEC_ID_PCM_BLURAY:
         stream_type = 0x80;
@@ -1791,6 +1799,21 @@ static int check_hevc_startcode(AVFormatContext *s, const AVStream *st, const AV
     return 0;
 }
 
+static int check_vvc_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
+{
+    if (pkt->size < 5 || AV_RB32(pkt->data) != 0x0000001 && AV_RB24(pkt->data) != 0x000001) {
+        if (!st->nb_frames) {
+            av_log(s, AV_LOG_ERROR, "VVC bitstream malformed, no startcode found\n");
+            return AVERROR_PATCHWELCOME;
+        }
+        av_log(s, AV_LOG_WARNING, "VVC bitstream error, startcode missing, size %d", pkt->size);
+        if (pkt->size)
+            av_log(s, AV_LOG_WARNING, " data %08"PRIX32, AV_RB32(pkt->data));
+        av_log(s, AV_LOG_WARNING, "\n");
+    }
+    return 0;
+}
+
 /* Based on GStreamer's gst-plugins-base/ext/ogg/gstoggstream.c
  * Released under the LGPL v2.1+, written by
  * Vincent Penquerc'h <vincent.penquerch@collabora.co.uk>
@@ -2015,6 +2038,42 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
             buf     = data;
             size    = pkt->size + 7 + extradd;
         }
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_VVC) {
+      const uint8_t *p = buf, *buf_end = p + size;
+      uint32_t state = -1;
+      uint32_t naltype = -1;
+      int extradd = (pkt->flags & AV_PKT_FLAG_KEY) ? st->codecpar->extradata_size : 0;
+      int ret = check_vvc_startcode(s, st, pkt);
+      if (ret < 0)
+          return ret;
+
+      if (extradd && AV_RB24(st->codecpar->extradata) > 1)
+          extradd = 0;
+
+      do {
+          p = avpriv_find_start_code(p, buf_end, &state);
+          // state contains byte behind start code, p points 2 bytes behind start code
+          naltype = ((AV_RB8(p)>>3) & 0x1F);
+          av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", naltype );
+          if (naltype == 14 ) // VPS
+              extradd = 0;
+      } while (p < buf_end && naltype != 20 && naltype >= 12);
+
+      if (naltype >= 12)
+          extradd = 0;
+      if (naltype != 20) { // AUD NAL
+          data = av_malloc(pkt->size + 7 + extradd);
+          if (!data)
+              return AVERROR(ENOMEM);
+          memcpy(data + 7, st->codecpar->extradata, extradd);
+          memcpy(data + 7 + extradd, pkt->data, pkt->size);
+          AV_WB32(data, 0x00000001);
+          data[4] = 20;
+          data[5] = 1;
+          data[6] = 0x50; // any slice type (0x4) + rbsp stop one bit
+          buf     = data;
+          size    = pkt->size + 7 + extradd;
+      }
     } else if (st->codecpar->codec_id == AV_CODEC_ID_OPUS) {
         if (pkt->size < 2) {
             av_log(s, AV_LOG_ERROR, "Opus packet too short\n");
@@ -2271,6 +2330,12 @@ static int mpegts_check_bitstream(AVFormatContext *s, AVStream *st,
                               (st->codecpar->extradata_size > 0 &&
                                st->codecpar->extradata[0] == 1)))
             ret = ff_stream_add_bitstream_filter(st, "hevc_mp4toannexb", NULL);
+    } else if (st->codecpar->codec_id == AV_CODEC_ID_VVC) {
+        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
+                             (AV_RB24(pkt->data) != 0x000001 ||
+                              (st->codecpar->extradata_size > 0 &&
+                               st->codecpar->extradata[0] == 1)))
+            ret = ff_stream_add_bitstream_filter(st, "h266_mp4toannexb", NULL);
     }
 
     return ret;
