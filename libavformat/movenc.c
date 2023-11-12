@@ -1161,7 +1161,16 @@ static int get_samples_per_packet(MOVTrack *track)
     }
     return first_duration;
 }
+static int mov_write_mhac_tag(AVIOContext *pb, MOVTrack *track)
+{
+    // Size of mhaC
+    avio_wb32(pb,track->par->extradata_size + 8 -1);
+    ffio_wfourcc(pb, "mhaC");
+    // Writing the buffer
+    avio_write(pb,track->par->extradata,track->par->extradata_size - 1);
 
+    return 1;
+}
 static int mov_write_btrt_tag(AVIOContext *pb, MOVTrack *track)
 {
     int64_t pos = avio_tell(pb);
@@ -1380,7 +1389,7 @@ static int mov_write_audio_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
         if (ret < 0)
             return ret;
         ret = mov_write_pcmc_tag(s, pb, track);
-    } else if (track->vos_len > 0)
+    } else if (track->vos_len > 0 && track->par->codec_id != AV_CODEC_ID_MPEGH_3D_AUDIO)
         ret = mov_write_glbl_tag(pb, track);
 
     if (ret < 0)
@@ -1400,6 +1409,10 @@ static int mov_write_audio_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
             ((ret = mov_write_btrt_tag(pb, track)) < 0))
         return ret;
 
+    // To write the mhaC tag data for mp4 in case of AV_CODEC_ID_MPEGH_3D_AUDIO
+    if(track->par->codec_id == AV_CODEC_ID_MPEGH_3D_AUDIO) {
+        mov_write_mhac_tag(pb,track);
+    }
     ret = update_size(pb, pos);
     return ret;
 }
@@ -3801,7 +3814,6 @@ static int mov_write_trak_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContext
     int entry_backup = track->entry;
     int chunk_backup = track->chunkCount;
     int ret;
-
     /* If we want to have an empty moov, but some samples already have been
      * buffered (delay_moov), pretend that no samples have been written yet. */
     if (mov->flags & FF_MOV_FLAG_EMPTY_MOOV)
@@ -7223,7 +7235,25 @@ static int mov_init(AVFormatContext *s)
         if (track->language < 0)
             track->language = 32767;  // Unspecified Macintosh language code
         track->mode = mov->mode;
-        track->tag  = mov_find_codec_tag(s, track);
+
+		if(track->par->codec_id == AV_CODEC_ID_MPEGH_3D_AUDIO)
+        {
+            // For MHA1
+            if((track->par->extradata)[track->par->extradata_size - 1] == 2)
+            {
+                track->tag = MKTAG('m', 'h', 'a', '1');
+            }
+            // For MHM1
+            else
+            {
+                track->tag = MKTAG('m', 'h', 'm', '1');
+            }
+        }
+        else
+        {
+            track->tag  = mov_find_codec_tag(s, track);
+        }
+
         if (!track->tag) {
             av_log(s, AV_LOG_ERROR, "Could not find tag for codec %s in stream #%d, "
                    "codec not currently supported in container\n",
@@ -7900,6 +7930,7 @@ static const AVCodecTag codec_mp4_tags[] = {
     { AV_CODEC_ID_MOV_TEXT,        MKTAG('t', 'x', '3', 'g') },
     { AV_CODEC_ID_BIN_DATA,        MKTAG('g', 'p', 'm', 'd') },
     { AV_CODEC_ID_MPEGH_3D_AUDIO,  MKTAG('m', 'h', 'm', '1') },
+    { AV_CODEC_ID_MPEGH_3D_AUDIO,  MKTAG('m', 'h', 'a', '1') },
     { AV_CODEC_ID_TTML,            MOV_MP4_TTML_TAG          },
     { AV_CODEC_ID_TTML,            MOV_ISMV_TTML_TAG         },
 

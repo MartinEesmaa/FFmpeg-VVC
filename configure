@@ -288,6 +288,7 @@ External library support:
   --enable-libvpx          enable VP8 and VP9 de/encoding via libvpx [no]
   --enable-libvvdec        enable H.266/VVC decoding via vvdec [no]
   --enable-libvvenc        enable H.266/VVC encoding via vvenc [no]
+  --enable-ia_mpegh        enable MPEG-H 3D Audio encoding via ia_mpegh [no]
   --enable-libwebp         enable WebP encoding via libwebp [no]
   --enable-libx264         enable H.264 encoding via x264 [no]
   --enable-libx265         enable HEVC encoding via x265 [no]
@@ -1904,6 +1905,7 @@ EXTERNAL_LIBRARY_LIST="
     libvpx
     libvvdec
     libvvenc
+    ia_mpegh
     libwebp
     libxml2
     libzimg
@@ -3451,6 +3453,8 @@ libvpx_vp9_decoder_deps="libvpx"
 libvpx_vp9_encoder_deps="libvpx"
 libvvdec_decoder_deps="libvvdec"
 libvvdec_decoder_select="vvc_mp4toannexb_bsf"
+ia_mpegh_encoder_deps="ia_mpegh"
+ia_mpegh_encoder_extralibs="-lia_mpeghe -L."
 libvvenc_encoder_deps="libvvenc"
 libwebp_encoder_deps="libwebp"
 libwebp_anim_encoder_deps="libwebp"
@@ -6863,6 +6867,8 @@ enabled libvpx            && {
 }
 enabled libvvdec          && require_pkg_config libvvdec "libvvdec >= 1.6.0" "vvdec/vvdec.h" vvdec_get_version
 enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
+
+enabled ia_mpegh
 
 enabled libwebp           && {
     enabled libwebp_encoder      && require_pkg_config libwebp "libwebp >= 0.2.0" webp/encode.h WebPGetEncoderVersion
