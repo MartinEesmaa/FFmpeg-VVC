@@ -19,23 +19,26 @@
  */
 
 #include "config.h"
+
 #include "libavutil/attributes.h"
 #include "libavutil/cpu.h"
-#include "libavcodec/huffyuvdsp.h"
+#include "libavcodec/lossless_audiodsp.h"
 
-void ff_add_int16_rvv(uint16_t *dst, const uint16_t *src, unsigned m, int w);
-void ff_add_hfyu_left_pred_bgr32_rvv(uint8_t *dst, const uint8_t *src,
-                                     intptr_t w, uint8_t *left);
+int32_t ff_scalarproduct_and_madd_int16_rvv(int16_t *v1, const int16_t *v2,
+                                            const int16_t *v3, int len,
+                                            int mul);
+int32_t ff_scalarproduct_and_madd_int32_rvv(int16_t *v1, const int32_t *v2,
+                                            const int16_t *v3, int len,
+                                            int mul);
 
-av_cold void ff_huffyuvdsp_init_riscv(HuffYUVDSPContext *c,
-                                      enum AVPixelFormat pix_fmt)
+av_cold void ff_llauddsp_init_riscv(LLAudDSPContext *c)
 {
 #if HAVE_RVV
     int flags = av_get_cpu_flags();
 
-    if ((flags & AV_CPU_FLAG_RVV_I32) && (flags & AV_CPU_FLAG_RVB_ADDR)) {
-        c->add_int16 = ff_add_int16_rvv;
-        c->add_hfyu_left_pred_bgr32 = ff_add_hfyu_left_pred_bgr32_rvv;
+    if ((flags & AV_CPU_FLAG_RVV_I32)  && (flags & AV_CPU_FLAG_RVB_ADDR)) {
+        c->scalarproduct_and_madd_int16 = ff_scalarproduct_and_madd_int16_rvv;
+        c->scalarproduct_and_madd_int32 = ff_scalarproduct_and_madd_int32_rvv;
     }
 #endif
 }
