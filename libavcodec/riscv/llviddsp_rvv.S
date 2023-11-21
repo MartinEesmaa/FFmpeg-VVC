@@ -1,4 +1,6 @@
 /*
+ * Copyright © 2023 Rémi Denis-Courmont.
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,13 +18,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVFILTER_CUDA_LOAD_HELPER_H
-#define AVFILTER_CUDA_LOAD_HELPER_H
+#include "libavutil/riscv/asm.S"
 
-/**
- * Loads a CUDA module and applies any decompression, if necessary.
- */
-int ff_cuda_load_module(void *avctx, AVCUDADeviceContext *hwctx, CUmodule *cu_module,
-                        const unsigned char *data, const unsigned int length);
+func ff_llvid_add_bytes_rvv, zve32x
+1:
+        vsetvli t0, a2, e8, m8, ta, ma
+        vle8.v  v0, (a1)
+        sub     a2, a2, t0
+        vle8.v  v8, (a0)
+        add     a1, t0, a1
+        vadd.vv v8, v0, v8
+        vse8.v  v8, (a0)
+        add     a0, t0, a0
+        bnez    a2, 1b
 
-#endif /* AVFILTER_CUDA_LOAD_HELPER_H */
+        ret
+endfunc

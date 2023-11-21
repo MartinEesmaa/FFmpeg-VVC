@@ -457,6 +457,7 @@ int ff_h264_update_thread_context(AVCodecContext *dst,
     h->poc.prev_frame_num        = h->poc.frame_num;
 
     h->recovery_frame        = h1->recovery_frame;
+    h->non_gray              = h1->non_gray;
 
     return err;
 }
@@ -1356,12 +1357,11 @@ static int h264_select_output_frame(H264Context *h)
         } else
             h->next_outputed_poc = out->poc;
 
-        if (out->recovered) {
-            // We have reached an recovery point and all frames after it in
-            // display order are "recovered".
-            h->frame_recovered |= FRAME_RECOVERED_SEI;
-        }
-        out->recovered |= !!(h->frame_recovered & FRAME_RECOVERED_SEI);
+        // We have reached an recovery point and all frames after it in
+        // display order are "recovered".
+        h->frame_recovered |= out->recovered;
+
+        out->recovered |= h->frame_recovered & FRAME_RECOVERED_SEI;
 
         if (!out->recovered) {
             if (!(h->avctx->flags & AV_CODEC_FLAG_OUTPUT_CORRUPT) &&
@@ -1545,11 +1545,15 @@ static int h264_field_start(H264Context *h, const H264SliceContext *sl,
                 if (ret < 0)
                     return ret;
                 h->short_ref[0]->poc = prev->poc + 2U;
+                h->short_ref[0]->gray = prev->gray;
                 ff_thread_report_progress(&h->short_ref[0]->tf, INT_MAX, 0);
                 if (h->short_ref[0]->field_picture)
                     ff_thread_report_progress(&h->short_ref[0]->tf, INT_MAX, 1);
-            } else if (!h->frame_recovered && !h->avctx->hwaccel)
-                color_frame(h->short_ref[0]->f, c);
+            } else if (!h->frame_recovered) {
+                if (!h->avctx->hwaccel)
+                    color_frame(h->short_ref[0]->f, c);
+                h->short_ref[0]->gray = 1;
+            }
             h->short_ref[0]->frame_num = h->poc.prev_frame_num;
         }
     }
@@ -1643,15 +1647,18 @@ static int h264_field_start(H264Context *h, const H264SliceContext *sl,
 
     h->cur_pic_ptr->f->flags |= AV_FRAME_FLAG_KEY * !!(nal->type == H264_NAL_IDR_SLICE);
 
-    if (nal->type == H264_NAL_IDR_SLICE ||
-        (h->recovery_frame == h->poc.frame_num && nal->ref_idc)) {
-        h->recovery_frame         = -1;
-        h->cur_pic_ptr->recovered = 1;
-    }
-    // If we have an IDR, all frames after it in decoded order are
-    // "recovered".
-    if (nal->type == H264_NAL_IDR_SLICE)
+    if (nal->type == H264_NAL_IDR_SLICE) {
+        h->cur_pic_ptr->recovered |= FRAME_RECOVERED_IDR;
+        // If we have an IDR, all frames after it in decoded order are
+        // "recovered".
         h->frame_recovered |= FRAME_RECOVERED_IDR;
+    }
+
+    if (h->recovery_frame == h->poc.frame_num && nal->ref_idc) {
+        h->recovery_frame = -1;
+        h->cur_pic_ptr->recovered |= FRAME_RECOVERED_SEI;
+    }
+
 #if 1
     h->cur_pic_ptr->recovered |= h->frame_recovered;
 #else
@@ -2003,6 +2010,19 @@ static int h264_slice_init(H264Context *h, H264SliceContext *sl,
         for (i = 16; i < 48; i++)
             ref2frm[i + 4] = 4 * id_list[(i - 16) >> 1] +
                              (sl->ref_list[j][i].reference & 3);
+    }
+
+    if (sl->slice_type_nos == AV_PICTURE_TYPE_I) {
+        h->cur_pic_ptr->gray = 0;
+        h->non_gray = 1;
+    } else {
+        int gray = 0;
+        for (j = 0; j < sl->list_count; j++) {
+            for (i = 0; i < sl->ref_count[j]; i++) {
+                gray |= sl->ref_list[j][i].parent->gray;
+            }
+        }
+        h->cur_pic_ptr->gray = gray;
     }
 
     if (h->avctx->debug & FF_DEBUG_PICT_INFO) {

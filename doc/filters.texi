@@ -1794,33 +1794,24 @@ Set wet gain. This sets final output gain.
 Set Impulse Response filter length. Default is 1, which means whole IR is processed.
 
 @item gtype
-Enable applying gain measured from power of IR.
+This option is deprecated, and does nothing.
 
-Set which approach to use for auto gain measurement.
+@item irnorm
+Set norm to be applied to IR coefficients before filtering.
+Allowed range is from @var{-1} to @var{2}.
+IR coefficients are normalized with calculated vector norm set by this option.
+For negative values, no norm is calculated, and IR coefficients are not modified at all.
+Default is @var{1}.
 
-@table @option
-@item none
-Do not apply any gain.
-
-@item peak
-select peak gain, very conservative approach. This is default value.
-
-@item dc
-select DC gain, limited application.
-
-@item gn
-select gain to noise approach, this is most popular one.
-
-@item ac
-select AC gain.
-
-@item rms
-select RMS gain.
-@end table
+@item irlink
+For multichannel IR if this option is set to @var{true}, all IR channels will be
+normalized with maximal measured gain of all IR channels coefficients as set by @code{irnorm} option.
+When disabled, all IR coefficients in each IR channel will be normalized independently.
+Default is @var{true}.
 
 @item irgain
 Set gain to be applied to IR coefficients before filtering.
-Allowed range is 0 to 1. This gain is applied after any gain applied with @var{gtype} option.
+Allowed range is 0 to 1. This gain is applied after any gain applied with @var{irnorm} option.
 
 @item irfmt
 Set format of IR stream. Can be @code{mono} or @code{input}.
@@ -1831,18 +1822,16 @@ Set max allowed Impulse Response filter duration in seconds. Default is 30 secon
 Allowed range is 0.1 to 60 seconds.
 
 @item response
-Show IR frequency response, magnitude(magenta), phase(green) and group delay(yellow) in additional video stream.
-By default it is disabled.
+This option is deprecated, and does nothing.
 
 @item channel
-Set for which IR channel to display frequency response. By default is first channel
-displayed. This option is used only when @var{response} is enabled.
+This option is deprecated, and does nothing.
 
 @item size
-Set video stream size. This option is used only when @var{response} is enabled.
+This option is deprecated, and does nothing.
 
 @item rate
-Set video stream frame rate. This option is used only when @var{response} is enabled.
+This option is deprecated, and does nothing.
 
 @item minp
 Set minimal partition size used for convolution. Default is @var{8192}.
@@ -1897,9 +1886,15 @@ ffmpeg -i input.wav -i middle_tunnel_1way_mono.wav -lavfi afir output.wav
 
 @item
 Apply true stereo processing given input stereo stream, and two stereo impulse responses for left and right channel,
-the impulse response files are files with names l_ir.wav and r_ir.wav:
+the impulse response files are files with names l_ir.wav and r_ir.wav, and setting irnorm option value:
 @example
-"pan=4C|c0=FL|c1=FL|c2=FR|c3=FR[a];amovie=l_ir.wav[LIR];amovie=r_ir.wav[RIR];[LIR][RIR]amerge[ir];[a][ir]afir=irfmt=input:gtype=gn:irgain=-5dB,pan=stereo|FL<c0+c2|FR<c1+c3"
+"pan=4C|c0=FL|c1=FL|c2=FR|c3=FR[a];amovie=l_ir.wav[LIR];amovie=r_ir.wav[RIR];[LIR][RIR]amerge[ir];[a][ir]afir=irfmt=input:irnorm=1.2,pan=stereo|FL<c0+c2|FR<c1+c3"
+@end example
+
+@item
+Similar to above example, but with @code{irgain} explicitly set to estimated value and with @code{irnorm} disabled:
+@example
+"pan=4C|c0=FL|c1=FL|c2=FR|c3=FR[a];amovie=l_ir.wav[LIR];amovie=r_ir.wav[RIR];[LIR][RIR]amerge[ir];[a][ir]afir=irfmt=input:irgain=-5dB:irnom=-1,pan=stereo|FL<c0+c2|FR<c1+c3"
 @end example
 @end itemize
 
@@ -2315,7 +2310,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -3687,7 +3682,7 @@ Set order of tilt filter.
 
 @item level
 Set input volume level. Allowed range is from 0 to 4.
-Defalt is 1.
+Default is 1.
 @end table
 
 @subsection Commands
@@ -3855,7 +3850,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -3952,7 +3947,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -4059,7 +4054,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -4151,7 +4146,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -4592,7 +4587,7 @@ This filter supports the all above options as @ref{commands}.
 @section crystalizer
 Simple algorithm for audio noise sharpening.
 
-This filter linearly increases differences betweeen each audio sample.
+This filter linearly increases differences between each audio sample.
 
 The filter accepts the following options:
 
@@ -4987,7 +4982,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -5498,7 +5493,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -5858,7 +5853,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -7215,7 +7210,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -7305,7 +7300,7 @@ Set transform type of IIR filter.
 @end table
 
 @item precision, r
-Set precison of filtering.
+Set precision of filtering.
 @table @option
 @item auto
 Pick automatic sample format depending on surround filters.
@@ -7774,7 +7769,7 @@ Set the sample rate, default is 44100.
 Set the number of samples per each frame. Default is 1024.
 
 @item taps, t
-Set the number of filter coefficents in output audio stream.
+Set the number of filter coefficients in output audio stream.
 Default value is 0.
 
 @item channel_layout, c
@@ -7830,7 +7825,7 @@ Bands are separated by white spaces and each band represent frequency in Hz.
 Default is @code{25 40 63 100 160 250 400 630 1000 1600 2500 4000 6300 10000 16000 24000}.
 
 @item taps, t
-Set number of filter coefficents in output audio stream.
+Set number of filter coefficients in output audio stream.
 Default value is @code{4096}.
 
 @item sample_rate, r
@@ -7857,7 +7852,7 @@ The filter accepts the following options:
 
 @table @option
 @item taps, t
-Set number of filter coefficents in output audio stream.
+Set number of filter coefficients in output audio stream.
 Default value is 1025.
 
 @item frequency, f
@@ -16842,7 +16837,7 @@ ffmpeg -init_hw_device vulkan -hwaccel vaapi -hwaccel_output_format vaapi ... -v
 @anchor{libvmaf}
 @section libvmaf
 
-Calulate the VMAF (Video Multi-Method Assessment Fusion) score for a
+Calculate the VMAF (Video Multi-Method Assessment Fusion) score for a
 reference/distorted pair of input videos.
 
 The first input is the distorted video, and the second input is the reference video.
@@ -16898,7 +16893,7 @@ ffmpeg -i distorted.mpg -i reference.mpg -lavfi libvmaf='model=version=vmaf_v0.6
 @end example
 
 @item
-Example with multiple addtional features:
+Example with multiple additional features:
 @example
 ffmpeg -i distorted.mpg -i reference.mpg -lavfi libvmaf='feature=name=psnr|name=ciede' -f null -
 @end example
@@ -20920,7 +20915,7 @@ pixel format is used.
 The filter does not support converting between YUV and RGB pixel formats.
 
 @item passthrough
-If set to 0, every frame is processed, even if no conversion is neccesary.
+If set to 0, every frame is processed, even if no conversion is necessary.
 This mode can be useful to use the filter as a buffer for a downstream
 frame-consumer that exhausts the limited decoder frame pool.
 
@@ -23050,7 +23045,7 @@ The filter accepts the following options:
 @table @option
 
 @item layout
-Set the grid size in the form @code{COLUMNSxROWS}. Range is upto UINT_MAX cells.
+Set the grid size in the form @code{COLUMNSxROWS}. Range is up to UINT_MAX cells.
 Default is @code{6x5}.
 
 @item nb_frames
@@ -27348,7 +27343,7 @@ Stack input videos horizontally.
 
 This is the VA-API variant of the @ref{hstack} filter, each input stream may
 have different height, this filter will scale down/up each input stream while
-keeping the orignal aspect.
+keeping the original aspect.
 
 It accepts the following options:
 
@@ -27369,7 +27364,7 @@ Stack input videos vertically.
 
 This is the VA-API variant of the @ref{vstack} filter, each input stream may
 have different width, this filter will scale down/up each input stream while
-keeping the orignal aspect.
+keeping the original aspect.
 
 It accepts the following options:
 
@@ -27830,7 +27825,7 @@ Stack input videos horizontally.
 
 This is the QSV variant of the @ref{hstack} filter, each input stream may
 have different height, this filter will scale down/up each input stream while
-keeping the orignal aspect.
+keeping the original aspect.
 
 It accepts the following options:
 
@@ -27851,7 +27846,7 @@ Stack input videos vertically.
 
 This is the QSV variant of the @ref{vstack} filter, each input stream may
 have different width, this filter will scale down/up each input stream while
-keeping the orignal aspect.
+keeping the original aspect.
 
 It accepts the following options:
 
@@ -28199,7 +28194,7 @@ It accepts the following values:
 Passes all supported output formats to DDA and returns what DDA decides to use.
 @item 8bit
 @item bgra
-8 Bit formats always work, and DDA will convert to them if neccesary.
+8 Bit formats always work, and DDA will convert to them if necessary.
 @item 10bit
 @item x2bgr10
 Filter initialization will fail if 10 bit format is requested but unavailable.
