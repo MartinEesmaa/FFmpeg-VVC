@@ -108,7 +108,7 @@ static int config_input(AVFilterLink *inlink)
 
     generate_window_func(s->window, s->fft_size, WFUNC_SINE, &overlap);
 
-    iscale = 1.f / s->fft_size;
+    iscale = 1.f / (s->fft_size * 1.5f);
 
     ret = av_tx_init(&s->tx_ctx[0], &s->tx_fn, AV_TX_FLOAT_RDFT, 0, s->fft_size, &scale, 0);
     if (ret < 0)
@@ -249,20 +249,21 @@ static int de_stereo(AVFilterContext *ctx, AVFrame *out)
     float *left_osamples   = (float *)out->extended_data[0];
     float *right_osamples  = (float *)out->extended_data[1];
     float *center_osamples = (float *)out->extended_data[2];
-    const int offset = s->fft_size - s->overlap;
-    const int nb_samples = FFMIN(s->overlap, s->in->nb_samples);
+    const int overlap = s->overlap;
+    const int offset = s->fft_size - overlap;
+    const int nb_samples = FFMIN(overlap, s->in->nb_samples);
     float vad;
 
     // shift in/out buffers
-    memmove(left_in, &left_in[s->overlap], offset * sizeof(float));
-    memmove(right_in, &right_in[s->overlap], offset * sizeof(float));
-    memmove(left_out, &left_out[s->overlap], offset * sizeof(float));
-    memmove(right_out, &right_out[s->overlap], offset * sizeof(float));
+    memmove(left_in, &left_in[overlap], offset * sizeof(float));
+    memmove(right_in, &right_in[overlap], offset * sizeof(float));
+    memmove(left_out, &left_out[overlap], offset * sizeof(float));
+    memmove(right_out, &right_out[overlap], offset * sizeof(float));
 
     memcpy(&left_in[offset], left_samples, nb_samples * sizeof(float));
     memcpy(&right_in[offset], right_samples, nb_samples * sizeof(float));
-    memset(&left_out[offset], 0, s->overlap * sizeof(float));
-    memset(&right_out[offset], 0, s->overlap * sizeof(float));
+    memset(&left_out[offset], 0, overlap * sizeof(float));
+    memset(&right_out[offset], 0, overlap * sizeof(float));
 
     apply_window(s, left_in,  windowed_left,  0);
     apply_window(s, right_in, windowed_right, 0);
@@ -292,15 +293,13 @@ static int de_stereo(AVFilterContext *ctx, AVFrame *out)
 
     apply_window(s, windowed_oleft, left_out,  1);
 
-    for (int i = 0; i < s->overlap; i++) {
-        // 4 times overlap with squared hanning window results in 1.5 time increase in amplitude
-        if (!ctx->is_disabled)
-            center_osamples[i] = left_out[i] / 1.5f;
-        else
-            center_osamples[i] = 0.f;
-        left_osamples[i]  = left_in[i];
-        right_osamples[i] = right_in[i];
-    }
+    memcpy(left_osamples, left_in, overlap * sizeof(float));
+    memcpy(right_osamples, right_in, overlap * sizeof(float));
+
+    if (ctx->is_disabled)
+        memset(center_osamples, 0, overlap * sizeof(float));
+    else
+        memcpy(center_osamples, left_out, overlap * sizeof(float));
 
     return 0;
 }

@@ -2687,6 +2687,20 @@ Pass error signal estimated samples.
 
 Default value is @var{o}.
 @end table
+
+@item precision
+Set which precision to use when processing samples.
+
+@table @option
+@item auto
+Auto pick internal sample format depending on other filters.
+
+@item float
+Always use single-floating point precision sample format.
+
+@item double
+Always use double-floating point precision sample format.
+@end table
 @end table
 
 @subsection Examples
@@ -3026,6 +3040,20 @@ Pass difference between input, 1st input and error signal estimate.
 Pass error signal estimated samples.
 
 Default value is @var{o}.
+@end table
+
+@item precision
+Set which precision to use when processing samples.
+
+@table @option
+@item auto
+Auto pick internal sample format depending on other filters.
+
+@item float
+Always use single-floating point precision sample format.
+
+@item double
+Always use double-floating point precision sample format.
 @end table
 @end table
 
@@ -16863,6 +16891,10 @@ Set the file path to be used to store log files.
 
 @item log_fmt
 Set the format of the log file (xml, json, csv, or sub).
+
+@item pool
+Set the pool method to be used for computing vmaf.
+Options are @code{min}, @code{harmonic_mean} or @code{mean} (default).
 
 @item n_threads
 Set number of threads to be used when initializing libvmaf.
