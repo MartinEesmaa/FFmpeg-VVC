@@ -139,6 +139,7 @@ static int activate(AVFilterContext *ctx)
                           FFMIN(ctx->outputs[0]->ch_layout.nb_channels, ff_filter_get_nb_threads(ctx)));
 
         out->pts = s->frame[0]->pts;
+        out->duration = s->frame[0]->duration;
 
         av_frame_free(&s->frame[0]);
         av_frame_free(&s->frame[1]);
@@ -159,7 +160,7 @@ static int activate(AVFilterContext *ctx)
 
     if (ff_outlink_frame_wanted(ctx->outputs[0])) {
         for (i = 0; i < 2; i++) {
-            if (ff_inlink_queued_samples(ctx->inputs[i]) > 0)
+            if (s->frame[i] || ff_inlink_queued_samples(ctx->inputs[i]) > 0)
                 continue;
             ff_inlink_request_frame(ctx->inputs[i]);
             return 0;
