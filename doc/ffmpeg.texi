@@ -830,7 +830,7 @@ be achieved with @code{ffmpeg ... < /dev/null} but it requires a
 shell.
 
 @item -debug_ts (@emph{global})
-Print timestamp information. It is off by default. This option is
+Print timestamp/latency information. It is off by default. This option is
 mostly useful for testing and debugging purposes, and the output
 format may change from one version to another, so it should not be
 employed by portable scripts.
@@ -1165,6 +1165,21 @@ Choose the first device and use the primary device context.
 
 @item d3d11va
 @var{device} is the number of the Direct3D 11 display adapter.
+If not specified, it will attempt to use the default Direct3D 11 display adapter
+or the first Direct3D 11 display adapter whose hardware VendorId is specified
+by @samp{vendor_id}.
+
+Examples:
+@table @emph
+@item -init_hw_device d3d11va
+Create a d3d11va device on the default Direct3D 11 display adapter.
+
+@item -init_hw_device d3d11va:1
+Create a d3d11va device on the Direct3D 11 display adapter specified by index 1.
+
+@item -init_hw_device d3d11va:,vendor_id=0x8086
+Create a d3d11va device on the first Direct3D 11 display adapter whose hardware VendorId is 0x8086.
+@end table
 
 @item vaapi
 @var{device} is either an X11 display name, a DRM render node or a DirectX adapter index.
@@ -1845,8 +1860,8 @@ of seconds.
 
 The timestamp discontinuity correction enabled by this option is only
 applied to input formats accepting timestamp discontinuity (for which
-the @code{AV_FMT_DISCONT} flag is enabled), e.g. MPEG-TS and HLS, and
-is automatically disabled when employing the @code{-copy_ts} option
+the @code{AVFMT_TS_DISCONT} flag is enabled), e.g. MPEG-TS and HLS, and
+is automatically disabled when employing the @code{-copyts} option
 (unless wrapping is detected).
 
 If a timestamp discontinuity is detected whose absolute value is
@@ -1862,7 +1877,7 @@ seconds.
 
 The timestamp correction enabled by this option is only applied to
 input formats not accepting timestamp discontinuity (for which the
-@code{AV_FMT_DISCONT} flag is not enabled).
+@code{AVFMT_TS_DISCONT} flag is not enabled).
 
 If a timestamp discontinuity is detected whose absolute value is
 greater than @var{threshold}, ffmpeg will drop the PTS/DTS timestamp

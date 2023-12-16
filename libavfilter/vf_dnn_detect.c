@@ -106,12 +106,16 @@ static int dnn_detect_parse_anchors(char *anchors_str, float **anchors)
         i++;
     }
     nb_anchor++;
-    anchors_buf = av_mallocz(nb_anchor * sizeof(*anchors));
+    anchors_buf = av_mallocz(nb_anchor * sizeof(**anchors));
     if (!anchors_buf) {
         return 0;
     }
     for (int i = 0; i < nb_anchor; i++) {
         token = av_strtok(anchors_str, "&", &saveptr);
+        if (!token) {
+            av_freep(&anchors_buf);
+            return 0;
+        }
         anchors_buf[i] = strtof(token, NULL);
         anchors_str = NULL;
     }
@@ -135,7 +139,8 @@ static int dnn_detect_parse_yolo_output(AVFrame *frame, DNNData *output, int out
 {
     DnnDetectContext *ctx = filter_ctx->priv;
     float conf_threshold = ctx->confidence;
-    int detection_boxes, box_size, cell_w, cell_h, scale_w, scale_h;
+    int detection_boxes, box_size;
+    int cell_w = 0, cell_h = 0, scale_w = 0, scale_h = 0;
     int nb_classes = ctx->nb_classes;
     float *output_data = output[output_index].data;
     float *anchors = ctx->anchors;
@@ -218,6 +223,7 @@ static int dnn_detect_parse_yolo_output(AVFrame *frame, DNNData *output, int out
                     av_freep(&bbox);
                     return AVERROR(ENOMEM);
                 }
+                bbox = NULL;
             }
     }
     return 0;

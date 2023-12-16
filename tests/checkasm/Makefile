@@ -23,6 +23,7 @@ AVCODECOBJS-$(CONFIG_VIDEODSP)          += videodsp.o
 # decoders/encoders
 AVCODECOBJS-$(CONFIG_AAC_DECODER)       += aacpsdsp.o \
                                            sbrdsp.o
+AVCODECOBJS-$(CONFIG_AAC_ENCODER)       += aacencdsp.o
 AVCODECOBJS-$(CONFIG_ALAC_DECODER)      += alacdsp.o
 AVCODECOBJS-$(CONFIG_DCA_DECODER)       += synth_filter.o
 AVCODECOBJS-$(CONFIG_EXR_DECODER)       += exrdsp.o
@@ -68,7 +69,7 @@ CHECKASMOBJS-$(CONFIG_AVUTIL)  += $(AVUTILOBJS)
 
 CHECKASMOBJS-$(ARCH_AARCH64)            += aarch64/checkasm.o
 CHECKASMOBJS-$(HAVE_ARMV5TE_EXTERNAL)   += arm/checkasm.o
-CHECKASMOBJS-$(ARCH_RISCV)              += riscv/checkasm.o
+CHECKASMOBJS-$(HAVE_RV)                 += riscv/checkasm.o
 CHECKASMOBJS-$(HAVE_X86ASM)             += x86/checkasm.o
 
 CHECKASMOBJS += $(CHECKASMOBJS-yes) checkasm.o
