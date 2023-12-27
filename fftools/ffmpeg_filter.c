@@ -2017,9 +2017,9 @@ static int choose_out_timebase(OutputFilterPriv *ofp, AVFrame *frame)
     if (!(tb.num > 0 && tb.den > 0))
         tb = frame->time_base;
 
+    fps->framerate     = fr;
 finish:
     ofp->tb_out        = tb;
-    fps->framerate     = fr;
     ofp->tb_out_locked = 1;
 
     return 0;
@@ -2104,8 +2104,11 @@ static void video_sync_process(OutputFilterPriv *ofp, AVFrame *frame,
 
     if (delta0 < 0 &&
         delta > 0 &&
-        ost->vsync_method != VSYNC_PASSTHROUGH &&
-        ost->vsync_method != VSYNC_DROP) {
+        ost->vsync_method != VSYNC_PASSTHROUGH
+#if FFMPEG_OPT_VSYNC_DROP
+        && ost->vsync_method != VSYNC_DROP
+#endif
+        ) {
         if (delta0 < -0.6) {
             av_log(ost, AV_LOG_VERBOSE, "Past duration %f too large\n", -delta0);
         } else
@@ -2143,7 +2146,9 @@ static void video_sync_process(OutputFilterPriv *ofp, AVFrame *frame,
             ofp->next_pts = llrint(sync_ipts);
         frame->duration = llrint(duration);
         break;
+#if FFMPEG_OPT_VSYNC_DROP
     case VSYNC_DROP:
+#endif
     case VSYNC_PASSTHROUGH:
         ofp->next_pts = llrint(sync_ipts);
         frame->duration = llrint(duration);
@@ -2454,7 +2459,7 @@ static int read_frames(FilterGraph *fg, FilterGraphThread *fgt,
             }
         }
         did_step = 1;
-    };
+    }
 
     return (fgp->nb_outputs_done == fg->nb_outputs) ? AVERROR_EOF : 0;
 }
@@ -2830,7 +2835,7 @@ read_frames:
     for (unsigned i = 0; i < fg->nb_outputs; i++) {
         OutputFilterPriv *ofp = ofp_from_ofilter(fg->outputs[i]);
 
-        if (fgt.eof_out[i])
+        if (fgt.eof_out[i] || !fgt.graph)
             continue;
 
         ret = fg_output_frame(ofp, &fgt, NULL);
