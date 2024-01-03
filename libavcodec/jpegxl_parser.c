@@ -162,7 +162,7 @@ typedef struct JXLParseContext {
     int skipped_icc;
     int next;
 
-    uint8_t cs_buffer[4096];
+    uint8_t cs_buffer[4096 + AV_INPUT_BUFFER_PADDING_SIZE];
 } JXLParseContext;
 
 /* used for reading brotli prefixes */
@@ -708,6 +708,10 @@ static int read_vlc_prefix(GetBitContext *gb, JXLEntropyDecoder *dec, JXLSymbolD
     level1_codecounts[0] = hskip;
     for (int i = hskip; i < 18; i++) {
         len = level1_lens[prefix_codelen_map[i]] = get_vlc2(gb, level0_table, 4, 1);
+        if (len < 0) {
+            ret = AVERROR_INVALIDDATA;
+            goto end;
+        }
         level1_codecounts[len]++;
         if (len) {
             total_code += (32 >> len);
@@ -753,6 +757,10 @@ static int read_vlc_prefix(GetBitContext *gb, JXLEntropyDecoder *dec, JXLSymbolD
     total_code = 0;
     for (int i = 0; i < dist->alphabet_size; i++) {
         len = get_vlc2(gb, level1_vlc.table, 5, 1);
+        if (len < 0) {
+            ret = AVERROR_INVALIDDATA;
+            goto end;
+        }
         if (get_bits_left(gb) < 0) {
             ret = AVERROR_BUFFER_TOO_SMALL;
             goto end;
@@ -1401,7 +1409,7 @@ static int try_parse(AVCodecParserContext *s, AVCodecContext *avctx, JXLParseCon
     if (ctx->container || AV_RL64(buf) == FF_JPEGXL_CONTAINER_SIGNATURE_LE) {
         ctx->container = 1;
         ret = ff_jpegxl_collect_codestream_header(buf, buf_size, ctx->cs_buffer,
-                                                  sizeof(ctx->cs_buffer), &ctx->copied);
+                                                  sizeof(ctx->cs_buffer) - AV_INPUT_BUFFER_PADDING_SIZE, &ctx->copied);
         if (ret < 0)
             return ret;
         ctx->collected_size = ret;
@@ -1410,7 +1418,7 @@ static int try_parse(AVCodecParserContext *s, AVCodecContext *avctx, JXLParseCon
             return AVERROR_BUFFER_TOO_SMALL;
         }
         cs_buffer = ctx->cs_buffer;
-        cs_buflen = FFMIN(sizeof(ctx->cs_buffer), ctx->copied);
+        cs_buflen = FFMIN(sizeof(ctx->cs_buffer) - AV_INPUT_BUFFER_PADDING_SIZE, ctx->copied);
     } else {
         cs_buffer = buf;
         cs_buflen = buf_size;
