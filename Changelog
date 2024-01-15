@@ -17,6 +17,8 @@ version <next>:
 - quirc filter
 - lavu/eval: introduce randomi() function in expressions
 - VVC decoder
+- fsync filter
+- Raw Captions with Time (RCWT) closed caption muxer
 
 version 6.1:
 - libaribcaption decoder
