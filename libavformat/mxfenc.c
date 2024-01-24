@@ -2656,13 +2656,13 @@ static int mxf_parse_jpeg2000_frame(AVFormatContext *s, AVStream *st, AVPacket *
 
     if (bytestream2_get_be16u(&g) != JPEG2000_SOC) {
         av_log(s, AV_LOG_ERROR, "Mandatory SOC marker is not present\n");
-        return AVERROR(AVERROR_INVALIDDATA);
+        return AVERROR_INVALIDDATA;
     }
 
     /* Extract usefull size information from the SIZ marker */
     if (bytestream2_get_be16u(&g) != JPEG2000_SIZ) {
         av_log(s, AV_LOG_ERROR, "Mandatory SIZ marker is not present\n");
-        return AVERROR(AVERROR_INVALIDDATA);
+        return AVERROR_INVALIDDATA;
     }
     bytestream2_skip(&g, 2); // Skip Lsiz
     sc->j2k_info.j2k_cap = bytestream2_get_be16u(&g);
@@ -2677,7 +2677,7 @@ static int mxf_parse_jpeg2000_frame(AVFormatContext *s, AVStream *st, AVPacket *
     j2k_ncomponents = bytestream2_get_be16u(&g);
     if (j2k_ncomponents != component_count) {
         av_log(s, AV_LOG_ERROR, "Incoherence about components image number.\n");
-        return AVERROR(AVERROR_INVALIDDATA);
+        return AVERROR_INVALIDDATA;
     }
     bytestream2_get_bufferu(&g, sc->j2k_info.j2k_comp_desc, 3 * j2k_ncomponents);
 
@@ -3574,6 +3574,7 @@ static const AVOption mxf_options[] = {
 
 static const AVClass mxf_muxer_class = {
     .class_name     = "MXF muxer",
+    .item_name      = av_default_item_name,
     .option         = mxf_options,
     .version        = LIBAVUTIL_VERSION_INT,
 };
@@ -3589,6 +3590,7 @@ static const AVOption d10_options[] = {
 
 static const AVClass mxf_d10_muxer_class = {
     .class_name     = "MXF-D10 muxer",
+    .item_name      = av_default_item_name,
     .option         = d10_options,
     .version        = LIBAVUTIL_VERSION_INT,
 };
@@ -3604,6 +3606,7 @@ static const AVOption opatom_options[] = {
 
 static const AVClass mxf_opatom_muxer_class = {
     .class_name     = "MXF-OPAtom muxer",
+    .item_name      = av_default_item_name,
     .option         = opatom_options,
     .version        = LIBAVUTIL_VERSION_INT,
 };

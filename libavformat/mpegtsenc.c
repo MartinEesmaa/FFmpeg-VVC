@@ -2408,6 +2408,7 @@ static const AVOption options[] = {
 
 static const AVClass mpegts_muxer_class = {
     .class_name = "MPEGTS muxer",
+    .item_name  = av_default_item_name,
     .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };

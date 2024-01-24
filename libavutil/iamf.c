@@ -64,7 +64,7 @@ child_type *av_iamf_ ## parent_name ## _add_ ## child_name(parent_type *parent_n
 //
 #define OFFSET(x) offsetof(AVIAMFMixGain, x)
 static const AVOption mix_gain_options[] = {
-    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT64, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
+    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
     { "animation_type", "set animation_type", OFFSET(animation_type), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 2, FLAGS },
     { "start_point_value", "set start_point_value", OFFSET(animation_type), AV_OPT_TYPE_RATIONAL, {.dbl = 0 }, -128.0, 128.0, FLAGS },
     { "end_point_value", "set end_point_value", OFFSET(animation_type), AV_OPT_TYPE_RATIONAL, {.dbl = 0 }, -128.0, 128.0, FLAGS },
@@ -75,6 +75,7 @@ static const AVOption mix_gain_options[] = {
 
 static const AVClass mix_gain_class = {
     .class_name     = "AVIAMFSubmixElement",
+    .item_name      = av_default_item_name,
     .version        = LIBAVUTIL_VERSION_INT,
     .option         = mix_gain_options,
 };
@@ -82,13 +83,14 @@ static const AVClass mix_gain_class = {
 #undef OFFSET
 #define OFFSET(x) offsetof(AVIAMFDemixingInfo, x)
 static const AVOption demixing_info_options[] = {
-    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT64, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
+    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
     { "dmixp_mode", "set dmixp_mode", OFFSET(dmixp_mode), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 6, FLAGS },
     { NULL },
 };
 
 static const AVClass demixing_info_class = {
     .class_name     = "AVIAMFDemixingInfo",
+    .item_name      = av_default_item_name,
     .version        = LIBAVUTIL_VERSION_INT,
     .option         = demixing_info_options,
 };
@@ -96,12 +98,13 @@ static const AVClass demixing_info_class = {
 #undef OFFSET
 #define OFFSET(x) offsetof(AVIAMFReconGain, x)
 static const AVOption recon_gain_options[] = {
-    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT64, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
+    { "subblock_duration", "set subblock_duration", OFFSET(subblock_duration), AV_OPT_TYPE_INT, {.i64 = 1 }, 1, UINT_MAX, FLAGS },
     { NULL },
 };
 
 static const AVClass recon_gain_class = {
     .class_name     = "AVIAMFReconGain",
+    .item_name      = av_default_item_name,
     .version        = LIBAVUTIL_VERSION_INT,
     .option         = recon_gain_options,
 };
@@ -109,10 +112,10 @@ static const AVClass recon_gain_class = {
 #undef OFFSET
 #define OFFSET(x) offsetof(AVIAMFParamDefinition, x)
 static const AVOption param_definition_options[] = {
-    { "parameter_id", "set parameter_id", OFFSET(parameter_id), AV_OPT_TYPE_INT64, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
-    { "parameter_rate", "set parameter_rate", OFFSET(parameter_rate), AV_OPT_TYPE_INT64, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
-    { "duration", "set duration", OFFSET(duration), AV_OPT_TYPE_INT64, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
-    { "constant_subblock_duration", "set constant_subblock_duration", OFFSET(constant_subblock_duration), AV_OPT_TYPE_INT64, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
+    { "parameter_id", "set parameter_id", OFFSET(parameter_id), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
+    { "parameter_rate", "set parameter_rate", OFFSET(parameter_rate), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
+    { "duration", "set duration", OFFSET(duration), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
+    { "constant_subblock_duration", "set constant_subblock_duration", OFFSET(constant_subblock_duration), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, UINT_MAX, FLAGS },
     { NULL },
 };
 
@@ -142,6 +145,7 @@ static const AVClass *param_definition_child_iterate(void **opaque)
 
 static const AVClass param_definition_class = {
     .class_name          = "AVIAMFParamDefinition",
+    .item_name           = av_default_item_name,
     .version             = LIBAVUTIL_VERSION_INT,
     .option              = param_definition_options,
     .child_class_iterate = param_definition_child_iterate,
@@ -270,6 +274,7 @@ static const AVOption layer_options[] = {
 
 static const AVClass layer_class = {
     .class_name     = "AVIAMFLayer",
+    .item_name      = av_default_item_name,
     .version        = LIBAVUTIL_VERSION_INT,
     .option         = layer_options,
 };
@@ -303,6 +308,7 @@ static const AVClass *audio_element_child_iterate(void **opaque)
 
 static const AVClass audio_element_class = {
     .class_name          = "AVIAMFAudioElement",
+    .item_name           = av_default_item_name,
     .version             = LIBAVUTIL_VERSION_INT,
     .option              = audio_element_options,
     .child_class_iterate = audio_element_child_iterate,
@@ -389,6 +395,7 @@ static const AVClass *submix_element_child_iterate(void **opaque)
 
 static const AVClass element_class = {
     .class_name          = "AVIAMFSubmixElement",
+    .item_name           = av_default_item_name,
     .version             = LIBAVUTIL_VERSION_INT,
     .option              = submix_element_options,
     .child_next          = submix_element_child_next,
@@ -418,6 +425,7 @@ static const AVOption submix_layout_options[] = {
 
 static const AVClass layout_class = {
     .class_name     = "AVIAMFSubmixLayout",
+    .item_name      = av_default_item_name,
     .version        = LIBAVUTIL_VERSION_INT,
     .option         = submix_layout_options,
 };
@@ -466,6 +474,7 @@ static const AVClass *submix_presentation_child_iterate(void **opaque)
 
 static const AVClass submix_class = {
     .class_name          = "AVIAMFSubmix",
+    .item_name           = av_default_item_name,
     .version             = LIBAVUTIL_VERSION_INT,
     .option              = submix_presentation_options,
     .child_next          = submix_presentation_child_next,
@@ -497,6 +506,7 @@ static const AVClass *mix_presentation_child_iterate(void **opaque)
 
 static const AVClass mix_presentation_class = {
     .class_name          = "AVIAMFMixPresentation",
+    .item_name           = av_default_item_name,
     .version             = LIBAVUTIL_VERSION_INT,
     .option              = mix_presentation_options,
     .child_class_iterate = mix_presentation_child_iterate,
