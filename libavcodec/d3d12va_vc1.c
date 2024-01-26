@@ -95,9 +95,6 @@ static int d3d12va_vc1_decode_slice(AVCodecContext *avctx, const uint8_t *buffer
 
 static int update_input_arguments(AVCodecContext *avctx, D3D12_VIDEO_DECODE_INPUT_STREAM_ARGUMENTS *input_args, ID3D12Resource *buffer)
 {
-    D3D12VADecodeContext      *ctx          = D3D12VA_DECODE_CONTEXT(avctx);
-    AVHWFramesContext         *frames_ctx   = D3D12VA_FRAMES_CONTEXT(avctx);
-    AVD3D12VAFramesContext    *frames_hwctx = frames_ctx->hwctx;
     const VC1Context *v                     = avctx->priv_data;
     const MpegEncContext      *s            = &v->s;
     D3D12DecodePictureContext *ctx_pic      = s->current_picture_ptr->hwaccel_picture_private;
@@ -108,7 +105,7 @@ static int update_input_arguments(AVCodecContext *avctx, D3D12_VIDEO_DECODE_INPU
 
     static const uint8_t start_code[] = { 0, 0, 1, 0x0d };
 
-    if (FAILED(ID3D12Resource_Map(buffer, 0, NULL, &mapped_data))) {
+    if (FAILED(ID3D12Resource_Map(buffer, 0, NULL, (void **)&mapped_data))) {
         av_log(avctx, AV_LOG_ERROR, "Failed to map D3D12 Buffer resource!\n");
         return AVERROR(EINVAL);
     }
