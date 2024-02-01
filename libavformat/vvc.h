@@ -23,8 +23,8 @@
  * internal header for H.266/VVC (de)muxer utilities
  */
 
-#ifndef AVFORMAT_H266_H
-#define AVFORMAT_H266_H
+#ifndef AVFORMAT_VVC_H
+#define AVFORMAT_VVC_H
 
 #include <stdint.h>
 #include "avio.h"
@@ -48,7 +48,7 @@
  * @return the amount (in bytes) of data written in case of success, a negative
  *         value corresponding to an AVERROR code in case of failure
  */
-int ff_h266_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
+int ff_vvc_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
                       int size, int filter_ps, int *ps_count);
 
 /**
@@ -75,7 +75,7 @@ int ff_h266_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
  *         code in case of failure
  * @note *buf_out will be treated as uninitialized on input and won't be freed.
  */
-int ff_h266_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
+int ff_vvc_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
                           int *size, int filter_ps, int *ps_count);
 
 /**
@@ -96,4 +96,4 @@ int ff_h266_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
 int ff_isom_write_vvcc(AVIOContext *pb, const uint8_t *data,
                        int size, int ps_array_completeness);
 
-#endif /* AVFORMAT_H266_H */
+#endif /* AVFORMAT_VVC_H */

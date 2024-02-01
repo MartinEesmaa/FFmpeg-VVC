@@ -56,7 +56,7 @@ static void ht_init(HTEntry *ht)
     }
 }
 
-static uint32_t ht_lookup_and_upsert(HTEntry *ht, AVCRC *hash_ctx,
+static uint32_t ht_lookup_and_upsert(HTEntry *ht, const AVCRC *hash_ctx,
                                     uint32_t key, uint32_t pos)
 {
     uint32_t ret = -1;
@@ -74,7 +74,7 @@ static uint32_t ht_lookup_and_upsert(HTEntry *ht, AVCRC *hash_ctx,
     return ret;
 }
 
-static void ht_delete(HTEntry *ht, AVCRC *hash_ctx,
+static void ht_delete(HTEntry *ht, const AVCRC *hash_ctx,
                       uint32_t key, uint32_t pos)
 {
     HTEntry *removed_entry = NULL;
@@ -110,7 +110,6 @@ static void ht_delete(HTEntry *ht, AVCRC *hash_ctx,
 typedef struct DXVEncContext {
     AVClass *class;
 
-    TextureDSPContext texdsp;
     PutByteContext pbc;
 
     uint8_t *tex_data;   // Compressed texture
@@ -124,30 +123,11 @@ typedef struct DXVEncContext {
     enum DXVTextureFormat tex_fmt;
     int (*compress_tex)(AVCodecContext *avctx);
 
-    AVCRC *crc_ctx;
+    const AVCRC *crc_ctx;
 
     HTEntry color_lookback_ht[LOOKBACK_HT_ELEMS];
     HTEntry lut_lookback_ht[LOOKBACK_HT_ELEMS];
 } DXVEncContext;
-
-static int compress_texture_thread(AVCodecContext *avctx, void *arg,
-                                   int slice, int thread_nb)
-{
-    DXVEncContext *ctx = avctx->priv_data;
-    AVFrame *frame = arg;
-
-    if (ctx->enc.tex_funct) {
-        ctx->enc.tex_data.out = ctx->tex_data;
-        ctx->enc.frame_data.in = frame->data[0];
-        ctx->enc.stride = frame->linesize[0];
-        return ff_texturedsp_compress_thread(avctx, &ctx->enc, slice, thread_nb);
-    } else {
-        /* unimplemented: YCoCg formats */
-        return AVERROR_INVALIDDATA;
-    }
-
-    return 0;
-}
 
 /* Converts an index offset value to a 2-bit opcode and pushes it to a stream.
  * Inverse of CHECKPOINT in dxv.c.  */
@@ -252,7 +232,15 @@ static int dxv_encode(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-    avctx->execute2(avctx, compress_texture_thread, (void*)frame, NULL, ctx->enc.slice_count);
+    if (ctx->enc.tex_funct) {
+        ctx->enc.tex_data.out = ctx->tex_data;
+        ctx->enc.frame_data.in = frame->data[0];
+        ctx->enc.stride = frame->linesize[0];
+        ff_texturedsp_exec_compress_threads(avctx, &ctx->enc);
+    } else {
+        /* unimplemented: YCoCg formats */
+        return AVERROR_INVALIDDATA;
+    }
 
     bytestream2_init_writer(pbc, pkt->data, pkt->size);
 
@@ -278,6 +266,7 @@ static int dxv_encode(AVCodecContext *avctx, AVPacket *pkt,
 static av_cold int dxv_init(AVCodecContext *avctx)
 {
     DXVEncContext *ctx = avctx->priv_data;
+    TextureDSPEncContext texdsp;
     int ret = av_image_check_size(avctx->width, avctx->height, 0, avctx);
 
     if (ret < 0) {
@@ -286,12 +275,12 @@ static av_cold int dxv_init(AVCodecContext *avctx)
         return ret;
     }
 
-    ff_texturedspenc_init(&ctx->texdsp);
+    ff_texturedspenc_init(&texdsp);
 
     switch (ctx->tex_fmt) {
     case DXV_FMT_DXT1:
         ctx->compress_tex = dxv_compress_dxt1;
-        ctx->enc.tex_funct = ctx->texdsp.dxt1_block;
+        ctx->enc.tex_funct = texdsp.dxt1_block;
         ctx->enc.tex_ratio = 8;
         break;
     default:
@@ -309,7 +298,7 @@ static av_cold int dxv_init(AVCodecContext *avctx)
         return AVERROR(ENOMEM);
     }
 
-    ctx->crc_ctx = (AVCRC*)av_crc_get_table(AV_CRC_32_IEEE);
+    ctx->crc_ctx = av_crc_get_table(AV_CRC_32_IEEE);
     if (!ctx->crc_ctx) {
         av_log(avctx, AV_LOG_ERROR, "Could not initialize CRC table.\n");
         return AVERROR_BUG;

@@ -225,12 +225,14 @@ int sch_add_filtergraph(Scheduler *sch, unsigned nb_inputs, unsigned nb_outputs,
  *             streams in the muxer.
  * @param ctx Muxer state; will be passed to func/init and used for logging.
  * @param sdp_auto Determines automatic SDP writing - see sch_sdp_filename().
+ * @param thread_queue_size number of packets that can be buffered before
+ *                          sending to the muxer blocks
  *
  * @retval ">=0" Index of the newly-created muxer.
  * @retval "<0"  Error code.
  */
 int sch_add_mux(Scheduler *sch, SchThreadFunc func, int (*init)(void *),
-                void *ctx, int sdp_auto);
+                void *ctx, int sdp_auto, unsigned thread_queue_size);
 /**
  * Add a muxed stream for a previously added muxer.
  *
@@ -388,6 +390,13 @@ int sch_dec_send(Scheduler *sch, unsigned dec_idx, struct AVFrame *frame);
  */
 int sch_filter_receive(Scheduler *sch, unsigned fg_idx,
                        unsigned *in_idx, struct AVFrame *frame);
+/**
+ * Called by filter tasks to signal that a filter input will no longer accept input.
+ *
+ * @param fg_idx Filtergraph index previously returned from sch_add_filtergraph().
+ * @param in_idx Index of the input to finish.
+ */
+void sch_filter_receive_finish(Scheduler *sch, unsigned fg_idx, unsigned in_idx);
 
 /**
  * Called by filtergraph tasks to send a filtered frame or EOF to consumers.

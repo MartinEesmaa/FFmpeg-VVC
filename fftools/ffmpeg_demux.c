@@ -50,6 +50,11 @@ typedef struct DemuxStream {
 
     double ts_scale;
 
+    /* non zero if the packets must be decoded in 'raw_fifo', see DECODING_FOR_* */
+    int decoding_needed;
+#define DECODING_FOR_OST    1
+#define DECODING_FOR_FILTER 2
+
     /* true if stream data should be discarded */
     int discard;
 
@@ -71,6 +76,10 @@ typedef struct DemuxStream {
     int64_t       dts;
 
     const AVCodecDescriptor *codec_desc;
+
+    AVDictionary            *decoder_opts;
+    DecoderOpts              dec_opts;
+    char                     dec_name[16];
 
     AVBSFContext *bsf;
 
@@ -793,12 +802,12 @@ static void demux_final_stats(Demuxer *d)
         av_log(f, AV_LOG_VERBOSE, "%"PRIu64" packets read (%"PRIu64" bytes); ",
                ds->nb_packets, ds->data_size);
 
-        if (ist->decoding_needed) {
+        if (ds->decoding_needed) {
             av_log(f, AV_LOG_VERBOSE,
                    "%"PRIu64" frames decoded; %"PRIu64" decode errors",
-                   ist->frames_decoded, ist->decode_errors);
+                   ist->decoder->frames_decoded, ist->decoder->decode_errors);
             if (type == AVMEDIA_TYPE_AUDIO)
-                av_log(f, AV_LOG_VERBOSE, " (%"PRIu64" samples)", ist->samples_decoded);
+                av_log(f, AV_LOG_VERBOSE, " (%"PRIu64" samples)", ist->decoder->samples_decoded);
             av_log(f, AV_LOG_VERBOSE, "; ");
         }
 
@@ -820,12 +829,11 @@ static void ist_free(InputStream **pist)
 
     dec_free(&ist->decoder);
 
-    av_dict_free(&ist->decoder_opts);
+    av_dict_free(&ds->decoder_opts);
     av_freep(&ist->filters);
     av_freep(&ist->outputs);
-    av_freep(&ist->hwaccel_device);
+    av_freep(&ds->dec_opts.hwaccel_device);
 
-    avcodec_free_context(&ist->dec_ctx);
     avcodec_parameters_free(&ist->par);
 
     av_bsf_free(&ds->bsf);
@@ -867,6 +875,13 @@ static int ist_use(InputStream *ist, int decoding_needed)
         return AVERROR(EINVAL);
     }
 
+    if (decoding_needed && !ist->dec) {
+        av_log(ist, AV_LOG_ERROR,
+               "Decoding requested, but no decoder found for: %s\n",
+                avcodec_get_name(ist->par->codec_id));
+        return AVERROR(EINVAL);
+    }
+
     if (ds->sch_idx_stream < 0) {
         ret = sch_add_demux_stream(d->sch, d->f.index);
         if (ret < 0)
@@ -880,33 +895,51 @@ static int ist_use(InputStream *ist, int decoding_needed)
     }
 
     ist->st->discard      = ist->user_set_discard;
-    ist->decoding_needed |= decoding_needed;
+    ds->decoding_needed   |= decoding_needed;
     ds->streamcopy_needed |= !decoding_needed;
 
     if (decoding_needed && ds->sch_idx_dec < 0) {
         int is_audio = ist->st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO;
 
-        ist->dec_ctx = avcodec_alloc_context3(ist->dec);
-        if (!ist->dec_ctx)
-            return AVERROR(ENOMEM);
+        ds->dec_opts.flags = (!!ist->fix_sub_duration * DECODER_FLAG_FIX_SUB_DURATION) |
+                             (!!(d->f.ctx->iformat->flags & AVFMT_NOTIMESTAMPS) * DECODER_FLAG_TS_UNRELIABLE) |
+                             (!!(d->loop && is_audio) * DECODER_FLAG_SEND_END_TS)
+#if FFMPEG_OPT_TOP
+                             | ((ist->top_field_first >= 0) * DECODER_FLAG_TOP_FIELD_FIRST)
+#endif
+                             ;
 
-        ret = avcodec_parameters_to_context(ist->dec_ctx, ist->par);
-        if (ret < 0) {
-            av_log(ist, AV_LOG_ERROR, "Error initializing the decoder context.\n");
-            return ret;
+        if (ist->framerate.num) {
+            ds->dec_opts.flags     |= DECODER_FLAG_FRAMERATE_FORCED;
+            ds->dec_opts.framerate  = ist->framerate;
+        } else
+            ds->dec_opts.framerate  = ist->st->avg_frame_rate;
+
+        if (ist->dec->id == AV_CODEC_ID_DVB_SUBTITLE &&
+           (ds->decoding_needed & DECODING_FOR_OST)) {
+            av_dict_set(&ds->decoder_opts, "compute_edt", "1", AV_DICT_DONT_OVERWRITE);
+            if (ds->decoding_needed & DECODING_FOR_FILTER)
+                av_log(ist, AV_LOG_WARNING,
+                       "Warning using DVB subtitles for filtering and output at the "
+                       "same time is not fully supported, also see -compute_edt [0|1]\n");
         }
 
-        ret = sch_add_dec(d->sch, decoder_thread, ist, d->loop && is_audio);
+        snprintf(ds->dec_name, sizeof(ds->dec_name), "%d:%d", ist->file->index, ist->index);
+        ds->dec_opts.name = ds->dec_name;
+
+        ds->dec_opts.codec = ist->dec;
+        ds->dec_opts.par   = ist->par;
+
+        ds->dec_opts.log_parent = ist;
+
+        ret = dec_open(&ist->decoder, d->sch,
+                       &ds->decoder_opts, &ds->dec_opts);
         if (ret < 0)
             return ret;
         ds->sch_idx_dec = ret;
 
         ret = sch_connect(d->sch, SCH_DSTREAM(d->f.index, ds->sch_idx_stream),
                                   SCH_DEC(ds->sch_idx_dec));
-        if (ret < 0)
-            return ret;
-
-        ret = dec_open(ist, d->sch, ds->sch_idx_dec);
         if (ret < 0)
             return ret;
 
@@ -950,12 +983,11 @@ int ist_filter_add(InputStream *ist, InputFilter *ifilter, int is_simple)
 
     ist->filters[ist->nb_filters - 1] = ifilter;
 
-    // initialize fallback parameters for filtering
-    ret = ifilter_parameters_from_dec(ifilter, ist->dec_ctx);
+    ret = dec_add_filter(ist->decoder, ifilter);
     if (ret < 0)
         return ret;
 
-    if (ist->dec_ctx->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+    if (ist->par->codec_type == AVMEDIA_TYPE_SUBTITLE) {
         if (!d->pkt_heartbeat) {
             d->pkt_heartbeat = av_packet_alloc();
             if (!d->pkt_heartbeat)
@@ -1136,6 +1168,8 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
     ds->first_dts   = AV_NOPTS_VALUE;
     ds->next_dts    = AV_NOPTS_VALUE;
 
+    ds->dec_opts.time_base = st->time_base;
+
     ds->ts_scale = 1.0;
     MATCH_PER_STREAM_OPT(ts_scale, dbl, ds->ts_scale, ic, st);
 
@@ -1168,25 +1202,25 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
                 "WARNING: defaulting hwaccel_output_format to cuda for compatibility "
                 "with old commandlines. This behaviour is DEPRECATED and will be removed "
                 "in the future. Please explicitly set \"-hwaccel_output_format cuda\".\n");
-            ist->hwaccel_output_format = AV_PIX_FMT_CUDA;
+            ds->dec_opts.hwaccel_output_format = AV_PIX_FMT_CUDA;
         } else if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "qsv")) {
             av_log(ist, AV_LOG_WARNING,
                 "WARNING: defaulting hwaccel_output_format to qsv for compatibility "
                 "with old commandlines. This behaviour is DEPRECATED and will be removed "
                 "in the future. Please explicitly set \"-hwaccel_output_format qsv\".\n");
-            ist->hwaccel_output_format = AV_PIX_FMT_QSV;
+            ds->dec_opts.hwaccel_output_format = AV_PIX_FMT_QSV;
         } else if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "mediacodec")) {
             // There is no real AVHWFrameContext implementation. Set
             // hwaccel_output_format to avoid av_hwframe_transfer_data error.
-            ist->hwaccel_output_format = AV_PIX_FMT_MEDIACODEC;
+            ds->dec_opts.hwaccel_output_format = AV_PIX_FMT_MEDIACODEC;
         } else if (hwaccel_output_format) {
-            ist->hwaccel_output_format = av_get_pix_fmt(hwaccel_output_format);
-            if (ist->hwaccel_output_format == AV_PIX_FMT_NONE) {
+            ds->dec_opts.hwaccel_output_format = av_get_pix_fmt(hwaccel_output_format);
+            if (ds->dec_opts.hwaccel_output_format == AV_PIX_FMT_NONE) {
                 av_log(ist, AV_LOG_FATAL, "Unrecognised hwaccel output "
                        "format: %s", hwaccel_output_format);
             }
         } else {
-            ist->hwaccel_output_format = AV_PIX_FMT_NONE;
+            ds->dec_opts.hwaccel_output_format = AV_PIX_FMT_NONE;
         }
 
         if (hwaccel) {
@@ -1195,17 +1229,17 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
                 hwaccel = "cuda";
 
             if (!strcmp(hwaccel, "none"))
-                ist->hwaccel_id = HWACCEL_NONE;
+                ds->dec_opts.hwaccel_id = HWACCEL_NONE;
             else if (!strcmp(hwaccel, "auto"))
-                ist->hwaccel_id = HWACCEL_AUTO;
+                ds->dec_opts.hwaccel_id = HWACCEL_AUTO;
             else {
                 enum AVHWDeviceType type = av_hwdevice_find_type_by_name(hwaccel);
                 if (type != AV_HWDEVICE_TYPE_NONE) {
-                    ist->hwaccel_id = HWACCEL_GENERIC;
-                    ist->hwaccel_device_type = type;
+                    ds->dec_opts.hwaccel_id = HWACCEL_GENERIC;
+                    ds->dec_opts.hwaccel_device_type = type;
                 }
 
-                if (!ist->hwaccel_id) {
+                if (!ds->dec_opts.hwaccel_id) {
                     av_log(ist, AV_LOG_FATAL, "Unrecognized hwaccel: %s.\n",
                            hwaccel);
                     av_log(ist, AV_LOG_FATAL, "Supported hwaccels: ");
@@ -1222,19 +1256,19 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
 
         MATCH_PER_STREAM_OPT(hwaccel_devices, str, hwaccel_device, ic, st);
         if (hwaccel_device) {
-            ist->hwaccel_device = av_strdup(hwaccel_device);
-            if (!ist->hwaccel_device)
+            ds->dec_opts.hwaccel_device = av_strdup(hwaccel_device);
+            if (!ds->dec_opts.hwaccel_device)
                 return AVERROR(ENOMEM);
         }
     }
 
-    ret = choose_decoder(o, ic, st, ist->hwaccel_id, ist->hwaccel_device_type,
-                         &ist->dec);
+    ret = choose_decoder(o, ic, st, ds->dec_opts.hwaccel_id,
+                         ds->dec_opts.hwaccel_device_type, &ist->dec);
     if (ret < 0)
         return ret;
 
     ret = filter_codec_opts(o->g->codec_opts, ist->st->codecpar->codec_id,
-                            ic, st, ist->dec, &ist->decoder_opts);
+                            ic, st, ist->dec, &ds->decoder_opts);
     if (ret < 0)
         return ret;
 
@@ -1260,7 +1294,12 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
     }
 
     if (o->bitexact)
-        av_dict_set(&ist->decoder_opts, "flags", "+bitexact", AV_DICT_MULTIKEY);
+        av_dict_set(&ds->decoder_opts, "flags", "+bitexact", AV_DICT_MULTIKEY);
+
+    /* Attached pics are sparse, therefore we would not want to delay their decoding
+     * till EOF. */
+    if (ist->st->disposition & AV_DISPOSITION_ATTACHED_PIC)
+        av_dict_set(&ds->decoder_opts, "thread_type", "-frame", 0);
 
     switch (par->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
@@ -1339,6 +1378,9 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
         av_log(ist, AV_LOG_ERROR, "Error exporting stream parameters.\n");
         return ret;
     }
+
+    if (ist->st->sample_aspect_ratio.num)
+        ist->par->sample_aspect_ratio = ist->st->sample_aspect_ratio;
 
     MATCH_PER_STREAM_OPT(bitstream_filters, str, bsfs, ic, st);
     if (bsfs) {
@@ -1693,8 +1735,6 @@ int ifile_open(const OptionsContext *o, const char *filename, Scheduler *sch)
     d->min_pts         = (Timestamp){ .ts = AV_NOPTS_VALUE, .tb = (AVRational){ 1, 1 } };
     d->max_pts         = (Timestamp){ .ts = AV_NOPTS_VALUE, .tb = (AVRational){ 1, 1 } };
 
-    f->format_nots = !!(ic->iformat->flags & AVFMT_NOTIMESTAMPS);
-
     d->readrate = o->readrate ? o->readrate : 0.0;
     if (d->readrate < 0.0f) {
         av_log(d, AV_LOG_ERROR, "Option -readrate is %0.3f; it must be non-negative.\n", d->readrate);
@@ -1733,8 +1773,9 @@ int ifile_open(const OptionsContext *o, const char *filename, Scheduler *sch)
     /* check if all codec options have been used */
     unused_opts = strip_specifiers(o->g->codec_opts);
     for (i = 0; i < f->nb_streams; i++) {
+        DemuxStream *ds = ds_from_ist(f->streams[i]);
         e = NULL;
-        while ((e = av_dict_iterate(f->streams[i]->decoder_opts, e)))
+        while ((e = av_dict_iterate(ds->decoder_opts, e)))
             av_dict_set(&unused_opts, e->key, NULL, 0);
     }
 

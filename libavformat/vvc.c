@@ -45,10 +45,10 @@ typedef struct VVCPTLRecord {
     uint8_t ptl_frame_only_constraint_flag;
     uint8_t ptl_multilayer_enabled_flag;
     uint8_t general_constraint_info[9];
-    uint8_t *ptl_sublayer_level_present_flag;
-    uint8_t *sublayer_level_idc;
+    uint8_t ptl_sublayer_level_present_flag[VVC_MAX_SUBLAYERS - 1];
+    uint8_t sublayer_level_idc[VVC_MAX_SUBLAYERS - 1];
     uint8_t ptl_num_sub_profiles;
-    uint32_t *general_sub_profile_idc;
+    uint32_t general_sub_profile_idc[VVC_MAX_SUB_PROFILES];
 } VVCPTLRecord;
 
 typedef struct VVCDecoderConfigurationRecord {
@@ -78,10 +78,10 @@ typedef struct VVCCProfileTierLevel {
     uint8_t gci_general_constraints[9];
     uint8_t gci_num_reserved_bits;
 // end general_constraint_info
-    uint8_t *ptl_sublayer_level_present_flag;
-    uint8_t *sublayer_level_idc;
+    uint8_t ptl_sublayer_level_present_flag[VVC_MAX_SUBLAYERS - 1];
+    uint8_t sublayer_level_idc[VVC_MAX_SUBLAYERS - 1];
     uint8_t ptl_num_sub_profiles;
-    uint32_t *general_sub_profile_idc;
+    uint32_t general_sub_profile_idc[VVC_MAX_SUB_PROFILES];
 } VVCCProfileTierLevel;
 
 static void vvcc_update_ptl(VVCDecoderConfigurationRecord *vvcc,
@@ -147,11 +147,6 @@ static void vvcc_update_ptl(VVCDecoderConfigurationRecord *vvcc,
      * Each bit in flags may only be set if one of
      * the parameter sets set that bit.
      */
-    vvcc->ptl.ptl_sublayer_level_present_flag =
-        (uint8_t *) malloc(sizeof(uint8_t) * vvcc->num_sublayers - 1);
-    vvcc->ptl.sublayer_level_idc =
-        (uint8_t *) malloc(sizeof(uint8_t) * vvcc->num_sublayers - 1);
-
     memset(vvcc->ptl.ptl_sublayer_level_present_flag, 0,
            sizeof(uint8_t) * vvcc->num_sublayers - 1);
     memset(vvcc->ptl.sublayer_level_idc, 0,
@@ -177,16 +172,10 @@ static void vvcc_update_ptl(VVCDecoderConfigurationRecord *vvcc,
     vvcc->ptl.ptl_num_sub_profiles =
         FFMAX(vvcc->ptl.ptl_num_sub_profiles, ptl->ptl_num_sub_profiles);
     if (vvcc->ptl.ptl_num_sub_profiles) {
-        vvcc->ptl.general_sub_profile_idc =
-            (uint32_t *) malloc(sizeof(uint32_t) *
-                                vvcc->ptl.ptl_num_sub_profiles);
         for (int i = 0; i < vvcc->ptl.ptl_num_sub_profiles; i++) {
             vvcc->ptl.general_sub_profile_idc[i] =
                 ptl->general_sub_profile_idc[i];
         }
-    } else {
-        vvcc->ptl.general_sub_profile_idc =
-            (uint32_t *) malloc(sizeof(uint32_t));
     }
 }
 
@@ -211,7 +200,6 @@ static void vvcc_parse_ptl(GetBitContext *gb,
         if (general_ptl.gci_present_flag) {
             for (j = 0; j < 8; j++)
                 general_ptl.gci_general_constraints[j] = get_bits(gb, 8);
-            general_ptl.gci_general_constraints[8] = 0;
             general_ptl.gci_general_constraints[8] = get_bits(gb, 7);
 
             general_ptl.gci_num_reserved_bits = get_bits(gb, 8);
@@ -221,16 +209,12 @@ static void vvcc_parse_ptl(GetBitContext *gb,
             skip_bits1(gb);
     }
 
-    general_ptl.ptl_sublayer_level_present_flag =
-        (uint8_t *) malloc(sizeof(uint8_t) * max_sub_layers_minus1);
-    for (int i = max_sub_layers_minus1 - 1; i >= 0; i--) {
+    for (int i = max_sub_layers_minus1 - 1; i >= 0; i--)
         general_ptl.ptl_sublayer_level_present_flag[i] = get_bits1(gb);
-    }
+
     while (gb->index % 8 != 0)
         skip_bits1(gb);
 
-    general_ptl.sublayer_level_idc =
-        (uint8_t *) malloc(sizeof(uint8_t) * max_sub_layers_minus1);
     for (int i = max_sub_layers_minus1 - 1; i >= 0; i--) {
         if (general_ptl.ptl_sublayer_level_present_flag[i])
             general_ptl.sublayer_level_idc[i] = get_bits(gb, 8);
@@ -239,37 +223,26 @@ static void vvcc_parse_ptl(GetBitContext *gb,
     if (profileTierPresentFlag) {
         general_ptl.ptl_num_sub_profiles = get_bits(gb, 8);
         if (general_ptl.ptl_num_sub_profiles) {
-            general_ptl.general_sub_profile_idc =
-                (uint32_t *) malloc(sizeof(uint32_t) *
-                                    general_ptl.ptl_num_sub_profiles);
-            for (int i = 0; i < general_ptl.ptl_num_sub_profiles; i++) {
+            for (int i = 0; i < general_ptl.ptl_num_sub_profiles; i++)
                 general_ptl.general_sub_profile_idc[i] = get_bits_long(gb, 32);
-            }
-        } else {
-            general_ptl.general_sub_profile_idc =
-                (uint32_t *) malloc(sizeof(uint32_t));
         }
     }
 
     vvcc_update_ptl(vvcc, &general_ptl);
-
-    free(general_ptl.ptl_sublayer_level_present_flag);
-    free(general_ptl.sublayer_level_idc);
-    free(general_ptl.general_sub_profile_idc);
 }
 
 static int vvcc_parse_vps(GetBitContext *gb,
                           VVCDecoderConfigurationRecord *vvcc)
 {
     unsigned int vps_max_layers_minus1;
-    unsigned int vps_max_sub_layers_minus1;
+    unsigned int vps_max_sublayers_minus1;
     unsigned int vps_default_ptl_dpb_hrd_max_tid_flag;
-    unsigned int vps_all_independant_layer_flag;
+    unsigned int vps_all_independent_layers_flag;
     unsigned int vps_each_layer_is_an_ols_flag;
     unsigned int vps_ols_mode_idc;
 
-    unsigned int *vps_pt_present_flag;
-    unsigned int *vps_ptl_max_tid;
+    unsigned int vps_pt_present_flag[VVC_MAX_PTLS];
+    unsigned int vps_ptl_max_tid[VVC_MAX_PTLS];
     unsigned int vps_num_ptls_minus1 = 0;
 
     /*
@@ -278,7 +251,7 @@ static int vvcc_parse_vps(GetBitContext *gb,
     skip_bits(gb, 4);
 
     vps_max_layers_minus1 = get_bits(gb, 6);
-    vps_max_sub_layers_minus1 = get_bits(gb, 3);
+    vps_max_sublayers_minus1 = get_bits(gb, 3);
 
     /*
      * numTemporalLayers greater than 1 indicates that the stream to which this
@@ -289,17 +262,19 @@ static int vvcc_parse_vps(GetBitContext *gb,
      * that it is unknown whether the stream is temporally scalable.
      */
     vvcc->num_sublayers = FFMAX(vvcc->num_sublayers,
-                                vps_max_sub_layers_minus1 + 1);
+                                vps_max_sublayers_minus1 + 1);
 
-    if (vps_max_layers_minus1 > 0 && vps_max_sub_layers_minus1 > 0)
+    if (vps_max_layers_minus1 > 0 && vps_max_sublayers_minus1 > 0)
         vps_default_ptl_dpb_hrd_max_tid_flag = get_bits1(gb);
     if (vps_max_layers_minus1 > 0)
-        vps_all_independant_layer_flag = get_bits1(gb);
+        vps_all_independent_layers_flag = get_bits1(gb);
+    else
+        vps_all_independent_layers_flag = 1;
 
     for (int i = 0; i <= vps_max_layers_minus1; i++) {
-        skip_bits(gb, 6);    //vps_default_ptl_dpb_hrd_max_tid_flag[i]
-        if (i > 0 && !vps_all_independant_layer_flag) {
-            if (get_bits1(gb)) {    // vps_independant_layer_flag
+        skip_bits(gb, 6);    //vps_layer_id[i]
+        if (i > 0 && !vps_all_independent_layers_flag) {
+            if (get_bits1(gb)) {    // vps_independent_layer_flag[i]
                 unsigned int vps_max_tid_ref_present_flag = get_bits1(gb);
                 for (int j = 0; j < i; j++) {
                     if (vps_max_tid_ref_present_flag && get_bits1(gb))  // vps_direct_ref_layer_flag[i][j]
@@ -310,45 +285,46 @@ static int vvcc_parse_vps(GetBitContext *gb,
     }
 
     if (vps_max_layers_minus1 > 0) {
-        if (vps_all_independant_layer_flag)
+        if (vps_all_independent_layers_flag)
             vps_each_layer_is_an_ols_flag = get_bits1(gb);
-        if (vps_each_layer_is_an_ols_flag) {
-            if (!vps_all_independant_layer_flag)
+        else
+            vps_each_layer_is_an_ols_flag = 0;
+        if (!vps_each_layer_is_an_ols_flag) {
+            if (!vps_all_independent_layers_flag)
                 vps_ols_mode_idc = get_bits(gb, 2);
+            else
+                vps_ols_mode_idc = 2;
             if (vps_ols_mode_idc == 2) {
                 unsigned int vps_num_output_layer_sets_minus2 = get_bits(gb, 8);
                 for (int i = 1; i <= vps_num_output_layer_sets_minus2 + 1; i++) {
                     for (int j = 0; j <= vps_max_layers_minus1; j++) {
-                        skip_bits1(gb);
+                        skip_bits1(gb); // vps_ols_output_layer_flag[i][j]
                     }
                 }
             }
         }
         vps_num_ptls_minus1 = get_bits(gb, 8);
+    } else {
+        vps_each_layer_is_an_ols_flag = 0;
     }
 
-    vps_pt_present_flag =
-        (unsigned int *) malloc(sizeof(unsigned int) *
-                                (vps_num_ptls_minus1 + 1));
-    vps_ptl_max_tid =
-        (unsigned int *) malloc(sizeof(unsigned int) *
-                                (vps_num_ptls_minus1 + 1));
     for (int i = 0; i <= vps_num_ptls_minus1; i++) {
         if (i > 0)
             vps_pt_present_flag[i] = get_bits1(gb);
+        else
+            vps_pt_present_flag[i] = 1;
+
         if (!vps_default_ptl_dpb_hrd_max_tid_flag)
             vps_ptl_max_tid[i] = get_bits(gb, 3);
+        else
+            vps_ptl_max_tid[i] = vps_max_sublayers_minus1;
     }
 
     while (gb->index % 8 != 0)
         skip_bits1(gb);
 
-    for (int i = 0; i <= vps_num_ptls_minus1; i++) {
+    for (int i = 0; i <= vps_num_ptls_minus1; i++)
         vvcc_parse_ptl(gb, vvcc, vps_pt_present_flag[i], vps_ptl_max_tid[i]);
-    }
-
-    free(vps_pt_present_flag);
-    free(vps_ptl_max_tid);
 
     /* nothing useful for vvcc past this point */
     return 0;
@@ -357,16 +333,13 @@ static int vvcc_parse_vps(GetBitContext *gb,
 static int vvcc_parse_sps(GetBitContext *gb,
                           VVCDecoderConfigurationRecord *vvcc)
 {
-    unsigned int sps_max_sub_layers_minus1, log2_ctu_size_minus5;
-    //unsigned int num_short_term_ref_pic_sets, num_delta_pocs[VVC_MAX_REF_PIC_LISTS];
-    //unsigned int sps_chroma_format_idc;
-    unsigned int sps_subpic_same_size_flag, sps_pic_height_max_in_luma_sample,
-        sps_pic_width_max_in_luma_sample;
-    unsigned int sps_independant_subpics_flag;
-    unsigned int flag;
+    unsigned int sps_max_sublayers_minus1, sps_log2_ctu_size_minus5;
+    unsigned int sps_subpic_same_size_flag, sps_pic_height_max_in_luma_samples,
+        sps_pic_width_max_in_luma_samples;
+    unsigned int sps_independent_subpics_flag;
 
     skip_bits(gb, 8);  // sps_seq_parameter_set_id && sps_video_parameter_set_id
-    sps_max_sub_layers_minus1 = get_bits(gb, 3);
+    sps_max_sublayers_minus1 = get_bits(gb, 3);
 
     /*
      * numTemporalLayers greater than 1 indicates that the stream to which this
@@ -377,26 +350,24 @@ static int vvcc_parse_sps(GetBitContext *gb,
      * that it is unknown whether the stream is temporally scalable.
      */
     vvcc->num_sublayers = FFMAX(vvcc->num_sublayers,
-                                sps_max_sub_layers_minus1 + 1);
+                                sps_max_sublayers_minus1 + 1);
 
     vvcc->chroma_format_idc = get_bits(gb, 2);
-    log2_ctu_size_minus5 = get_bits(gb, 2);
+    sps_log2_ctu_size_minus5 = get_bits(gb, 2);
 
-    if (get_bits1(gb))          //sps_ptl_dpb_hrd_params_present_flag
-        vvcc_parse_ptl(gb, vvcc, 1, sps_max_sub_layers_minus1);
+    if (get_bits1(gb))          // sps_ptl_dpb_hrd_params_present_flag
+        vvcc_parse_ptl(gb, vvcc, 1, sps_max_sublayers_minus1);
 
-    flag = get_bits(gb, 1);     //skip_bits1(gb); //sps_gdr_enabled_flag
-    flag = get_bits(gb, 1);     //sps_ref_pic_resampling_enabled_flag
-    if (flag) {                 //sps_ref_pic_resampling_enabled_flag
-        flag = get_bits(gb, 1); //skip_bits1(gb); //sps_res_change_in_clvs_allowed_flag
-    }
+    skip_bits1(gb);             // sps_gdr_enabled_flag
+    if (get_bits(gb, 1))        // sps_ref_pic_resampling_enabled_flag
+        skip_bits1(gb);         // sps_res_change_in_clvs_allowed_flag
 
-    sps_pic_width_max_in_luma_sample = get_ue_golomb_long(gb);
+    sps_pic_width_max_in_luma_samples = get_ue_golomb_long(gb);
     vvcc->max_picture_width =
-        FFMAX(vvcc->max_picture_width, sps_pic_width_max_in_luma_sample);
-    sps_pic_height_max_in_luma_sample = get_ue_golomb_long(gb);
+        FFMAX(vvcc->max_picture_width, sps_pic_width_max_in_luma_samples);
+    sps_pic_height_max_in_luma_samples = get_ue_golomb_long(gb);
     vvcc->max_picture_height =
-        FFMAX(vvcc->max_picture_height, sps_pic_height_max_in_luma_sample);
+        FFMAX(vvcc->max_picture_height, sps_pic_height_max_in_luma_samples);
 
     if (get_bits1(gb)) {
         get_ue_golomb_long(gb); // sps_conf_win_left_offset
@@ -406,27 +377,29 @@ static int vvcc_parse_sps(GetBitContext *gb,
     }
 
     if (get_bits1(gb)) {        // sps_subpic_info_present_flag
-        unsigned int sps_num_subpics_minus1 = get_ue_golomb_long(gb);
+        const unsigned int sps_num_subpics_minus1 = get_ue_golomb_long(gb);
+        const int ctb_log2_size_y = sps_log2_ctu_size_minus5 + 5;
+        const int ctb_size_y      = 1 << ctb_log2_size_y;
+        const int tmp_width_val   = AV_CEIL_RSHIFT(sps_pic_width_max_in_luma_samples,  ctb_log2_size_y);
+        const int tmp_height_val  = AV_CEIL_RSHIFT(sps_pic_height_max_in_luma_samples, ctb_log2_size_y);
+        const int wlen            = av_ceil_log2(tmp_width_val);
+        const int hlen            = av_ceil_log2(tmp_height_val);
         if (sps_num_subpics_minus1 > 0) {       // sps_num_subpics_minus1
-            sps_independant_subpics_flag = get_bits1(gb);
+            sps_independent_subpics_flag = get_bits1(gb);
             sps_subpic_same_size_flag = get_bits1(gb);
         }
-        for (int i = 0;
-             sps_num_subpics_minus1 > 0 && i <= sps_num_subpics_minus1; i++) {
+        for (int i = 0; sps_num_subpics_minus1 > 0 && i <= sps_num_subpics_minus1; i++) {
             if (!sps_subpic_same_size_flag || i == 0) {
-                int len = FFMIN(log2_ctu_size_minus5 + 5, 16);
-                if (i > 0 && sps_pic_width_max_in_luma_sample > 128)
-                    skip_bits(gb, len);
-                if (i > 0 && sps_pic_height_max_in_luma_sample > 128)
-                    skip_bits(gb, len);
-                if (i < sps_num_subpics_minus1
-                    && sps_pic_width_max_in_luma_sample > 128)
-                    skip_bits(gb, len);
-                if (i < sps_num_subpics_minus1
-                    && sps_pic_height_max_in_luma_sample > 128)
-                    skip_bits(gb, len);
+                if (i > 0 && sps_pic_width_max_in_luma_samples > ctb_size_y)
+                    skip_bits(gb, wlen);
+                if (i > 0 && sps_pic_height_max_in_luma_samples > ctb_size_y)
+                    skip_bits(gb, hlen);
+                if (i < sps_num_subpics_minus1 && sps_pic_width_max_in_luma_samples > ctb_size_y)
+                    skip_bits(gb, wlen);
+                if (i < sps_num_subpics_minus1 && sps_pic_height_max_in_luma_samples > ctb_size_y)
+                    skip_bits(gb, hlen);
             }
-            if (!sps_independant_subpics_flag) {
+            if (!sps_independent_subpics_flag) {
                 skip_bits(gb, 2);       // sps_subpic_treated_as_pic_flag && sps_loop_filter_across_subpic_enabled_flag
             }
         }
@@ -621,10 +594,6 @@ static void vvcc_close(VVCDecoderConfigurationRecord *vvcc)
         av_freep(&vvcc->array[i].nal_unit_length);
     }
 
-    free(vvcc->ptl.ptl_sublayer_level_present_flag);
-    free(vvcc->ptl.sublayer_level_idc);
-    free(vvcc->ptl.general_sub_profile_idc);
-
     vvcc->num_of_arrays = 0;
     av_freep(&vvcc->array);
 }
@@ -752,7 +721,11 @@ static int vvcc_write(AVIOContext *pb, VVCDecoderConfigurationRecord *vvcc)
             break;
         }
 
+    if (vps_count > VVC_MAX_VPS_COUNT)
+        return AVERROR_INVALIDDATA;
     if (!sps_count || sps_count > VVC_MAX_SPS_COUNT)
+        return AVERROR_INVALIDDATA;
+    if (!pps_count || pps_count > VVC_MAX_PPS_COUNT)
         return AVERROR_INVALIDDATA;
 
     /* bit(5) reserved = ‘11111’b;
@@ -868,7 +841,7 @@ static int vvcc_write(AVIOContext *pb, VVCDecoderConfigurationRecord *vvcc)
     return 0;
 }
 
-int ff_h266_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
+int ff_vvc_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
                       int size, int filter_ps, int *ps_count)
 {
     int num_ps = 0, ret = 0;
@@ -916,7 +889,7 @@ int ff_h266_annexb2mp4(AVIOContext *pb, const uint8_t *buf_in,
     return ret;
 }
 
-int ff_h266_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
+int ff_vvc_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
                           int *size, int filter_ps, int *ps_count)
 {
     AVIOContext *pb;
@@ -926,7 +899,7 @@ int ff_h266_annexb2mp4_buf(const uint8_t *buf_in, uint8_t **buf_out,
     if (ret < 0)
         return ret;
 
-    ret = ff_h266_annexb2mp4(pb, buf_in, *size, filter_ps, ps_count);
+    ret = ff_vvc_annexb2mp4(pb, buf_in, *size, filter_ps, ps_count);
     if (ret < 0) {
         ffio_free_dyn_buf(&pb);
         return ret;
@@ -947,7 +920,7 @@ int ff_isom_write_vvcc(AVIOContext *pb, const uint8_t *data,
     if (size < 6) {
         /* We can't write a valid vvcc from the provided data */
         return AVERROR_INVALIDDATA;
-    } else if (*data == 1) {
+    } else if ((*data & 0xf8) == 0xf8) {
         /* Data is already vvcc-formatted */
         avio_write(pb, data, size);
         return 0;

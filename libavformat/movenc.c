@@ -6270,16 +6270,16 @@ int ff_mov_write_packet(AVFormatContext *s, AVPacket *pkt)
         }
     } else if (par->codec_id == AV_CODEC_ID_VVC && trk->vos_len > 6 &&
              (AV_RB24(trk->vos_data) == 1 || AV_RB32(trk->vos_data) == 1)) {
-      /* extradata is Annex B, assume the bitstream is too and convert it */
-      if (trk->hint_track >= 0 && trk->hint_track < mov->nb_tracks) {
-            ret = ff_h266_annexb2mp4_buf(pkt->data, &reformatted_data,
-                                         &size, 0, NULL);
+        /* extradata is Annex B, assume the bitstream is too and convert it */
+        if (trk->hint_track >= 0 && trk->hint_track < mov->nb_tracks) {
+            ret = ff_vvc_annexb2mp4_buf(pkt->data, &reformatted_data,
+                                        &size, 0, NULL);
             if (ret < 0)
                 return ret;
             avio_write(pb, reformatted_data, size);
-      } else {
-          size = ff_h266_annexb2mp4(pb, pkt->data, pkt->size, 0, NULL);
-      }
+        } else {
+            size = ff_vvc_annexb2mp4(pb, pkt->data, pkt->size, 0, NULL);
+        }
     } else if (par->codec_id == AV_CODEC_ID_AV1) {
         if (trk->hint_track >= 0 && trk->hint_track < mov->nb_tracks) {
             ret = ff_av1_filter_obus_buf(pkt->data, &reformatted_data,

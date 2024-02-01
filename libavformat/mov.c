@@ -2124,7 +2124,7 @@ static int mov_read_glbl(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return AVERROR_INVALIDDATA;
 
     if (atom.type == MKTAG('v','v','c','C')) {
-        avio_rb32(pb);
+        avio_skip(pb, 4);
         atom.size -= 4;
     }
 

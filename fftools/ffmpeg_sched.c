@@ -218,6 +218,7 @@ typedef struct SchMux {
      */
     atomic_int          mux_started;
     ThreadQueue        *queue;
+    unsigned            queue_size;
 
     AVPacket           *sub_heartbeat_pkt;
 } SchMux;
@@ -226,6 +227,7 @@ typedef struct SchFilterIn {
     SchedulerNode       src;
     SchedulerNode       src_sched;
     int                 send_finished;
+    int                 receive_finished;
 } SchFilterIn;
 
 typedef struct SchFilterOut {
@@ -237,7 +239,8 @@ typedef struct SchFilterGraph {
 
     SchFilterIn        *inputs;
     unsigned         nb_inputs;
-    atomic_uint      nb_inputs_finished;
+    atomic_uint      nb_inputs_finished_send;
+    unsigned         nb_inputs_finished_receive;
 
     SchFilterOut       *outputs;
     unsigned         nb_outputs;
@@ -357,6 +360,8 @@ static int queue_alloc(ThreadQueue **ptq, unsigned nb_streams, unsigned queue_si
 {
     ThreadQueue *tq;
     ObjPool *op;
+
+    queue_size = queue_size > 0 ? queue_size : 8;
 
     op = (type == QUEUE_PACKETS) ? objpool_alloc_packets() :
                                    objpool_alloc_frames();
@@ -653,7 +658,7 @@ static const AVClass sch_mux_class = {
 };
 
 int sch_add_mux(Scheduler *sch, SchThreadFunc func, int (*init)(void *),
-                void *arg, int sdp_auto)
+                void *arg, int sdp_auto, unsigned thread_queue_size)
 {
     const unsigned idx = sch->nb_mux;
 
@@ -667,6 +672,7 @@ int sch_add_mux(Scheduler *sch, SchThreadFunc func, int (*init)(void *),
     mux             = &sch->mux[idx];
     mux->class      = &sch_mux_class;
     mux->init       = init;
+    mux->queue_size = thread_queue_size;
 
     task_init(sch, &mux->task, SCH_NODE_TYPE_MUX, idx, func, arg);
 
@@ -773,7 +779,7 @@ int sch_add_dec(Scheduler *sch, SchThreadFunc func, void *ctx,
     if (!dec->send_frame)
         return AVERROR(ENOMEM);
 
-    ret = queue_alloc(&dec->queue, 1, 1, QUEUE_PACKETS);
+    ret = queue_alloc(&dec->queue, 1, 0, QUEUE_PACKETS);
     if (ret < 0)
         return ret;
 
@@ -813,7 +819,7 @@ int sch_add_enc(Scheduler *sch, SchThreadFunc func, void *ctx,
 
     task_init(sch, &enc->task, SCH_NODE_TYPE_ENC, idx, func, ctx);
 
-    ret = queue_alloc(&enc->queue, 1, 1, QUEUE_FRAMES);
+    ret = queue_alloc(&enc->queue, 1, 0, QUEUE_FRAMES);
     if (ret < 0)
         return ret;
 
@@ -861,7 +867,7 @@ int sch_add_filtergraph(Scheduler *sch, unsigned nb_inputs, unsigned nb_outputs,
     if (ret < 0)
         return ret;
 
-    ret = queue_alloc(&fg->queue, fg->nb_inputs + 1, 1, QUEUE_FRAMES);
+    ret = queue_alloc(&fg->queue, fg->nb_inputs + 1, 0, QUEUE_FRAMES);
     if (ret < 0)
         return ret;
 
@@ -1313,7 +1319,8 @@ int sch_start(Scheduler *sch)
             }
         }
 
-        ret = queue_alloc(&mux->queue, mux->nb_streams, 1, QUEUE_PACKETS);
+        ret = queue_alloc(&mux->queue, mux->nb_streams, mux->queue_size,
+                          QUEUE_PACKETS);
         if (ret < 0)
             return ret;
 
@@ -1959,7 +1966,7 @@ static int send_to_filter(Scheduler *sch, SchFilterGraph *fg,
         tq_send_finish(fg->queue, in_idx);
 
         // close the control stream when all actual inputs are done
-        if (atomic_fetch_add(&fg->nb_inputs_finished, 1) == fg->nb_inputs - 1)
+        if (atomic_fetch_add(&fg->nb_inputs_finished_send, 1) == fg->nb_inputs - 1)
             tq_send_finish(fg->queue, fg->nb_inputs);
     }
     return 0;
@@ -2140,6 +2147,27 @@ int sch_filter_receive(Scheduler *sch, unsigned fg_idx,
 
         // disregard EOFs for specific streams - they should always be
         // preceded by an EOF frame
+    }
+}
+
+void sch_filter_receive_finish(Scheduler *sch, unsigned fg_idx, unsigned in_idx)
+{
+    SchFilterGraph *fg;
+    SchFilterIn    *fi;
+
+    av_assert0(fg_idx < sch->nb_filters);
+    fg = &sch->filters[fg_idx];
+
+    av_assert0(in_idx < fg->nb_inputs);
+    fi = &fg->inputs[in_idx];
+
+    if (!fi->receive_finished) {
+        fi->receive_finished = 1;
+        tq_receive_finish(fg->queue, in_idx);
+
+        // close the control stream when all actual inputs are done
+        if (++fg->nb_inputs_finished_receive == fg->nb_inputs)
+            tq_receive_finish(fg->queue, fg->nb_inputs);
     }
 }
 

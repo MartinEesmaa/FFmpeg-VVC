@@ -31,6 +31,8 @@
 #include "libavcodec/bytestream.h"
 #include "libavcodec/defs.h"
 #include "libavcodec/h264.h"
+#include "libavcodec/hevc.h"
+#include "libavcodec/vvc.h"
 #include "libavcodec/startcode.h"
 
 #include "avformat.h"
@@ -1767,16 +1769,16 @@ static void mpegts_write_pes(AVFormatContext *s, AVStream *st,
     ts_st->prev_payload_key = key;
 }
 
-int ff_check_h264_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
+static int check_h26x_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt, const char *codec)
 {
     if (pkt->size < 5 || AV_RB32(pkt->data) != 0x0000001 && AV_RB24(pkt->data) != 0x000001) {
         if (!st->nb_frames) {
-            av_log(s, AV_LOG_ERROR, "H.264 bitstream malformed, "
-                   "no startcode found, use the video bitstream filter 'h264_mp4toannexb' to fix it "
-                   "('-bsf:v h264_mp4toannexb' option with ffmpeg)\n");
+            av_log(s, AV_LOG_ERROR, "%s bitstream malformed, "
+                   "no startcode found, use the video bitstream filter '%s_mp4toannexb' to fix it "
+                   "('-bsf:v %s_mp4toannexb' option with ffmpeg)\n", codec, codec, codec);
             return AVERROR_INVALIDDATA;
         }
-        av_log(s, AV_LOG_WARNING, "H.264 bitstream error, startcode missing, size %d", pkt->size);
+        av_log(s, AV_LOG_WARNING, "%s bitstream error, startcode missing, size %d", codec, pkt->size);
         if (pkt->size)
             av_log(s, AV_LOG_WARNING, " data %08"PRIX32, AV_RB32(pkt->data));
         av_log(s, AV_LOG_WARNING, "\n");
@@ -1784,19 +1786,9 @@ int ff_check_h264_startcode(AVFormatContext *s, const AVStream *st, const AVPack
     return 0;
 }
 
-static int check_hevc_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
+int ff_check_h264_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
 {
-    if (pkt->size < 5 || AV_RB32(pkt->data) != 0x0000001 && AV_RB24(pkt->data) != 0x000001) {
-        if (!st->nb_frames) {
-            av_log(s, AV_LOG_ERROR, "HEVC bitstream malformed, no startcode found\n");
-            return AVERROR_PATCHWELCOME;
-        }
-        av_log(s, AV_LOG_WARNING, "HEVC bitstream error, startcode missing, size %d", pkt->size);
-        if (pkt->size)
-            av_log(s, AV_LOG_WARNING, " data %08"PRIX32, AV_RB32(pkt->data));
-        av_log(s, AV_LOG_WARNING, "\n");
-    }
-    return 0;
+    return check_h26x_startcode(s, st, pkt, "h264");
 }
 
 static int check_vvc_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
@@ -1866,6 +1858,24 @@ static int opus_get_packet_samples(AVFormatContext *s, AVPacket *pkt)
     return duration;
 }
 
+static uint8_t *h26x_prefix_aud(const uint8_t *aud, const int aud_size,
+    const uint8_t *extra_data, const int extra_size, AVPacket *pkt, int *size)
+{
+    const int sz = 4;       //start code size
+    uint8_t *data = av_malloc(pkt->size + sz + aud_size + extra_size);
+    if (!data)
+        return NULL;
+    AV_WB32(data, 0x00000001);
+    memcpy(data + sz, aud, aud_size);
+    memcpy(data + sz + aud_size, extra_data, extra_size);
+    memcpy(data + sz + aud_size + extra_size, pkt->data, pkt->size);
+    *size = pkt->size + sz + aud_size + extra_size;
+    return data;
+}
+
+#define H264_NAL_TYPE(state) (state & 0x1f)
+#define HEVC_NAL_TYPE(state) ((state & 0x7e) >> 1)
+#define VVC_NAL_TYPE(state)  ((state >> 11) & 0x1f)
 static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
 {
     AVStream *st = s->streams[pkt->stream_index];
@@ -1909,6 +1919,7 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
     if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
         const uint8_t *p = buf, *buf_end = p + size;
         const uint8_t *found_aud = NULL, *found_aud_end = NULL;
+        int nal_type;
         uint32_t state = -1;
         int extradd = (pkt->flags & AV_PKT_FLAG_KEY) ? st->codecpar->extradata_size : 0;
         int ret = ff_check_h264_startcode(s, st, pkt);
@@ -1923,10 +1934,11 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
          * are assumed to be available in 'extradata' if not found in-band. */
         do {
             p = avpriv_find_start_code(p, buf_end, &state);
-            av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", state & 0x1f);
-            if ((state & 0x1f) == H264_NAL_SPS)
+            nal_type = H264_NAL_TYPE(state);
+            av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", nal_type);
+            if (nal_type == H264_NAL_SPS)
                 extradd = 0;
-            if ((state & 0x1f) == H264_NAL_AUD) {
+            if (nal_type == H264_NAL_AUD) {
                 found_aud = p - 4;     // start of the 0x000001 start code.
                 found_aud_end = p + 1; // first byte past the AUD.
                 if (found_aud < buf)
@@ -1935,24 +1947,22 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
                     found_aud_end = buf_end;
             }
         } while (p < buf_end
-                 && (state & 0x1f) != H264_NAL_IDR_SLICE
-                 && (state & 0x1f) != H264_NAL_SLICE
+                 && nal_type != H264_NAL_IDR_SLICE
+                 && nal_type != H264_NAL_SLICE
                  && (extradd > 0 || !found_aud));
-        if ((state & 0x1f) != H264_NAL_IDR_SLICE)
+        if (nal_type != H264_NAL_IDR_SLICE)
             extradd = 0;
 
         if (!found_aud) {
             /* Prefix 'buf' with the missing AUD, and extradata if needed. */
-            data = av_malloc(pkt->size + 6 + extradd);
+            const uint8_t aud[] = {
+                H264_NAL_AUD,
+                0xf0, // any slice type (0xe) + rbsp stop one bit
+            };
+            buf = data = h26x_prefix_aud(aud, FF_ARRAY_ELEMS(aud),
+                st->codecpar->extradata, extradd, pkt, &size);
             if (!data)
                 return AVERROR(ENOMEM);
-            memcpy(data + 6, st->codecpar->extradata, extradd);
-            memcpy(data + 6 + extradd, pkt->data, pkt->size);
-            AV_WB32(data, 0x00000001);
-            data[4] = H264_NAL_AUD;
-            data[5] = 0xf0; // any slice type (0xe) + rbsp stop one bit
-            buf     = data;
-            size    = pkt->size + 6 + extradd;
         } else if (extradd != 0) {
             /* Move the AUD up to the beginning of the frame, where the H.264
              * spec requires it to appear. Emit the extradata after it. */
@@ -2007,8 +2017,9 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
     } else if (st->codecpar->codec_id == AV_CODEC_ID_HEVC) {
         const uint8_t *p = buf, *buf_end = p + size;
         uint32_t state = -1;
+        int nal_type;
         int extradd = (pkt->flags & AV_PKT_FLAG_KEY) ? st->codecpar->extradata_size : 0;
-        int ret = check_hevc_startcode(s, st, pkt);
+        int ret = check_h26x_startcode(s, st, pkt, "hevc");
         if (ret < 0)
             return ret;
 
@@ -2017,33 +2028,31 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
 
         do {
             p = avpriv_find_start_code(p, buf_end, &state);
-            av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", (state & 0x7e)>>1);
-            if ((state & 0x7e) == 2*32)
+            nal_type = HEVC_NAL_TYPE(state);
+            av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", nal_type);
+            if (nal_type == HEVC_NAL_VPS)
                 extradd = 0;
-        } while (p < buf_end && (state & 0x7e) != 2*35 &&
-                 (state & 0x7e) >= 2*32);
+        } while (p < buf_end && nal_type != HEVC_NAL_AUD && nal_type >= HEVC_NAL_VPS);
 
-        if ((state & 0x7e) < 2*16 || (state & 0x7e) >= 2*24)
+        if (nal_type < HEVC_NAL_BLA_W_LP || nal_type >= HEVC_NAL_RSV_VCL24)
             extradd = 0;
-        if ((state & 0x7e) != 2*35) { // AUD NAL
-            data = av_malloc(pkt->size + 7 + extradd);
+        if (nal_type != HEVC_NAL_AUD) { // AUD NAL
+            const uint8_t aud[] = {
+                (HEVC_NAL_AUD << 1),
+                0x01,
+                0x50, // any slice type (0x4) + rbsp stop one bit
+            };
+            buf = data = h26x_prefix_aud(aud, FF_ARRAY_ELEMS(aud),
+                st->codecpar->extradata, extradd, pkt, &size);
             if (!data)
                 return AVERROR(ENOMEM);
-            memcpy(data + 7, st->codecpar->extradata, extradd);
-            memcpy(data + 7 + extradd, pkt->data, pkt->size);
-            AV_WB32(data, 0x00000001);
-            data[4] = 2*35;
-            data[5] = 1;
-            data[6] = 0x50; // any slice type (0x4) + rbsp stop one bit
-            buf     = data;
-            size    = pkt->size + 7 + extradd;
         }
     } else if (st->codecpar->codec_id == AV_CODEC_ID_VVC) {
       const uint8_t *p = buf, *buf_end = p + size;
       uint32_t state = -1;
-      uint32_t naltype = -1;
+      uint32_t nal_type = -1;
       int extradd = (pkt->flags & AV_PKT_FLAG_KEY) ? st->codecpar->extradata_size : 0;
-      int ret = check_vvc_startcode(s, st, pkt);
+      int ret = check_h26x_startcode(s, st, pkt, "vvc");
       if (ret < 0)
           return ret;
 
@@ -2053,26 +2062,23 @@ static int mpegts_write_packet_internal(AVFormatContext *s, AVPacket *pkt)
       do {
           p = avpriv_find_start_code(p, buf_end, &state);
           // state contains byte behind start code, p points 2 bytes behind start code
-          naltype = ((AV_RB8(p)>>3) & 0x1F);
-          av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", naltype );
-          if (naltype == 14 ) // VPS
+          nal_type = VVC_NAL_TYPE(state);
+          av_log(s, AV_LOG_TRACE, "nal %"PRId32"\n", nal_type );
+          if (nal_type == VVC_VPS_NUT)
               extradd = 0;
-      } while (p < buf_end && naltype != 20 && naltype >= 12);
+      } while (p < buf_end && nal_type != VVC_AUD_NUT && nal_type >= VVC_OPI_NUT);
 
-      if (naltype >= 12)
+      if (nal_type >= VVC_OPI_NUT)
           extradd = 0;
-      if (naltype != 20) { // AUD NAL
-          data = av_malloc(pkt->size + 7 + extradd);
-          if (!data)
-              return AVERROR(ENOMEM);
-          memcpy(data + 7, st->codecpar->extradata, extradd);
-          memcpy(data + 7 + extradd, pkt->data, pkt->size);
-          AV_WB32(data, 0x00000001);
-          data[4] = 20;
-          data[5] = 1;
-          data[6] = 0x50; // any slice type (0x4) + rbsp stop one bit
-          buf     = data;
-          size    = pkt->size + 7 + extradd;
+      if (nal_type != VVC_AUD_NUT) { // AUD NAL
+            const uint8_t aud[] = {
+                0,                                          // forbidden_zero_bit, nuh_reserved_zero_bit, nuh_layer_id
+                (VVC_AUD_NUT << 3) | 1,                     // nal_unit_type, nuh_temporal_id_plus1(1)
+                (pkt->flags & AV_PKT_FLAG_KEY) << 7 | 0x28, // aud_irap_or_gdr_flag, aud_pic_type(2), rbsp_stop_one_bit
+            };
+            buf = data = h26x_prefix_aud(aud, FF_ARRAY_ELEMS(aud), st->codecpar->extradata, extradd, pkt, &size);
+            if (!data)
+                return AVERROR(ENOMEM);
       }
     } else if (st->codecpar->codec_id == AV_CODEC_ID_OPUS) {
         if (pkt->size < 2) {
@@ -2316,29 +2322,27 @@ static void mpegts_deinit(AVFormatContext *s)
 static int mpegts_check_bitstream(AVFormatContext *s, AVStream *st,
                                   const AVPacket *pkt)
 {
-    int ret = 1;
+    const struct Entry {
+        enum AVCodecID id;
+        const char *bsf_name;
+        uint8_t mask;
+        uint8_t value;
+    } list[] = {
+        { AV_CODEC_ID_H264, "h264_mp4toannexb", 0xff, 0x01 /* configurationVersion in AVCDecoderConfigurationRecord  */},
+        { AV_CODEC_ID_HEVC, "hevc_mp4toannexb", 0xff, 0x01 /* configurationVersion in HEVCDecoderConfigurationRecord */},
+        { AV_CODEC_ID_VVC,  "vvc_mp4toannexb",  0xf8, 0xf8 /* reserved '11111'b    in VVCDecoderConfigurationRecord  */},
+    };
 
-    if (st->codecpar->codec_id == AV_CODEC_ID_H264) {
-        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
-                             (AV_RB24(pkt->data) != 0x000001 ||
-                              (st->codecpar->extradata_size > 0 &&
-                               st->codecpar->extradata[0] == 1)))
-            ret = ff_stream_add_bitstream_filter(st, "h264_mp4toannexb", NULL);
-    } else if (st->codecpar->codec_id == AV_CODEC_ID_HEVC) {
-        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
-                             (AV_RB24(pkt->data) != 0x000001 ||
-                              (st->codecpar->extradata_size > 0 &&
-                               st->codecpar->extradata[0] == 1)))
-            ret = ff_stream_add_bitstream_filter(st, "hevc_mp4toannexb", NULL);
-    } else if (st->codecpar->codec_id == AV_CODEC_ID_VVC) {
-        if (pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
-                             (AV_RB24(pkt->data) != 0x000001 ||
-                              (st->codecpar->extradata_size > 0 &&
-                               st->codecpar->extradata[0] == 1)))
-            ret = ff_stream_add_bitstream_filter(st, "h266_mp4toannexb", NULL);
+    for (int i = 0; i < FF_ARRAY_ELEMS(list); i++) {
+        const struct Entry *e = list + i;
+        if (e->id == st->codecpar->codec_id &&
+                pkt->size >= 5 && AV_RB32(pkt->data) != 0x0000001 &&
+                (AV_RB24(pkt->data) != 0x000001 ||
+                    (st->codecpar->extradata_size > 0 &&
+                        (st->codecpar->extradata[0] & e->mask == e->value))))
+            return ff_stream_add_bitstream_filter(st, e->bsf_name, NULL);
     }
-
-    return ret;
+    return 1;
 }
 
 #define OFFSET(x) offsetof(MpegTSWrite, x)
