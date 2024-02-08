@@ -2221,7 +2221,7 @@ static int mov_write_clli_tag(AVIOContext *pb, MOVTrack *track)
     return 12;
 }
 
-static inline int64_t rescale_mdcv(AVRational q, int b)
+static inline int64_t rescale_rational(AVRational q, int b)
 {
     return av_rescale(q.num, b, q.den);
 }
@@ -2244,17 +2244,44 @@ static int mov_write_mdcv_tag(AVIOContext *pb, MOVTrack *track)
 
     avio_wb32(pb, 32); // size
     ffio_wfourcc(pb, "mdcv");
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[1][0], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[1][1], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[2][0], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[2][1], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[0][0], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->display_primaries[0][1], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->white_point[0], chroma_den));
-    avio_wb16(pb, rescale_mdcv(metadata->white_point[1], chroma_den));
-    avio_wb32(pb, rescale_mdcv(metadata->max_luminance, luma_den));
-    avio_wb32(pb, rescale_mdcv(metadata->min_luminance, luma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[1][0], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[1][1], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[2][0], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[2][1], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[0][0], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->display_primaries[0][1], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->white_point[0], chroma_den));
+    avio_wb16(pb, rescale_rational(metadata->white_point[1], chroma_den));
+    avio_wb32(pb, rescale_rational(metadata->max_luminance, luma_den));
+    avio_wb32(pb, rescale_rational(metadata->min_luminance, luma_den));
     return 32;
+}
+
+static int mov_write_amve_tag(AVIOContext *pb, MOVTrack *track)
+{
+    const int illuminance_den = 10000;
+    const int ambient_den = 50000;
+    const AVPacketSideData *side_data;
+    const AVAmbientViewingEnvironment *ambient;
+
+
+    side_data = av_packet_side_data_get(track->st->codecpar->coded_side_data,
+                                        track->st->codecpar->nb_coded_side_data,
+                                        AV_PKT_DATA_AMBIENT_VIEWING_ENVIRONMENT);
+
+    if (!side_data)
+        return 0;
+
+    ambient = (const AVAmbientViewingEnvironment*)side_data->data;
+    if (!ambient || !ambient->ambient_illuminance.num)
+        return 0;
+
+    avio_wb32(pb, 16); // size
+    ffio_wfourcc(pb, "amve");
+    avio_wb32(pb, rescale_rational(ambient->ambient_illuminance, illuminance_den));
+    avio_wb16(pb, rescale_rational(ambient->ambient_light_x, ambient_den));
+    avio_wb16(pb, rescale_rational(ambient->ambient_light_y, ambient_den));
+    return 16;
 }
 
 static void find_compressor(char * compressor_name, int len, MOVTrack *track)
@@ -2470,6 +2497,7 @@ static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
     if (track->mode == MODE_MOV || track->mode == MODE_MP4) {
         mov_write_clli_tag(pb, track);
         mov_write_mdcv_tag(pb, track);
+        mov_write_amve_tag(pb, track);
     }
 
     if (track->mode == MODE_MP4 && mov->fc->strict_std_compliance <= FF_COMPLIANCE_UNOFFICIAL) {

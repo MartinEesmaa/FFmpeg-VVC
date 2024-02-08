@@ -29,6 +29,7 @@
 
 #include "libavutil/encryption_info.h"
 #include "libavutil/mastering_display_metadata.h"
+#include "libavutil/ambient_viewing_environment.h"
 #include "libavutil/spherical.h"
 #include "libavutil/stereo3d.h"
 
@@ -249,6 +250,8 @@ typedef struct MOVStreamContext {
     AVMasteringDisplayMetadata *mastering;
     AVContentLightMetadata *coll;
     size_t coll_size;
+    AVAmbientViewingEnvironment *ambient;
+    size_t ambient_size;
 
     uint32_t format;
 
@@ -280,6 +283,7 @@ typedef struct MOVContext {
     int64_t duration;     ///< duration of the longest track
     int found_moov;       ///< 'moov' atom has been found
     int found_iloc;       ///< 'iloc' atom has been found
+    int found_iinf;       ///< 'iinf' atom has been found
     int found_mdat;       ///< 'mdat' atom has been found
     int found_hdlr_mdta;  ///< 'hdlr' atom with type 'mdta' has been found
     int trak_index;       ///< Index of the current 'trak'
@@ -333,8 +337,8 @@ typedef struct MOVContext {
     uint32_t max_stts_delta;
     int primary_item_id;
     int cur_item_id;
-    HEIFItem *heif_info;
-    int heif_info_size;
+    HEIFItem *heif_item;
+    int nb_heif_item;
     int interleaved_read;
 } MOVContext;
 

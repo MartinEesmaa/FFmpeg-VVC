@@ -28,6 +28,7 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/log.h"
 #include "libavutil/mastering_display_metadata.h"
+#include "libavutil/ambient_viewing_environment.h"
 #include "libavutil/dovi_meta.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/opt.h"
@@ -379,6 +380,17 @@ static void dump_content_light_metadata(void *ctx, const AVPacketSideData *sd,
            metadata->MaxCLL, metadata->MaxFALL);
 }
 
+static void dump_ambient_viewing_environment_metadata(void *ctx, const AVPacketSideData *sd)
+{
+    const AVAmbientViewingEnvironment *ambient =
+        (const AVAmbientViewingEnvironment *)sd->data;
+    av_log(ctx, AV_LOG_INFO, "Ambient Viewing Environment, "
+           "ambient_illuminance=%f, ambient_light_x=%f, ambient_light_y=%f",
+           av_q2d(ambient->ambient_illuminance),
+           av_q2d(ambient->ambient_light_x),
+           av_q2d(ambient->ambient_light_y));
+}
+
 static void dump_spherical(void *ctx, const AVCodecParameters *par,
                            const AVPacketSideData *sd, int log_level)
 {
@@ -513,6 +525,9 @@ static void dump_sidedata(void *ctx, const AVStream *st, const char *indent,
             av_log(ctx, log_level, "SMPTE ST 12-1:2014: ");
             dump_s12m_timecode(ctx, st, sd, log_level);
             break;
+        case AV_PKT_DATA_AMBIENT_VIEWING_ENVIRONMENT:
+            dump_ambient_viewing_environment_metadata(ctx, sd);
+            break;
         default:
             av_log(ctx, log_level, "unknown side data type %d "
                    "(%"SIZE_SPECIFIER" bytes)", sd->type, sd->size);
@@ -550,12 +565,14 @@ static void dump_stream_format(const AVFormatContext *ic, int i,
     }
 
     // Fields which are missing from AVCodecParameters need to be taken from the AVCodecContext
-    avctx->properties   = sti->avctx->properties;
-    avctx->codec        = sti->avctx->codec;
-    avctx->qmin         = sti->avctx->qmin;
-    avctx->qmax         = sti->avctx->qmax;
-    avctx->coded_width  = sti->avctx->coded_width;
-    avctx->coded_height = sti->avctx->coded_height;
+    if (sti->avctx) {
+        avctx->properties   = sti->avctx->properties;
+        avctx->codec        = sti->avctx->codec;
+        avctx->qmin         = sti->avctx->qmin;
+        avctx->qmax         = sti->avctx->qmax;
+        avctx->coded_width  = sti->avctx->coded_width;
+        avctx->coded_height = sti->avctx->coded_height;
+    }
 
     if (separator)
         av_opt_set(avctx, "dump_separator", separator, 0);

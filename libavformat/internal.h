@@ -245,7 +245,7 @@ typedef struct FFStream {
 
     int is_intra_only;
 
-    FFFrac *priv_pts;
+    FFFrac priv_pts;
 
     /**
      * Stream information used internally by avformat_find_stream_info()
@@ -416,6 +416,8 @@ typedef struct FFStream {
     int64_t cur_dts;
 
     const struct AVCodecDescriptor *codec_desc;
+
+    AVRational transferred_mux_tb;
 } FFStream;
 
 static av_always_inline FFStream *ffstream(AVStream *st)

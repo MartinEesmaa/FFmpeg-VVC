@@ -62,6 +62,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         if (next_pts != AV_NOPTS_VALUE && cur_pts != AV_NOPTS_VALUE) {
             yadif->out->pts = cur_pts + next_pts;
+            if (yadif->pts_multiplier == 1) {
+                yadif->out->pts >>= 1;
+                yadif->out->duration >>= 1;
+            }
         } else {
             yadif->out->pts = AV_NOPTS_VALUE;
         }
@@ -150,8 +154,8 @@ int ff_yadif_filter_frame(AVFilterLink *link, AVFrame *frame)
         ff_ccfifo_inject(&yadif->cc_fifo, yadif->out);
         av_frame_free(&yadif->prev);
         if (yadif->out->pts != AV_NOPTS_VALUE)
-            yadif->out->pts *= 2;
-        yadif->out->duration *= 2;
+            yadif->out->pts *= yadif->pts_multiplier;
+        yadif->out->duration *= yadif->pts_multiplier;
         return ff_filter_frame(ctx->outputs[0], yadif->out);
     }
 
@@ -168,9 +172,11 @@ FF_ENABLE_DEPRECATION_WARNINGS
     yadif->out->flags &= ~AV_FRAME_FLAG_INTERLACED;
 
     if (yadif->out->pts != AV_NOPTS_VALUE)
-        yadif->out->pts *= 2;
+        yadif->out->pts *= yadif->pts_multiplier;
     if (!(yadif->mode & 1))
-        yadif->out->duration *= 2;
+        yadif->out->duration *= yadif->pts_multiplier;
+    else if (yadif->pts_multiplier == 1)
+        yadif->out->duration >>= 1;
 
     return return_frame(ctx, 0);
 }
@@ -207,6 +213,54 @@ int ff_yadif_request_frame(AVFilterLink *link)
     }
 
     return 0;
+}
+
+int ff_yadif_config_output_common(AVFilterLink *outlink)
+{
+    AVFilterContext *ctx = outlink->src;
+    YADIFContext *yadif = ctx->priv;
+    AVRational tb = ctx->inputs[0]->time_base;
+    int ret;
+
+    if (av_reduce(&outlink->time_base.num, &outlink->time_base.den, tb.num, tb.den * 2LL, INT_MAX)) {
+        yadif->pts_multiplier = 2;
+    } else {
+        av_log(ctx, AV_LOG_WARNING, "Cannot use exact output timebase\n");
+        outlink->time_base = tb;
+        yadif->pts_multiplier = 1;
+    }
+
+    outlink->w             = ctx->inputs[0]->w;
+    outlink->h             = ctx->inputs[0]->h;
+
+    if (outlink->w < 3 || outlink->h < 3) {
+        av_log(ctx, AV_LOG_ERROR, "Video of less than 3 columns or lines is not supported\n");
+        return AVERROR(EINVAL);
+    }
+
+    if(yadif->mode & 1)
+        outlink->frame_rate = av_mul_q(ctx->inputs[0]->frame_rate,
+                                    (AVRational){2, 1});
+    else
+        outlink->frame_rate = ctx->inputs[0]->frame_rate;
+
+    ret = ff_ccfifo_init(&yadif->cc_fifo, outlink->frame_rate, ctx);
+    if (ret < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Failure to setup CC FIFO queue\n");
+        return ret;
+    }
+
+    return 0;
+}
+
+void ff_yadif_uninit(AVFilterContext *ctx)
+{
+    YADIFContext *yadif = ctx->priv;
+
+    av_frame_free(&yadif->prev);
+    av_frame_free(&yadif->cur );
+    av_frame_free(&yadif->next);
+    ff_ccfifo_uninit(&yadif->cc_fifo);
 }
 
 #define OFFSET(x) offsetof(YADIFContext, x)

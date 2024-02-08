@@ -300,6 +300,7 @@ static int mux_packet_filter(Muxer *mux, MuxThreadContext *mt,
             av_packet_unref(pkt);
             pkt = NULL;
             ret = 0;
+            *stream_eof = 1;
         } else if (ret < 0)
             goto fail;
     }
@@ -352,14 +353,13 @@ static int mux_packet_filter(Muxer *mux, MuxThreadContext *mt,
                 goto mux_fail;
         }
         *stream_eof = 1;
-        return AVERROR_EOF;
     } else {
         ret = sync_queue_process(mux, ms, pkt, stream_eof);
         if (ret < 0)
             goto mux_fail;
     }
 
-    return 0;
+    return *stream_eof ? AVERROR_EOF : 0;
 
 mux_fail:
     err_msg = "submitting a packet to the muxer";
@@ -725,8 +725,8 @@ static void mux_final_stats(Muxer *mux)
     }
 
     av_log(of, AV_LOG_INFO,
-           "video:%1.0fkB audio:%1.0fkB subtitle:%1.0fkB other streams:%1.0fkB "
-           "global headers:%1.0fkB muxing overhead: %s\n",
+           "video:%1.0fKiB audio:%1.0fKiB subtitle:%1.0fKiB other streams:%1.0fKiB "
+           "global headers:%1.0fKiB muxing overhead: %s\n",
            video_size    / 1024.0,
            audio_size    / 1024.0,
            subtitle_size / 1024.0,
