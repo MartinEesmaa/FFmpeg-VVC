@@ -27,6 +27,7 @@
 
 #include "bytestream.h"
 #include "codec_internal.h"
+#include "dxv.h"
 #include "encode.h"
 #include "texturedsp.h"
 
@@ -39,10 +40,6 @@
  */
 #define LOOKBACK_HT_ELEMS 0x40000
 #define LOOKBACK_WORDS    0x20202
-
-enum DXVTextureFormat {
-    DXV_FMT_DXT1 = MKBETAG('D', 'X', 'T', '1'),
-};
 
 typedef struct HTEntry {
     uint32_t key;
@@ -120,7 +117,7 @@ typedef struct DXVEncContext {
 
     TextureDSPThreadContext enc;
 
-    enum DXVTextureFormat tex_fmt;
+    DXVTextureFormat tex_fmt;
     int (*compress_tex)(AVCodecContext *avctx);
 
     const AVCRC *crc_ctx;
@@ -275,6 +272,14 @@ static av_cold int dxv_init(AVCodecContext *avctx)
         return ret;
     }
 
+    if (avctx->width % TEXTURE_BLOCK_W || avctx->height % TEXTURE_BLOCK_H) {
+        av_log(avctx,
+               AV_LOG_ERROR,
+               "Video size %dx%d is not multiple of "AV_STRINGIFY(TEXTURE_BLOCK_W)"x"AV_STRINGIFY(TEXTURE_BLOCK_H)".\n",
+               avctx->width, avctx->height);
+        return AVERROR_INVALIDDATA;
+    }
+
     ff_texturedspenc_init(&texdsp);
 
     switch (ctx->tex_fmt) {
@@ -288,10 +293,10 @@ static av_cold int dxv_init(AVCodecContext *avctx)
         return AVERROR_INVALIDDATA;
     }
     ctx->enc.raw_ratio = 16;
-    ctx->tex_size = FFALIGN(avctx->width, 16) / TEXTURE_BLOCK_W *
-                    FFALIGN(avctx->height, 16) / TEXTURE_BLOCK_H *
+    ctx->tex_size = avctx->width  / TEXTURE_BLOCK_W *
+                    avctx->height / TEXTURE_BLOCK_H *
                     ctx->enc.tex_ratio;
-    ctx->enc.slice_count = av_clip(avctx->thread_count, 1, FFALIGN(avctx->height, 16) / TEXTURE_BLOCK_H);
+    ctx->enc.slice_count = av_clip(avctx->thread_count, 1, avctx->height / TEXTURE_BLOCK_H);
 
     ctx->tex_data = av_malloc(ctx->tex_size);
     if (!ctx->tex_data) {
