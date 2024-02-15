@@ -1093,6 +1093,16 @@ typedef struct AVStreamGroup {
      * Freed by libavformat in avformat_free_context().
      */
     AVStream **streams;
+
+    /**
+     * Stream group disposition - a combination of AV_DISPOSITION_* flags.
+     * This field currently applies to all defined AVStreamGroupParamsType.
+     *
+     * - demuxing: set by libavformat when creating the group or in
+     *             avformat_find_stream_info().
+     * - muxing: may be set by the caller before avformat_write_header().
+     */
+    int disposition;
 } AVStreamGroup;
 
 struct AVCodecParserContext *av_stream_get_parser(const AVStream *s);
@@ -1688,7 +1698,7 @@ typedef struct AVFormatContext {
     /**
      * Number of bytes to be written as padding in a metadata header.
      * Demuxing: Unused.
-     * Muxing: Set by user via av_format_set_metadata_header_padding.
+     * Muxing: Set by user.
      */
     int metadata_header_padding;
 
