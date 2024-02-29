@@ -2237,6 +2237,12 @@ the two temporal layer 2 frames within the temporal period.
 @end table
 @end table
 
+@item VP8-specific options
+@table @option
+@item screen-content-mode
+Screen content mode, one of: 0 (off), 1 (screen), 2 (screen with more aggressive rate control).
+@end table
+
 @item VP9-specific options
 @table @option
 @item lossless
@@ -3332,8 +3338,8 @@ quality range is 1 to 51, with 1 being the best quality.
 @end itemize
 
 @item
-Otherwise, a bitrate-based mode is used. For all of those, you should specify at
-least the desired average bitrate with the @option{b} option.
+Otherwise when the desired average bitrate is specified with the @option{b}
+option, a bitrate-based mode is used.
 @itemize @minus
 @item
 @var{LA} - VBR with lookahead, when the @option{look_ahead} option is specified.
@@ -3354,6 +3360,9 @@ than the average bitrate.
 @option{avbr_accuracy} and @option{avbr_convergence} are set to non-zero. This
 mode is available for H264 and HEVC on Windows.
 @end itemize
+
+@item
+Otherwise the default ratecontrol method @var{CQP} is used.
 @end itemize
 
 Note that depending on your system, a different mode than the one you specified

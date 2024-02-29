@@ -743,7 +743,7 @@ static int set_context_with_sequence(AVCodecContext *avctx,
     avctx->color_range =
         seq->color_config.color_range ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
     avctx->color_primaries = seq->color_config.color_primaries;
-    avctx->colorspace = seq->color_config.color_primaries;
+    avctx->colorspace = seq->color_config.matrix_coefficients;
     avctx->color_trc = seq->color_config.transfer_characteristics;
 
     switch (seq->color_config.chroma_sample_position) {
@@ -1200,11 +1200,18 @@ static int av1_receive_frame_internal(AVCodecContext *avctx, AVFrame *frame)
         AV1RawOBU *obu = unit->content;
         const AV1RawOBUHeader *header;
 
+        av_log(avctx, AV_LOG_DEBUG, "OBU idx:%d, type:%d, content available:%d.\n", i, unit->type, !!obu);
+
+        if (unit->type == AV1_OBU_TILE_LIST) {
+            av_log(avctx, AV_LOG_ERROR, "Large scale tile decoding is unsupported.\n");
+            ret = AVERROR_PATCHWELCOME;
+            goto end;
+        }
+
         if (!obu)
             continue;
 
         header = &obu->header;
-        av_log(avctx, AV_LOG_DEBUG, "Obu idx:%d, obu type:%d.\n", i, unit->type);
 
         switch (unit->type) {
         case AV1_OBU_SEQUENCE_HEADER:

@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2024 Institue of Software Chinese Academy of Sciences (ISCAS).
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,13 +18,24 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVFILTER_THREAD_H
-#define AVFILTER_THREAD_H
+#include "config.h"
 
-#include "avfilter.h"
+#include "libavutil/attributes.h"
+#include "libavutil/cpu.h"
+#include "libavutil/riscv/cpu.h"
+#include "libavcodec/rv34dsp.h"
 
-int ff_graph_thread_init(AVFilterGraph *graph);
+void ff_rv34_inv_transform_dc_rvv(int16_t *block);
+void ff_rv34_idct_dc_add_rvv(uint8_t *dst, ptrdiff_t stride, int dc);
 
-void ff_graph_thread_free(AVFilterGraph *graph);
+av_cold void ff_rv34dsp_init_riscv(RV34DSPContext *c)
+{
+#if HAVE_RVV
+    int flags = av_get_cpu_flags();
 
-#endif /* AVFILTER_THREAD_H */
+    if (flags & AV_CPU_FLAG_RVV_I32 && ff_get_rv_vlenb() >= 16) {
+        c->rv34_inv_transform_dc = ff_rv34_inv_transform_dc_rvv;
+        c->rv34_idct_dc_add = ff_rv34_idct_dc_add_rvv;
+    }
+#endif
+}

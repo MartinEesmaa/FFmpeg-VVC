@@ -781,7 +781,7 @@ static void putnumpasses(Jpeg2000EncoderContext *s, int n)
 
 
 static int encode_packet(Jpeg2000EncoderContext *s, Jpeg2000ResLevel *rlevel, int layno,
-                         int precno, uint8_t *expn, int numgbits, int packetno,
+                         int precno, const uint8_t *expn, int numgbits, int packetno,
                          int nlayers)
 {
     int bandno, empty = 1;
@@ -1534,7 +1534,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     uint8_t *chunkstart, *jp2cstart, *jp2hstart;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(avctx->pix_fmt);
 
-    if ((ret = ff_alloc_packet(avctx, pkt, avctx->width*avctx->height*9 + AV_INPUT_BUFFER_MIN_SIZE)) < 0)
+    if ((ret = ff_alloc_packet(avctx, pkt, avctx->width*avctx->height*9 + FF_INPUT_BUFFER_MIN_SIZE)) < 0)
         return ret;
 
     // init:
