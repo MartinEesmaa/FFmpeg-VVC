@@ -254,7 +254,7 @@ OBJS-$(CONFIG_ATRAC3PAL_DECODER)       += atrac3plusdec.o atrac3plus.o \
 OBJS-$(CONFIG_ATRAC9_DECODER)          += atrac9dec.o
 OBJS-$(CONFIG_AURA_DECODER)            += cyuv.o
 OBJS-$(CONFIG_AURA2_DECODER)           += aura.o
-OBJS-$(CONFIG_AV1_DECODER)             += av1dec.o
+OBJS-$(CONFIG_AV1_DECODER)             += av1dec.o av1_parse.o
 OBJS-$(CONFIG_AV1_CUVID_DECODER)       += cuviddec.o
 OBJS-$(CONFIG_AV1_MEDIACODEC_DECODER)  += mediacodecdec.o
 OBJS-$(CONFIG_AV1_MEDIACODEC_ENCODER)  += mediacodecenc.o
@@ -1243,7 +1243,6 @@ OBJS-$(CONFIG_EXTRACT_EXTRADATA_BSF)      += av1_parse.o h2645_parse.o
 OBJS-$(CONFIG_H264_METADATA_BSF)          += h264_levels.o h2645data.o
 OBJS-$(CONFIG_HAPQA_EXTRACT_BSF)          += hap.o
 OBJS-$(CONFIG_HEVC_METADATA_BSF)          += h265_profile_level.o h2645data.o
-OBJS-$(CONFIG_MP3_HEADER_DECOMPRESS_BSF)  += mpegaudiotabs.o
 OBJS-$(CONFIG_REMOVE_EXTRADATA_BSF)       += av1_parse.o
 OBJS-$(CONFIG_TRUEHD_CORE_BSF)            += mlp_parse.o mlp.o
 
