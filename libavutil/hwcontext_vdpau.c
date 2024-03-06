@@ -83,6 +83,11 @@ static const struct {
 };
 
 typedef struct VDPAUDeviceContext {
+    /**
+     * The public AVVDPAUDeviceContext. See hwcontext_vdpau.h for it.
+     */
+    AVVDPAUDeviceContext p;
+
     VdpVideoSurfaceQueryGetPutBitsYCbCrCapabilities *get_transfer_caps;
     VdpVideoSurfaceGetBitsYCbCr                     *get_data;
     VdpVideoSurfacePutBitsYCbCr                     *put_data;
@@ -115,8 +120,8 @@ static int count_pixfmts(const VDPAUPixFmtMap *map)
 
 static int vdpau_init_pixmfts(AVHWDeviceContext *ctx)
 {
-    AVVDPAUDeviceContext *hwctx = ctx->hwctx;
-    VDPAUDeviceContext    *priv = ctx->internal->priv;
+    VDPAUDeviceContext    *priv = ctx->hwctx;
+    AVVDPAUDeviceContext *hwctx = &priv->p;
     int i;
 
     for (i = 0; i < FF_ARRAY_ELEMS(priv->pix_fmts); i++) {
@@ -157,8 +162,8 @@ do {                                                                            
 
 static int vdpau_device_init(AVHWDeviceContext *ctx)
 {
-    AVVDPAUDeviceContext *hwctx = ctx->hwctx;
-    VDPAUDeviceContext   *priv  = ctx->internal->priv;
+    VDPAUDeviceContext    *priv = ctx->hwctx;
+    AVVDPAUDeviceContext *hwctx = &priv->p;
     VdpStatus             err;
     int                   ret;
 
@@ -180,7 +185,7 @@ static int vdpau_device_init(AVHWDeviceContext *ctx)
 
 static void vdpau_device_uninit(AVHWDeviceContext *ctx)
 {
-    VDPAUDeviceContext *priv = ctx->internal->priv;
+    VDPAUDeviceContext *priv = ctx->hwctx;
     int i;
 
     for (i = 0; i < FF_ARRAY_ELEMS(priv->pix_fmts); i++)
@@ -191,7 +196,7 @@ static int vdpau_frames_get_constraints(AVHWDeviceContext *ctx,
                                         const void *hwconfig,
                                         AVHWFramesConstraints *constraints)
 {
-    VDPAUDeviceContext   *priv  = ctx->internal->priv;
+    VDPAUDeviceContext *priv  = ctx->hwctx;
     int nb_sw_formats = 0;
     int i;
 
@@ -219,7 +224,7 @@ static int vdpau_frames_get_constraints(AVHWDeviceContext *ctx,
 static void vdpau_buffer_free(void *opaque, uint8_t *data)
 {
     AVHWFramesContext          *ctx = opaque;
-    VDPAUDeviceContext *device_priv = ctx->device_ctx->internal->priv;
+    VDPAUDeviceContext *device_priv = ctx->device_ctx->hwctx;
     VdpVideoSurface            surf = (VdpVideoSurface)(uintptr_t)data;
 
     device_priv->surf_destroy(surf);
@@ -228,9 +233,9 @@ static void vdpau_buffer_free(void *opaque, uint8_t *data)
 static AVBufferRef *vdpau_pool_alloc(void *opaque, size_t size)
 {
     AVHWFramesContext             *ctx = opaque;
-    VDPAUFramesContext           *priv = ctx->internal->priv;
-    AVVDPAUDeviceContext *device_hwctx = ctx->device_ctx->hwctx;
-    VDPAUDeviceContext    *device_priv = ctx->device_ctx->internal->priv;
+    VDPAUFramesContext           *priv = ctx->hwctx;
+    VDPAUDeviceContext    *device_priv = ctx->device_ctx->hwctx;
+    AVVDPAUDeviceContext *device_hwctx = &device_priv->p;
 
     AVBufferRef *ret;
     VdpVideoSurface surf;
@@ -255,8 +260,8 @@ static AVBufferRef *vdpau_pool_alloc(void *opaque, size_t size)
 
 static int vdpau_frames_init(AVHWFramesContext *ctx)
 {
-    VDPAUDeviceContext *device_priv = ctx->device_ctx->internal->priv;
-    VDPAUFramesContext        *priv = ctx->internal->priv;
+    VDPAUDeviceContext *device_priv = ctx->device_ctx->hwctx;
+    VDPAUFramesContext        *priv = ctx->hwctx;
 
     int i;
 
@@ -306,7 +311,7 @@ static int vdpau_transfer_get_formats(AVHWFramesContext *ctx,
                                       enum AVHWFrameTransferDirection dir,
                                       enum AVPixelFormat **formats)
 {
-    VDPAUFramesContext *priv  = ctx->internal->priv;
+    VDPAUFramesContext *priv  = ctx->hwctx;
 
     enum AVPixelFormat *fmts;
 
@@ -329,7 +334,7 @@ static int vdpau_transfer_get_formats(AVHWFramesContext *ctx,
 static int vdpau_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
                                     const AVFrame *src)
 {
-    VDPAUFramesContext *priv = ctx->internal->priv;
+    VDPAUFramesContext *priv = ctx->hwctx;
     VdpVideoSurface     surf = (VdpVideoSurface)(uintptr_t)src->data[3];
 
     void *data[3];
@@ -387,7 +392,7 @@ static int vdpau_transfer_data_from(AVHWFramesContext *ctx, AVFrame *dst,
 static int vdpau_transfer_data_to(AVHWFramesContext *ctx, AVFrame *dst,
                                   const AVFrame *src)
 {
-    VDPAUFramesContext *priv = ctx->internal->priv;
+    VDPAUFramesContext *priv = ctx->hwctx;
     VdpVideoSurface     surf = (VdpVideoSurface)(uintptr_t)dst->data[3];
 
     const void *data[3];
@@ -508,9 +513,8 @@ const HWContextType ff_hwcontext_type_vdpau = {
     .type                 = AV_HWDEVICE_TYPE_VDPAU,
     .name                 = "VDPAU",
 
-    .device_hwctx_size    = sizeof(AVVDPAUDeviceContext),
-    .device_priv_size     = sizeof(VDPAUDeviceContext),
-    .frames_priv_size     = sizeof(VDPAUFramesContext),
+    .device_hwctx_size    = sizeof(VDPAUDeviceContext),
+    .frames_hwctx_size    = sizeof(VDPAUFramesContext),
 
 #if HAVE_VDPAU_X11
     .device_create        = vdpau_device_create,
