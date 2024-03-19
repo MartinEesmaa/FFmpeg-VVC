@@ -16,33 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "codec_id.h"
-
 #include "vulkan_video.h"
-
-const FFVkCodecMap ff_vk_codec_map[3] = {
-    {
-        .codec_id = AV_CODEC_ID_H264,
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_H264,
-                           VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR,
-    },
-    {
-        .codec_id = AV_CODEC_ID_HEVC,
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_H265,
-                           VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR
-    },
-    {
-        .codec_id = AV_CODEC_ID_AV1,
-                           0,
-                           0,
-                           FF_VK_EXT_VIDEO_DECODE_AV1,
-                           0x01000000 /* TODO fix this */
-    },
-};
 
 #define ASPECT_2PLANE (VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT)
 #define ASPECT_3PLANE (VK_IMAGE_ASPECT_PLANE_0_BIT | VK_IMAGE_ASPECT_PLANE_1_BIT | VK_IMAGE_ASPECT_PLANE_2_BIT)
@@ -309,7 +283,6 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
     int err;
     VkResult ret;
     FFVulkanFunctions *vk = &s->vkfn;
-    VkMemoryRequirements2 *mem_req = NULL;
     VkVideoSessionMemoryRequirementsKHR *mem = NULL;
     VkBindVideoSessionMemoryInfoKHR *bind_mem = NULL;
 
@@ -340,11 +313,6 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
         err = AVERROR(ENOMEM);
         goto fail;
     }
-    mem_req = av_mallocz(sizeof(*mem_req)*common->nb_mem);
-    if (!mem_req) {
-        err = AVERROR(ENOMEM);
-        goto fail;
-    }
     bind_mem = av_mallocz(sizeof(*bind_mem)*common->nb_mem);
     if (!bind_mem) {
         err = AVERROR(ENOMEM);
@@ -353,12 +321,8 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
 
     /* Set the needed fields to get the memory requirements */
     for (int i = 0; i < common->nb_mem; i++) {
-        mem_req[i] = (VkMemoryRequirements2) {
-            .sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2,
-        };
         mem[i] = (VkVideoSessionMemoryRequirementsKHR) {
             .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_MEMORY_REQUIREMENTS_KHR,
-            .memoryRequirements = mem_req[i].memoryRequirements,
         };
     }
 
@@ -400,14 +364,12 @@ av_cold int ff_vk_video_common_init(void *log, FFVulkanContext *s,
     }
 
     av_freep(&mem);
-    av_freep(&mem_req);
     av_freep(&bind_mem);
 
     return 0;
 
 fail:
     av_freep(&mem);
-    av_freep(&mem_req);
     av_freep(&bind_mem);
 
     ff_vk_video_common_uninit(s, common);

@@ -404,7 +404,7 @@ fail:
     return AVERROR(ENOMEM);
 }
 
-void *muxer_thread(void *arg)
+int muxer_thread(void *arg)
 {
     Muxer     *mux = arg;
     OutputFile *of = &mux->of;
@@ -433,6 +433,7 @@ void *muxer_thread(void *arg)
 
         ost = of->streams[mux->sch_stream_idx[stream_idx]];
         mt.pkt->stream_index = ost->index;
+        mt.pkt->flags       &= ~AV_PKT_FLAG_TRUSTED;
 
         ret = mux_packet_filter(mux, &mt, ost, ret < 0 ? NULL : mt.pkt, &stream_eof);
         av_packet_unref(mt.pkt);
@@ -453,7 +454,7 @@ void *muxer_thread(void *arg)
 finish:
     mux_thread_uninit(&mt);
 
-    return (void*)(intptr_t)ret;
+    return ret;
 }
 
 static int of_streamcopy(OutputFile *of, OutputStream *ost, AVPacket *pkt)

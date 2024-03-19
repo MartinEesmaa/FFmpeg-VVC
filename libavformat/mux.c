@@ -233,22 +233,6 @@ static int init_muxer(AVFormatContext *s, AVDictionary **options)
                 goto fail;
             }
 
-#if FF_API_OLD_CHANNEL_LAYOUT
-FF_DISABLE_DEPRECATION_WARNINGS
-            /* if the caller is using the deprecated channel layout API,
-             * convert it to the new style */
-            if (!par->ch_layout.nb_channels &&
-                par->channels) {
-                if (par->channel_layout) {
-                    av_channel_layout_from_mask(&par->ch_layout, par->channel_layout);
-                } else {
-                    par->ch_layout.order       = AV_CHANNEL_ORDER_UNSPEC;
-                    par->ch_layout.nb_channels = par->channels;
-                }
-            }
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
-
             if (!par->block_align)
                 par->block_align = par->ch_layout.nb_channels *
                                    av_get_bits_per_sample(par->codec_id) >> 3;
@@ -1452,13 +1436,6 @@ static int write_uncoded_frame_internal(AVFormatContext *s, int stream_index,
         pkt->size         = sizeof(frame);
         pkt->pts          =
         pkt->dts          = frame->pts;
-#if FF_API_PKT_DURATION
-FF_DISABLE_DEPRECATION_WARNINGS
-        if (frame->pkt_duration)
-            pkt->duration     = frame->pkt_duration;
-        else
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
         pkt->duration = frame->duration;
         pkt->stream_index = stream_index;
         pkt->flags |= AV_PKT_FLAG_UNCODED_FRAME;

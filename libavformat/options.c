@@ -152,13 +152,6 @@ static int io_open_default(AVFormatContext *s, AVIOContext **pb,
     return ffio_open_whitelist(pb, url, flags, &s->interrupt_callback, options, s->protocol_whitelist, s->protocol_blacklist);
 }
 
-#if FF_API_AVFORMAT_IO_CLOSE
-void ff_format_io_close_default(AVFormatContext *s, AVIOContext *pb)
-{
-    avio_close(pb);
-}
-#endif
-
 static int io_close2_default(AVFormatContext *s, AVIOContext *pb)
 {
     return avio_close(pb);
@@ -175,11 +168,6 @@ AVFormatContext *avformat_alloc_context(void)
     s = &si->pub;
     s->av_class = &av_format_context_class;
     s->io_open  = io_open_default;
-#if FF_API_AVFORMAT_IO_CLOSE
-FF_DISABLE_DEPRECATION_WARNINGS
-    s->io_close = ff_format_io_close_default;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
     s->io_close2= io_close2_default;
 
     av_opt_set_defaults(s);
@@ -198,10 +186,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
     return s;
 }
 
+#if FF_API_GET_DUR_ESTIMATE_METHOD
 enum AVDurationEstimationMethod av_fmt_ctx_get_duration_estimation_method(const AVFormatContext* ctx)
 {
     return ctx->duration_estimation_method;
 }
+#endif
 
 const AVClass *avformat_get_class(void)
 {

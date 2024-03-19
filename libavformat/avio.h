@@ -101,13 +101,7 @@ typedef struct AVIODirEntry {
     int64_t filemode;                     /**< Unix file mode, -1 if unknown. */
 } AVIODirEntry;
 
-#if FF_API_AVIODIRCONTEXT
-typedef struct AVIODirContext {
-    struct URLContext *url_context;
-} AVIODirContext;
-#else
 typedef struct AVIODirContext AVIODirContext;
-#endif
 
 /**
  * Different data types that can be returned via the AVIO
@@ -238,11 +232,7 @@ typedef struct AVIOContext {
     void *opaque;           /**< A private pointer, passed to the read/write/seek/...
                                  functions. */
     int (*read_packet)(void *opaque, uint8_t *buf, int buf_size);
-#if FF_API_AVIO_WRITE_NONCONST
-    int (*write_packet)(void *opaque, uint8_t *buf, int buf_size);
-#else
     int (*write_packet)(void *opaque, const uint8_t *buf, int buf_size);
-#endif
     int64_t (*seek)(void *opaque, int64_t offset, int whence);
     int64_t pos;            /**< position in the file of the current buffer */
     int eof_reached;        /**< true if was unable to read due to error or eof */
@@ -290,13 +280,8 @@ typedef struct AVIOContext {
     /**
      * A callback that is used instead of write_packet.
      */
-#if FF_API_AVIO_WRITE_NONCONST
-    int (*write_data_type)(void *opaque, uint8_t *buf, int buf_size,
-                           enum AVIODataMarkerType type, int64_t time);
-#else
     int (*write_data_type)(void *opaque, const uint8_t *buf, int buf_size,
                            enum AVIODataMarkerType type, int64_t time);
-#endif
     /**
      * If set, don't call write_data_type separately for AVIO_DATA_MARKER_BOUNDARY_POINT,
      * but ignore them and treat them as AVIO_DATA_MARKER_UNKNOWN (to avoid needlessly
@@ -416,11 +401,7 @@ AVIOContext *avio_alloc_context(
                   int write_flag,
                   void *opaque,
                   int (*read_packet)(void *opaque, uint8_t *buf, int buf_size),
-#if FF_API_AVIO_WRITE_NONCONST
-                  int (*write_packet)(void *opaque, uint8_t *buf, int buf_size),
-#else
                   int (*write_packet)(void *opaque, const uint8_t *buf, int buf_size),
-#endif
                   int64_t (*seek)(void *opaque, int64_t offset, int whence));
 
 /**

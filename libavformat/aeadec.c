@@ -23,6 +23,9 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "avformat.h"
+#include "avio_internal.h"
+#include "demux.h"
+#include "internal.h"
 #include "pcm.h"
 
 #define AT1_SU_SIZE 212
@@ -58,12 +61,20 @@ static int aea_read_probe(const AVProbeData *p)
 static int aea_read_header(AVFormatContext *s)
 {
     AVStream *st = avformat_new_stream(s, NULL);
-    int channels;
+    char title[256 + 1];
+    int channels, ret;
     if (!st)
         return AVERROR(ENOMEM);
 
-    /* Parse the amount of channels and skip to pos 2048(0x800) */
-    avio_skip(s->pb, 264);
+    /* Read the title, parse the number of channels and skip to pos 2048(0x800) */
+    avio_rl32(s->pb); // magic
+    ret = ffio_read_size(s->pb, title, sizeof(title) - 1);
+    if (ret < 0)
+        return ret;
+    title[sizeof(title) - 1] = '\0';
+    if (title[0] != '\0')
+        av_dict_set(&st->metadata, "title", title, 0);
+    avio_rl32(s->pb); // Block count
     channels = avio_r8(s->pb);
     avio_skip(s->pb, 1783);
 
@@ -81,6 +92,7 @@ static int aea_read_header(AVFormatContext *s)
     av_channel_layout_default(&st->codecpar->ch_layout, channels);
 
     st->codecpar->block_align = AT1_SU_SIZE * st->codecpar->ch_layout.nb_channels;
+    avpriv_set_pts_info(st, 64, 1, 44100);
     return 0;
 }
 
@@ -89,13 +101,13 @@ static int aea_read_packet(AVFormatContext *s, AVPacket *pkt)
     return av_get_packet(s->pb, pkt, s->streams[0]->codecpar->block_align);
 }
 
-const AVInputFormat ff_aea_demuxer = {
-    .name           = "aea",
-    .long_name      = NULL_IF_CONFIG_SMALL("MD STUDIO audio"),
+const FFInputFormat ff_aea_demuxer = {
+    .p.name         = "aea",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("MD STUDIO audio"),
+    .p.flags        = AVFMT_GENERIC_INDEX,
+    .p.extensions   = "aea",
     .read_probe     = aea_read_probe,
     .read_header    = aea_read_header,
     .read_packet    = aea_read_packet,
     .read_seek      = ff_pcm_read_seek,
-    .flags          = AVFMT_GENERIC_INDEX,
-    .extensions     = "aea",
 };

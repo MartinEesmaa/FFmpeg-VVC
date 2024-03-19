@@ -25,6 +25,7 @@
  */
 
 #include "avformat.h"
+#include "demux.h"
 #include "internal.h"
 #include "subtitles.h"
 #include "libavutil/bprint.h"
@@ -94,6 +95,8 @@ static int webvtt_read_header(AVFormatContext *s)
         /* ignore header chunk */
         if (!strncmp(p, "\xEF\xBB\xBFWEBVTT", 9) ||
             !strncmp(p, "WEBVTT", 6) ||
+            !strncmp(p, "STYLE", 5) ||
+            !strncmp(p, "REGION", 6) ||
             !strncmp(p, "NOTE", 4))
             continue;
 
@@ -210,9 +213,11 @@ static const AVClass webvtt_demuxer_class = {
     .version     = LIBAVUTIL_VERSION_INT,
 };
 
-const AVInputFormat ff_webvtt_demuxer = {
-    .name           = "webvtt",
-    .long_name      = NULL_IF_CONFIG_SMALL("WebVTT subtitle"),
+const FFInputFormat ff_webvtt_demuxer = {
+    .p.name         = "webvtt",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("WebVTT subtitle"),
+    .p.extensions   = "vtt",
+    .p.priv_class   = &webvtt_demuxer_class,
     .priv_data_size = sizeof(WebVTTContext),
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = webvtt_probe,
@@ -220,6 +225,4 @@ const AVInputFormat ff_webvtt_demuxer = {
     .read_packet    = webvtt_read_packet,
     .read_seek2     = webvtt_read_seek,
     .read_close     = webvtt_read_close,
-    .extensions     = "vtt",
-    .priv_class     = &webvtt_demuxer_class,
 };

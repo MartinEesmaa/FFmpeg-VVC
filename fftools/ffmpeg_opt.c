@@ -94,13 +94,16 @@ int recast_media = 0;
 
 static void uninit_options(OptionsContext *o)
 {
-    const OptionDef *po = options;
     int i;
 
     /* all OPT_SPEC and OPT_TYPE_STRING can be freed in generic way */
-    while (po->name) {
-        void *dst = (uint8_t*)o + po->u.off;
+    for (const OptionDef *po = options; po->name; po++) {
+        void *dst;
 
+        if (!(po->flags & OPT_FLAG_OFFSET))
+            continue;
+
+        dst = (uint8_t*)o + po->u.off;
         if (po->flags & OPT_FLAG_SPEC) {
             SpecifierOptList *so = dst;
             for (int i = 0; i < so->nb_opt; i++) {
@@ -110,9 +113,8 @@ static void uninit_options(OptionsContext *o)
             }
             av_freep(&so->opt);
             so->nb_opt = 0;
-        } else if (po->flags & OPT_FLAG_OFFSET && po->type == OPT_TYPE_STRING)
+        } else if (po->type == OPT_TYPE_STRING)
             av_freep(dst);
-        po++;
     }
 
     for (i = 0; i < o->nb_stream_maps; i++)
@@ -674,18 +676,6 @@ static int opt_streamid(void *optctx, const char *opt, const char *arg)
     return av_dict_set(&o->streamid, idx_str, p, 0);
 }
 
-static int init_complex_filters(void)
-{
-    int i, ret = 0;
-
-    for (i = 0; i < nb_filtergraphs; i++) {
-        ret = init_complex_filtergraph(filtergraphs[i]);
-        if (ret < 0)
-            return ret;
-    }
-    return 0;
-}
-
 static int opt_target(void *optctx, const char *opt, const char *arg)
 {
     OptionsContext *o = optctx;
@@ -1189,11 +1179,13 @@ void show_usage(void)
 enum OptGroup {
     GROUP_OUTFILE,
     GROUP_INFILE,
+    GROUP_DECODER,
 };
 
 static const OptionGroupDef groups[] = {
     [GROUP_OUTFILE] = { "output url",  NULL, OPT_OUTPUT },
     [GROUP_INFILE]  = { "input url",   "i",  OPT_INPUT },
+    [GROUP_DECODER] = { "loopback decoder", "dec", OPT_DECODER },
 };
 
 static int open_files(OptionGroupList *l, const char *inout, Scheduler *sch,
@@ -1264,13 +1256,6 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
     }
 
-    /* create the complex filtergraphs */
-    ret = init_complex_filters();
-    if (ret < 0) {
-        errmsg = "initializing complex filters";
-        goto fail;
-    }
-
     /* open output files */
     ret = open_files(&octx.groups[GROUP_OUTFILE], "output", sch, of_open);
     if (ret < 0) {
@@ -1278,13 +1263,25 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
     }
 
+    /* create loopback decoders */
+    ret = open_files(&octx.groups[GROUP_DECODER], "decoder", sch, dec_create);
+    if (ret < 0) {
+        errmsg = "creating loopback decoders";
+        goto fail;
+    }
+
+    // bind unbound filtegraph inputs/outputs and check consistency
+    for (int i = 0; i < nb_filtergraphs; i++) {
+        ret = fg_finalise_bindings(filtergraphs[i]);
+        if (ret < 0) {
+            errmsg = "binding filtergraph inputs/outputs";
+            goto fail;
+        }
+    }
+
     correct_input_start_times();
 
     ret = apply_sync_offsets();
-    if (ret < 0)
-        goto fail;
-
-    ret = check_filter_outputs();
     if (ret < 0)
         goto fail;
 
@@ -1381,11 +1378,11 @@ const OptionDef options[] = {
     { "recast_media",           OPT_TYPE_BOOL, OPT_EXPERT,
         {              &recast_media },
         "allow recasting stream type in order to force a decoder of different media type" },
-    { "c",                      OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_HAS_CANON,
+    { "c",                      OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_DECODER | OPT_HAS_CANON,
         { .off       = OFFSET(codec_names) },
         "select encoder/decoder ('copy' to copy stream without reencoding)", "codec",
         .u1.name_canon = "codec", },
-    { "codec",                  OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_EXPERT | OPT_HAS_ALT,
+    { "codec",                  OPT_TYPE_STRING, OPT_PERSTREAM | OPT_INPUT | OPT_OUTPUT | OPT_DECODER | OPT_EXPERT | OPT_HAS_ALT,
         { .off       = OFFSET(codec_names) },
         "alias for -c (select encoder/decoder)", "codec",
         .u1.names_alt = alt_codec, },

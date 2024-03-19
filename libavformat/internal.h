@@ -40,7 +40,7 @@
 #endif
 
 /**
- * For an AVInputFormat with this flag set read_close() needs to be called
+ * For an FFInputFormat with this flag set read_close() needs to be called
  * by the caller upon read_header() failure.
  */
 #define FF_FMT_INIT_CLEANUP                             (1 << 0)
@@ -719,10 +719,6 @@ int ff_copy_whiteblacklists(AVFormatContext *dst, const AVFormatContext *src);
  */
 int ff_format_io_close(AVFormatContext *s, AVIOContext **pb);
 
-/* Default io_close callback, not to be used directly, use ff_format_io_close
- * instead. */
-void ff_format_io_close_default(AVFormatContext *s, AVIOContext *pb);
-
 /**
  * Utility function to check if the file uses http or https protocol
  *
@@ -757,6 +753,8 @@ void ff_format_set_url(AVFormatContext *s, char *url);
 int ff_match_url_ext(const char *url, const char *extensions);
 
 struct FFOutputFormat;
-void avpriv_register_devices(const struct FFOutputFormat * const o[], const AVInputFormat * const i[]);
+struct FFInputFormat;
+void avpriv_register_devices(const struct FFOutputFormat * const o[],
+                             const struct FFInputFormat * const i[]);
 
 #endif /* AVFORMAT_INTERNAL_H */

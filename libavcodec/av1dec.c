@@ -734,6 +734,7 @@ static av_cold int av1_decode_free(AVCodecContext *avctx)
 
     ff_cbs_fragment_free(&s->current_obu);
     ff_cbs_close(&s->cbc);
+    ff_dovi_ctx_unref(&s->dovi);
 
     return 0;
 }
@@ -828,6 +829,7 @@ static av_cold int av1_decode_init(AVCodecContext *avctx)
 {
     AV1DecContext *s = avctx->priv_data;
     AV1RawSequenceHeader *seq;
+    const AVPacketSideData *sd;
     int ret;
 
     s->avctx = avctx;
@@ -883,6 +885,12 @@ static av_cold int av1_decode_init(AVCodecContext *avctx)
         ff_cbs_fragment_reset(&s->current_obu);
     }
 
+    s->dovi.logctx = avctx;
+    s->dovi.dv_profile = 10; // default for AV1
+    sd = ff_get_coded_side_data(avctx, AV_PKT_DATA_DOVI_CONF);
+    if (sd && sd->size > 0)
+        ff_dovi_update_cfg(&s->dovi, (AVDOVIDecoderConfigurationRecord *) sd->data);
+
     return ret;
 }
 
@@ -936,6 +944,7 @@ static int export_itut_t35(AVCodecContext *avctx, AVFrame *frame,
                            const AV1RawMetadataITUTT35 *itut_t35)
 {
     GetByteContext gb;
+    AV1DecContext *s = avctx->priv_data;
     int ret, provider_code;
 
     bytestream2_init(&gb, itut_t35->payload, itut_t35->payload_size);
@@ -954,8 +963,9 @@ static int export_itut_t35(AVCodecContext *avctx, AVFrame *frame,
             if (!ret)
                 break;
 
-            if (!av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_A53_CC, buf))
-                av_buffer_unref(&buf);
+            ret = ff_frame_new_side_data_from_buf(avctx, frame, AV_FRAME_DATA_A53_CC, &buf, NULL);
+            if (ret < 0)
+                return ret;
 
             avctx->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
             break;
@@ -984,6 +994,22 @@ static int export_itut_t35(AVCodecContext *avctx, AVFrame *frame,
             return ret;
         break;
     }
+    case 0x3B: { // dolby_provider_code
+        int provider_oriented_code = bytestream2_get_be32(&gb);
+        if (itut_t35->itu_t_t35_country_code != 0xB5 || provider_oriented_code != 0x800)
+            break;
+
+        ret = ff_dovi_rpu_parse(&s->dovi, gb.buffer, gb.buffer_end - gb.buffer);
+        if (ret < 0) {
+            av_log(avctx, AV_LOG_WARNING, "Error parsing DOVI OBU.\n");
+            break; // ignore
+        }
+
+        ret = ff_dovi_attach_side_data(&s->dovi, frame);
+        if (ret < 0)
+            return ret;
+        break;
+    }
     default: // ignore unsupported provider codes
         break;
     }
@@ -998,31 +1024,39 @@ static int export_metadata(AVCodecContext *avctx, AVFrame *frame)
     int ret = 0;
 
     if (s->mdcv) {
-        AVMasteringDisplayMetadata *mastering = av_mastering_display_metadata_create_side_data(frame);
-        if (!mastering)
-            return AVERROR(ENOMEM);
+        AVMasteringDisplayMetadata *mastering;
 
-        for (int i = 0; i < 3; i++) {
-            mastering->display_primaries[i][0] = av_make_q(s->mdcv->primary_chromaticity_x[i], 1 << 16);
-            mastering->display_primaries[i][1] = av_make_q(s->mdcv->primary_chromaticity_y[i], 1 << 16);
+        ret = ff_decode_mastering_display_new(avctx, frame, &mastering);
+        if (ret < 0)
+            return ret;
+
+        if (mastering) {
+            for (int i = 0; i < 3; i++) {
+                mastering->display_primaries[i][0] = av_make_q(s->mdcv->primary_chromaticity_x[i], 1 << 16);
+                mastering->display_primaries[i][1] = av_make_q(s->mdcv->primary_chromaticity_y[i], 1 << 16);
+            }
+            mastering->white_point[0] = av_make_q(s->mdcv->white_point_chromaticity_x, 1 << 16);
+            mastering->white_point[1] = av_make_q(s->mdcv->white_point_chromaticity_y, 1 << 16);
+
+            mastering->max_luminance = av_make_q(s->mdcv->luminance_max, 1 << 8);
+            mastering->min_luminance = av_make_q(s->mdcv->luminance_min, 1 << 14);
+
+            mastering->has_primaries = 1;
+            mastering->has_luminance = 1;
         }
-        mastering->white_point[0] = av_make_q(s->mdcv->white_point_chromaticity_x, 1 << 16);
-        mastering->white_point[1] = av_make_q(s->mdcv->white_point_chromaticity_y, 1 << 16);
-
-        mastering->max_luminance = av_make_q(s->mdcv->luminance_max, 1 << 8);
-        mastering->min_luminance = av_make_q(s->mdcv->luminance_min, 1 << 14);
-
-        mastering->has_primaries = 1;
-        mastering->has_luminance = 1;
     }
 
     if (s->cll) {
-        AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
-        if (!light)
-            return AVERROR(ENOMEM);
+        AVContentLightMetadata *light;
 
-        light->MaxCLL = s->cll->max_cll;
-        light->MaxFALL = s->cll->max_fall;
+        ret = ff_decode_content_light_new(avctx, frame, &light);
+        if (ret < 0)
+            return ret;
+
+        if (light) {
+            light->MaxCLL = s->cll->max_cll;
+            light->MaxFALL = s->cll->max_fall;
+        }
     }
 
     while (av_fifo_read(s->itut_t35_fifo, &itut_t35, 1) >= 0) {

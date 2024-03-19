@@ -2036,7 +2036,7 @@ static int matroska_parse_content_encodings(MatroskaTrackEncoding *encodings,
 {
     if (nb_encodings > 1) {
         av_log(logctx, AV_LOG_ERROR,
-                "Multiple combined encodings not supported");
+                "Multiple combined encodings not supported\n");
         return 0;
     }
     if (!nb_encodings)
@@ -2055,7 +2055,7 @@ static int matroska_parse_content_encodings(MatroskaTrackEncoding *encodings,
                              encodings->encryption.key_id.size);
         } else {
             encodings->scope = 0;
-            av_log(logctx, AV_LOG_ERROR, "Unsupported encoding type");
+            av_log(logctx, AV_LOG_ERROR, "Unsupported encoding type\n");
         }
     } else if (
 #if CONFIG_ZLIB
@@ -2067,7 +2067,7 @@ static int matroska_parse_content_encodings(MatroskaTrackEncoding *encodings,
             encodings->compression.algo != MATROSKA_TRACK_ENCODING_COMP_LZO   &&
             encodings->compression.algo != MATROSKA_TRACK_ENCODING_COMP_HEADERSTRIP) {
         encodings->scope = 0;
-        av_log(logctx, AV_LOG_ERROR, "Unsupported encoding type");
+        av_log(logctx, AV_LOG_ERROR, "Unsupported encoding type\n");
     } else if (track->codec_priv.size && encodings[0].scope & 2) {
         uint8_t *codec_priv = track->codec_priv.data;
         int ret = matroska_decode_buffer(&track->codec_priv.data,
@@ -4785,10 +4785,10 @@ static const AVClass webm_dash_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVInputFormat ff_webm_dash_manifest_demuxer = {
-    .name           = "webm_dash_manifest",
-    .long_name      = NULL_IF_CONFIG_SMALL("WebM DASH Manifest"),
-    .priv_class     = &webm_dash_class,
+const FFInputFormat ff_webm_dash_manifest_demuxer = {
+    .p.name         = "webm_dash_manifest",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("WebM DASH Manifest"),
+    .p.priv_class   = &webm_dash_class,
     .priv_data_size = sizeof(MatroskaDemuxContext),
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_header    = webm_dash_manifest_read_header,
@@ -4797,10 +4797,11 @@ const AVInputFormat ff_webm_dash_manifest_demuxer = {
 };
 #endif
 
-const AVInputFormat ff_matroska_demuxer = {
-    .name           = "matroska,webm",
-    .long_name      = NULL_IF_CONFIG_SMALL("Matroska / WebM"),
-    .extensions     = "mkv,mk3d,mka,mks,webm",
+const FFInputFormat ff_matroska_demuxer = {
+    .p.name         = "matroska,webm",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Matroska / WebM"),
+    .p.extensions   = "mkv,mk3d,mka,mks,webm",
+    .p.mime_type    = "audio/webm,audio/x-matroska,video/webm,video/x-matroska",
     .priv_data_size = sizeof(MatroskaDemuxContext),
     .flags_internal = FF_FMT_INIT_CLEANUP,
     .read_probe     = matroska_probe,
@@ -4808,5 +4809,4 @@ const AVInputFormat ff_matroska_demuxer = {
     .read_packet    = matroska_read_packet,
     .read_close     = matroska_read_close,
     .read_seek      = matroska_read_seek,
-    .mime_type      = "audio/webm,audio/x-matroska,video/webm,video/x-matroska"
 };

@@ -35,6 +35,7 @@
 #include "bytestream.h"
 #include "codec_internal.h"
 #include "decode.h"
+#include "dovi_rpu.h"
 #include "internal.h"
 
 #define FF_DAV1D_VERSION_AT_LEAST(x,y) \
@@ -44,6 +45,7 @@ typedef struct Libdav1dContext {
     AVClass *class;
     Dav1dContext *c;
     AVBufferPool *pool;
+    DOVIContext dovi;
     int pool_size;
 
     Dav1dData data;
@@ -213,6 +215,7 @@ static av_cold int libdav1d_init(AVCodecContext *c)
 #else
     int threads = (c->thread_count ? c->thread_count : av_cpu_count()) * 3 / 2;
 #endif
+    const AVPacketSideData *sd;
     int res;
 
     av_log(c, AV_LOG_VERBOSE, "libdav1d %s\n", dav1d_version());
@@ -285,6 +288,11 @@ static av_cold int libdav1d_init(AVCodecContext *c)
     c->delay = res > 1 ? res : 0;
 #endif
 
+    dav1d->dovi.logctx = c;
+    dav1d->dovi.dv_profile = 10; // default for AV1
+    sd = ff_get_coded_side_data(c, AV_PKT_DATA_DOVI_CONF);
+    if (sd && sd->size > 0)
+        ff_dovi_update_cfg(&dav1d->dovi, (AVDOVIDecoderConfigurationRecord *) sd->data);
     return 0;
 }
 
@@ -298,9 +306,6 @@ static void libdav1d_flush(AVCodecContext *c)
 
 typedef struct OpaqueData {
     void    *pkt_orig_opaque;
-#if FF_API_REORDERED_OPAQUE
-    int64_t  reordered_opaque;
-#endif
 } OpaqueData;
 
 static void libdav1d_data_free(const uint8_t *data, void *opaque) {
@@ -346,12 +351,7 @@ static int libdav1d_receive_frame_internal(AVCodecContext *c, Dav1dPicture *p)
 
             pkt->buf = NULL;
 
-FF_DISABLE_DEPRECATION_WARNINGS
-            if (
-#if FF_API_REORDERED_OPAQUE
-                c->reordered_opaque != AV_NOPTS_VALUE ||
-#endif
-                (pkt->opaque && (c->flags & AV_CODEC_FLAG_COPY_OPAQUE))) {
+            if (pkt->opaque && (c->flags & AV_CODEC_FLAG_COPY_OPAQUE)) {
                 od = av_mallocz(sizeof(*od));
                 if (!od) {
                     av_packet_free(&pkt);
@@ -359,10 +359,6 @@ FF_DISABLE_DEPRECATION_WARNINGS
                     return AVERROR(ENOMEM);
                 }
                 od->pkt_orig_opaque  = pkt->opaque;
-#if FF_API_REORDERED_OPAQUE
-                od->reordered_opaque = c->reordered_opaque;
-#endif
-FF_ENABLE_DEPRECATION_WARNINGS
             }
             pkt->opaque = od;
 
@@ -464,14 +460,6 @@ static int libdav1d_receive_frame(AVCodecContext *c, AVFrame *frame)
 
     pkt = (AVPacket *)p->m.user_data.data;
     od  = pkt->opaque;
-#if FF_API_REORDERED_OPAQUE
-FF_DISABLE_DEPRECATION_WARNINGS
-    if (od && od->reordered_opaque != AV_NOPTS_VALUE)
-        frame->reordered_opaque = od->reordered_opaque;
-    else
-        frame->reordered_opaque = AV_NOPTS_VALUE;
-FF_ENABLE_DEPRECATION_WARNINGS
-#endif
 
     // restore the original user opaque value for
     // ff_decode_frame_props_from_pkt()
@@ -507,33 +495,38 @@ FF_ENABLE_DEPRECATION_WARNINGS
     }
 
     if (p->mastering_display) {
-        AVMasteringDisplayMetadata *mastering = av_mastering_display_metadata_create_side_data(frame);
-        if (!mastering) {
-            res = AVERROR(ENOMEM);
+        AVMasteringDisplayMetadata *mastering;
+
+        res = ff_decode_mastering_display_new(c, frame, &mastering);
+        if (res < 0)
             goto fail;
+
+        if (mastering) {
+            for (int i = 0; i < 3; i++) {
+                mastering->display_primaries[i][0] = av_make_q(p->mastering_display->primaries[i][0], 1 << 16);
+                mastering->display_primaries[i][1] = av_make_q(p->mastering_display->primaries[i][1], 1 << 16);
+            }
+            mastering->white_point[0] = av_make_q(p->mastering_display->white_point[0], 1 << 16);
+            mastering->white_point[1] = av_make_q(p->mastering_display->white_point[1], 1 << 16);
+
+            mastering->max_luminance = av_make_q(p->mastering_display->max_luminance, 1 << 8);
+            mastering->min_luminance = av_make_q(p->mastering_display->min_luminance, 1 << 14);
+
+            mastering->has_primaries = 1;
+            mastering->has_luminance = 1;
         }
-
-        for (int i = 0; i < 3; i++) {
-            mastering->display_primaries[i][0] = av_make_q(p->mastering_display->primaries[i][0], 1 << 16);
-            mastering->display_primaries[i][1] = av_make_q(p->mastering_display->primaries[i][1], 1 << 16);
-        }
-        mastering->white_point[0] = av_make_q(p->mastering_display->white_point[0], 1 << 16);
-        mastering->white_point[1] = av_make_q(p->mastering_display->white_point[1], 1 << 16);
-
-        mastering->max_luminance = av_make_q(p->mastering_display->max_luminance, 1 << 8);
-        mastering->min_luminance = av_make_q(p->mastering_display->min_luminance, 1 << 14);
-
-        mastering->has_primaries = 1;
-        mastering->has_luminance = 1;
     }
     if (p->content_light) {
-        AVContentLightMetadata *light = av_content_light_metadata_create_side_data(frame);
-        if (!light) {
-            res = AVERROR(ENOMEM);
+        AVContentLightMetadata *light;
+
+        res = ff_decode_content_light_new(c, frame, &light);
+        if (res < 0)
             goto fail;
+
+        if (light) {
+            light->MaxCLL = p->content_light->max_content_light_level;
+            light->MaxFALL = p->content_light->max_frame_average_light_level;
         }
-        light->MaxCLL = p->content_light->max_content_light_level;
-        light->MaxFALL = p->content_light->max_frame_average_light_level;
     }
     if (p->itut_t35) {
 #if FF_DAV1D_VERSION_AT_LEAST(6,9)
@@ -561,8 +554,9 @@ FF_ENABLE_DEPRECATION_WARNINGS
                 if (!res)
                     break;
 
-                if (!av_frame_new_side_data_from_buf(frame, AV_FRAME_DATA_A53_CC, buf))
-                    av_buffer_unref(&buf);
+                res = ff_frame_new_side_data_from_buf(c, frame, AV_FRAME_DATA_A53_CC, &buf, NULL);
+                if (res < 0)
+                    goto fail;
 
                 c->properties |= FF_CODEC_PROPERTY_CLOSED_CAPTIONS;
                 break;
@@ -589,6 +583,22 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
             res = av_dynamic_hdr_plus_from_t35(hdrplus, gb.buffer,
                                                bytestream2_get_bytes_left(&gb));
+            if (res < 0)
+                goto fail;
+            break;
+        }
+        case 0x3B: { // dolby_provider_code
+            int provider_oriented_code = bytestream2_get_be32(&gb);
+            if (itut_t35->country_code != 0xB5 || provider_oriented_code != 0x800)
+                break;
+
+            res = ff_dovi_rpu_parse(&dav1d->dovi, gb.buffer, gb.buffer_end - gb.buffer);
+            if (res < 0) {
+                av_log(c, AV_LOG_WARNING, "Error parsing DOVI OBU.\n");
+                break; // ignore
+            }
+
+            res = ff_dovi_attach_side_data(&dav1d->dovi, frame);
             if (res < 0)
                 goto fail;
             break;
@@ -652,6 +662,7 @@ static av_cold int libdav1d_close(AVCodecContext *c)
     Libdav1dContext *dav1d = c->priv_data;
 
     av_buffer_pool_uninit(&dav1d->pool);
+    ff_dovi_ctx_unref(&dav1d->dovi);
     dav1d_data_unref(&dav1d->data);
     dav1d_close(&dav1d->c);
 

@@ -1,6 +1,25 @@
-The last version increases of all libraries were on 2023-02-09
+The last version increases of all libraries were on 2024-03-07
 
 API changes, most recent first:
+
+2024-03-xx - xxxxxxxxxx - lavu 59.2.100 - channel_layout.h
+  Add AV_CHANNEL_LAYOUT_RETYPE_FLAG_CANONICAL.
+
+2024-03-08 - xxxxxxxxxx - lavc 61.1.100 - avcodec.h
+  Add AVCodecContext.[nb_]side_data_prefer_packet.
+
+2024-03-08 - xxxxxxxxxx - lavu 59.1.100 - opt.h
+  Add AV_OPT_TYPE_FLAG_ARRAY and AVOptionArrayDef.
+
+2024-03-08 - xxxxxxxxxx - lavc 61.0.100 - vdpau.h
+  Deprecate av_vdpau_alloc_context(), av_alloc_vdpaucontext(),
+  av_vdpau_hwaccel_get_render2() and av_vdpau_hwaccel_set_render2().
+  The former are superseded by av_vdpau_bind_context(), the latter
+  are unneeded as the relevant field is public and can be accessed directly.
+
+2024-03-06 - xxxxxxxxxx - lavf 60.25.100 - avformat.h
+  Deprecate av_fmt_ctx_get_duration_estimation_method().
+  The relevant field is public and needs no getter to access.
 
 2024-03-05 - xxxxxxxxxx - lavf 60.24.100 - avformat.h
   Add avformat_stream_group_name().
