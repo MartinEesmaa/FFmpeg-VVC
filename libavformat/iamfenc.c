@@ -21,12 +21,7 @@
 
 #include <stdint.h>
 
-#include "libavutil/avassert.h"
-#include "libavutil/common.h"
-#include "libavutil/iamf.h"
-#include "libavcodec/put_bits.h"
 #include "avformat.h"
-#include "avio_internal.h"
 #include "iamf.h"
 #include "iamf_writer.h"
 #include "internal.h"
@@ -47,11 +42,6 @@ static int iamf_init(AVFormatContext *s)
     IAMFContext *const iamf = &c->iamf;
     int nb_audio_elements = 0, nb_mix_presentations = 0;
     int ret;
-
-    if (!s->nb_streams) {
-        av_log(s, AV_LOG_ERROR, "There must be at least one stream\n");
-        return AVERROR(EINVAL);
-    }
 
     for (int i = 0; i < s->nb_streams; i++) {
         if (s->streams[i]->codecpar->codec_type != AVMEDIA_TYPE_AUDIO ||
@@ -77,7 +67,7 @@ static int iamf_init(AVFormatContext *s)
         }
     }
 
-    if (!s->nb_stream_groups) {
+    if (s->nb_stream_groups <= 1) {
         av_log(s, AV_LOG_ERROR, "There must be at least two stream groups\n");
         return AVERROR(EINVAL);
     }
