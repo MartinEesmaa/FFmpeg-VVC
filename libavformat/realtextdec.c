@@ -30,7 +30,7 @@
 #include "subtitles.h"
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
-#include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 
 typedef struct {
     FFDemuxSubtitlesQueue q;
@@ -137,7 +137,7 @@ const FFInputFormat ff_realtext_demuxer = {
     .p.long_name    = NULL_IF_CONFIG_SMALL("RealText subtitle format"),
     .p.extensions   = "rt",
     .priv_data_size = sizeof(RealTextContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = realtext_probe,
     .read_header    = realtext_read_header,
     .read_packet    = ff_subtitles_read_packet,

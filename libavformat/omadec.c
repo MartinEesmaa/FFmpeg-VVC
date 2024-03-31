@@ -43,6 +43,7 @@
 #include <inttypes.h>
 
 #include "libavutil/channel_layout.h"
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "demux.h"
 #include "internal.h"
@@ -615,7 +616,7 @@ const FFInputFormat ff_oma_demuxer = {
     .p.extensions   = "oma,omg,aa3",
     .p.codec_tag    = ff_oma_codec_tags_list,
     .priv_data_size = sizeof(OMAContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = oma_read_probe,
     .read_header    = oma_read_header,
     .read_packet    = oma_read_packet,

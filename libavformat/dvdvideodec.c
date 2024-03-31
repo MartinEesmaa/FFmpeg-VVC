@@ -30,6 +30,8 @@
  * 7) Close the dvdnav VM, and free dvdread's IFO structures
  */
 
+#include <inttypes.h>
+
 #include <dvdnav/dvdnav.h>
 #include <dvdread/dvd_reader.h>
 #include <dvdread/ifo_read.h>
@@ -1705,7 +1707,7 @@ const FFInputFormat ff_dvdvideo_demuxer = {
     .p.flags        = AVFMT_NOFILE | AVFMT_SHOW_IDS | AVFMT_TS_DISCONT |
                       AVFMT_NO_BYTE_SEEK | AVFMT_NOGENSEARCH | AVFMT_NOBINSEARCH,
     .priv_data_size = sizeof(DVDVideoDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_close     = dvdvideo_close,
     .read_header    = dvdvideo_read_header,
     .read_packet    = dvdvideo_read_packet

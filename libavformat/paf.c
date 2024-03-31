@@ -20,6 +20,7 @@
  */
 
 #include "libavutil/channel_layout.h"
+#include "libavutil/mem.h"
 #include "libavcodec/paf.h"
 #include "avformat.h"
 #include "demux.h"
@@ -270,7 +271,7 @@ const FFInputFormat ff_paf_demuxer = {
     .p.name         = "paf",
     .p.long_name    = NULL_IF_CONFIG_SMALL("Amazing Studio Packed Animation File"),
     .priv_data_size = sizeof(PAFDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = read_probe,
     .read_header    = read_header,
     .read_packet    = read_packet,

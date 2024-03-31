@@ -20,6 +20,7 @@
  */
 
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "avio_internal.h"
 #include "demux.h"
@@ -148,8 +149,8 @@ static int laf_read_header(AVFormatContext *ctx)
     if (!s->data)
         return AVERROR(ENOMEM);
 
-    for (int st = 0; st < st_count; st++) {
-        StreamParams *stp = &s->p[st];
+    for (unsigned i = 0; i < st_count; i++) {
+        StreamParams *stp = &s->p[i];
         AVCodecParameters *par;
         AVStream *st = avformat_new_stream(ctx, NULL);
         if (!st)
@@ -289,5 +290,5 @@ const FFInputFormat ff_laf_demuxer = {
     .read_packet    = laf_read_packet,
     .read_close     = laf_read_close,
     .read_seek      = laf_read_seek,
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
 };

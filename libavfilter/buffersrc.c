@@ -26,21 +26,19 @@
 #include <float.h>
 
 #include "libavutil/channel_layout.h"
-#include "libavutil/common.h"
 #include "libavutil/frame.h"
 #include "libavutil/hwcontext.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
+#include "libavutil/pixdesc.h"
 #include "libavutil/samplefmt.h"
 #include "libavutil/timestamp.h"
-#include "audio.h"
 #include "avfilter.h"
 #include "buffersrc.h"
 #include "filters.h"
 #include "formats.h"
 #include "internal.h"
-#include "video.h"
 
 typedef struct BufferSourceContext {
     const AVClass    *class;
@@ -507,7 +505,7 @@ static int config_props(AVFilterLink *link)
         }
         break;
     case AVMEDIA_TYPE_AUDIO:
-        if (!c->ch_layout.nb_channels) {
+        if (!c->ch_layout.nb_channels || c->ch_layout.order == AV_CHANNEL_ORDER_UNSPEC) {
             int ret = av_channel_layout_copy(&c->ch_layout, &link->ch_layout);
             if (ret < 0)
                 return ret;

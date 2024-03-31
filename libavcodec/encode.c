@@ -25,6 +25,7 @@
 #include "libavutil/frame.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/internal.h"
+#include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/samplefmt.h"
 
@@ -780,6 +781,29 @@ int ff_encode_preinit(AVCodecContext *avctx)
         avci->recon_frame = av_frame_alloc();
         if (!avci->recon_frame)
             return AVERROR(ENOMEM);
+    }
+
+    for (int i = 0; ff_sd_global_map[i].packet < AV_PKT_DATA_NB; i++) {
+        const enum AVPacketSideDataType type_packet = ff_sd_global_map[i].packet;
+        const enum AVFrameSideDataType  type_frame  = ff_sd_global_map[i].frame;
+        const AVFrameSideData *sd_frame;
+        AVPacketSideData      *sd_packet;
+
+        sd_frame = av_frame_side_data_get(avctx->decoded_side_data,
+                                          avctx->nb_decoded_side_data,
+                                          type_frame);
+        if (!sd_frame ||
+            av_packet_side_data_get(avctx->coded_side_data, avctx->nb_coded_side_data,
+                                    type_packet))
+
+            continue;
+
+        sd_packet = av_packet_side_data_new(&avctx->coded_side_data, &avctx->nb_coded_side_data,
+                                            type_packet, sd_frame->size, 0);
+        if (!sd_packet)
+            return AVERROR(ENOMEM);
+
+        memcpy(sd_packet->data, sd_frame->data, sd_frame->size);
     }
 
     if (CONFIG_FRAME_THREAD_ENCODER) {

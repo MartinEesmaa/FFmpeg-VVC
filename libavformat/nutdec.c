@@ -26,6 +26,7 @@
 #include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/tree.h"
 #include "libavcodec/bytestream.h"
 #include "avio_internal.h"
@@ -1313,7 +1314,7 @@ const FFInputFormat ff_nut_demuxer = {
     .p.extensions   = "nut",
     .p.codec_tag    = ff_nut_codec_tags,
     .priv_data_size = sizeof(NUTContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = nut_probe,
     .read_header    = nut_read_header,
     .read_packet    = nut_read_packet,

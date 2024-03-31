@@ -25,6 +25,7 @@
 #include "libavutil/avassert.h"
 #include "libavutil/mastering_display_metadata.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavcodec/codec_desc.h"
 #include "libavcodec/mpeg4audio.h"
 #include "avio.h"
@@ -231,6 +232,9 @@ static void put_amf_string(AVIOContext *pb, const char *str)
 {
     size_t len = strlen(str);
     avio_wb16(pb, len);
+    // Avoid avio_write() if put_amf_string(pb, "") is inlined.
+    if (av_builtin_constant_p(len == 0) && len == 0)
+        return;
     avio_write(pb, str, len);
 }
 

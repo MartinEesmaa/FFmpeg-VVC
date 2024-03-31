@@ -33,17 +33,14 @@
 #include "compat/va_copy.h"
 #include "libavformat/avformat.h"
 #include "libswscale/swscale.h"
-#include "libswscale/version.h"
 #include "libswresample/swresample.h"
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
 #include "libavutil/bprint.h"
-#include "libavutil/channel_layout.h"
 #include "libavutil/display.h"
 #include "libavutil/getenv_utf8.h"
-#include "libavutil/mathematics.h"
-#include "libavutil/imgutils.h"
 #include "libavutil/libm.h"
+#include "libavutil/mem.h"
 #include "libavutil/parseutils.h"
 #include "libavutil/eval.h"
 #include "libavutil/dict.h"
@@ -997,10 +994,6 @@ int filter_codec_opts(const AVDictionary *opts, enum AVCodecID codec_id,
                                       : AV_OPT_FLAG_DECODING_PARAM;
     char          prefix = 0;
     const AVClass    *cc = avcodec_get_class();
-
-    if (!codec)
-        codec            = s->oformat ? avcodec_find_encoder(codec_id)
-                                      : avcodec_find_decoder(codec_id);
 
     switch (st->codecpar->codec_type) {
     case AVMEDIA_TYPE_VIDEO:

@@ -22,8 +22,7 @@
 */
 
 #include <gme/gme.h>
-#include "libavutil/avstring.h"
-#include "libavutil/eval.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "avformat.h"
 #include "demux.h"
@@ -199,7 +198,7 @@ const FFInputFormat ff_libgme_demuxer = {
     .p.long_name    = NULL_IF_CONFIG_SMALL("Game Music Emu demuxer"),
     .p.priv_class   = &class_gme,
     .priv_data_size = sizeof(GMEContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = probe_gme,
     .read_header    = read_header_gme,
     .read_packet    = read_packet_gme,

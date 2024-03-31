@@ -28,10 +28,10 @@
  */
 
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "demux.h"
 #include "internal.h"
-#include "avio_internal.h"
 
 #define FILM_TAG MKBETAG('F', 'I', 'L', 'M')
 #define FDSC_TAG MKBETAG('F', 'D', 'S', 'C')
@@ -329,7 +329,7 @@ const FFInputFormat ff_segafilm_demuxer = {
     .p.name         = "film_cpk",
     .p.long_name    = NULL_IF_CONFIG_SMALL("Sega FILM / CPK"),
     .priv_data_size = sizeof(FilmDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = film_probe,
     .read_header    = film_read_header,
     .read_packet    = film_read_packet,

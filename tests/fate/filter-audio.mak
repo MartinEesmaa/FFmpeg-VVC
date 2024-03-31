@@ -302,16 +302,14 @@ fate-filter-channelmap-one-str: SRC = $(TARGET_PATH)/tests/data/asynth-44100-2.w
 fate-filter-channelmap-one-str: tests/data/asynth-44100-2.wav
 fate-filter-channelmap-one-str: CMD = md5 -auto_conversion_filters -i $(SRC) -/filter_complex $(TARGET_PATH)/tests/data/filtergraphs/channelmap_one_str -f wav -fflags +bitexact
 fate-filter-channelmap-one-str: CMP = oneline
-fate-filter-channelmap-one-str: REF = 0ea3052e482c95d5d3bd9da6dac1b5fa
+fate-filter-channelmap-one-str: REF = e18791f65ce5861e130b2c3e472ab90a
 
 FATE_AFILTER-$(call FILTERDEMDECENCMUX, CHANNELMAP ARESAMPLE, WAV, PCM_S16LE, PCM_S16LE, WAV) += $(FATE_FILTER_CHANNELMAP)
 
-FATE_AFILTER-$(call FILTERDEMDECENCMUX, CHANNELSPLIT ASETNSAMPLES ARESAMPLE, WAV, PCM_S16LE, PCM_S16LE, PCM_S16LE) += fate-filter-channelsplit
+FATE_AFILTER-$(call FILTERDEMDECENCMUX, CHANNELSPLIT ASETNSAMPLES ARESAMPLE, WAV, PCM_S16LE, PCM_S16LE, STREAMHASH) += fate-filter-channelsplit
 fate-filter-channelsplit: SRC = $(TARGET_PATH)/tests/data/asynth-44100-2.wav
 fate-filter-channelsplit: tests/data/asynth-44100-2.wav
-fate-filter-channelsplit: CMD = md5 -auto_conversion_filters -i $(SRC) -filter_complex asetnsamples=n=1024:p=0,channelsplit -f s16le
-fate-filter-channelsplit: CMP = oneline
-fate-filter-channelsplit: REF = d92988d0fe2dd92236763f47b07ab597
+fate-filter-channelsplit: CMD = fmtstdout streamhash -auto_conversion_filters -i $(SRC) -filter_complex asetnsamples=n=1024:p=0,channelsplit
 
 FATE_AFILTER-$(call FILTERDEMDECENCMUX, JOIN ARESAMPLE, WAV, PCM_S16LE, PCM_S16LE, PCM_S16LE) += fate-filter-join
 fate-filter-join: SRC1 = $(TARGET_PATH)/tests/data/asynth-44100-2.wav

@@ -22,6 +22,7 @@
 
 #include "libavutil/avutil.h"
 #include "libavutil/avstring.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavcodec/bsf.h"
 #include "internal.h"
@@ -614,5 +615,5 @@ const FFOutputFormat ff_tee_muxer = {
 #else
     .p.flags           = AVFMT_NOFILE | AVFMT_TS_NEGATIVE,
 #endif
-    .flags_internal    = FF_FMT_ALLOW_FLUSH,
+    .flags_internal    = FF_OFMT_FLAG_ALLOW_FLUSH,
 };

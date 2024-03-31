@@ -19,6 +19,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "demux.h"
 #include "internal.h"
@@ -165,7 +166,7 @@ const FFInputFormat ff_pdv_demuxer = {
     .p.long_name    = NULL_IF_CONFIG_SMALL("PlayDate Video"),
     .p.extensions   = "pdv",
     .priv_data_size = sizeof(PDVDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = pdv_probe,
     .read_header    = pdv_read_header,
     .read_packet    = pdv_read_packet,

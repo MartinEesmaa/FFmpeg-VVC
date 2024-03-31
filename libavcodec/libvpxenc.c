@@ -33,8 +33,8 @@
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "libvpx.h"
 #include "packet_internal.h"
 #include "profiles.h"
@@ -357,19 +357,20 @@ static int frame_data_submit(AVCodecContext *avctx, AVFifo *fifo,
     const struct vpx_codec_enc_cfg *enccfg = ctx->encoder.config.enc;
 
     FrameData fd = { .pts = frame->pts };
-
-    AVFrameSideData *av_uninit(sd);
     int ret;
 
 #if CONFIG_LIBVPX_VP9_ENCODER
-    // Keep HDR10+ if it has bit depth higher than 8 and
-    // it has PQ trc (SMPTE2084).
-    sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
-    if (avctx->codec_id == AV_CODEC_ID_VP9 && sd &&
+    if (avctx->codec_id == AV_CODEC_ID_VP9 &&
+        // Keep HDR10+ if it has bit depth higher than 8 and
+        // it has PQ trc (SMPTE2084).
         enccfg->g_bit_depth > 8 && avctx->color_trc == AVCOL_TRC_SMPTE2084) {
-        fd.hdr10_plus = av_buffer_ref(sd->buf);
-        if (!fd.hdr10_plus)
-            return AVERROR(ENOMEM);
+        const AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS);
+
+        if (sd) {
+            fd.hdr10_plus = av_buffer_ref(sd->buf);
+            if (!fd.hdr10_plus)
+                return AVERROR(ENOMEM);
+        }
     }
 #endif
 
@@ -784,7 +785,7 @@ static int set_pix_fmt(AVCodecContext *avctx, vpx_codec_caps_t codec_caps,
                        struct vpx_codec_enc_cfg *enccfg, vpx_codec_flags_t *flags,
                        vpx_img_fmt_t *img_fmt)
 {
-    VPxContext av_unused *ctx = avctx->priv_data;
+    VPxContext *ctx = avctx->priv_data;
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(avctx->pix_fmt);
     enccfg->g_bit_depth = enccfg->g_input_bit_depth = desc->comp[0].depth;
     switch (avctx->pix_fmt) {

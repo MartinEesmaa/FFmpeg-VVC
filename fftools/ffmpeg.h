@@ -304,6 +304,8 @@ enum DecoderFlags {
     DECODER_FLAG_TOP_FIELD_FIRST  = (1 << 3),
 #endif
     DECODER_FLAG_SEND_END_TS      = (1 << 4),
+    // force bitexact decoding
+    DECODER_FLAG_BITEXACT         = (1 << 5),
 };
 
 typedef struct DecoderOpts {
@@ -367,8 +369,6 @@ typedef struct InputStream {
 #if FFMPEG_OPT_TOP
     int                   top_field_first;
 #endif
-
-    int                   autorotate;
 
     int                   fix_sub_duration;
 
@@ -697,13 +697,6 @@ const FrameData *frame_data_c(AVFrame *frame);
 
 FrameData       *packet_data  (AVPacket *pkt);
 const FrameData *packet_data_c(AVPacket *pkt);
-
-/**
- * Set up fallback filtering parameters from a decoder context. They will only
- * be used if no frames are ever sent on this input, otherwise the actual
- * parameters are taken from the frame.
- */
-int ifilter_parameters_from_dec(InputFilter *ifilter, const AVCodecContext *dec);
 
 int ofilter_bind_ost(OutputFilter *ofilter, OutputStream *ost,
                      unsigned sched_idx_enc);

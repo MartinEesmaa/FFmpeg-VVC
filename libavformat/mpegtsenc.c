@@ -25,6 +25,7 @@
 #include "libavutil/dict.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 
 #include "libavcodec/ac3_parser_internal.h"
@@ -2435,6 +2436,6 @@ const FFOutputFormat ff_mpegts_muxer = {
 #else
     .p.flags         = AVFMT_VARIABLE_FPS | AVFMT_NODIMENSIONS,
 #endif
-    .flags_internal  = FF_FMT_ALLOW_FLUSH,
+    .flags_internal  = FF_OFMT_FLAG_ALLOW_FLUSH,
     .p.priv_class   = &mpegts_muxer_class,
 };

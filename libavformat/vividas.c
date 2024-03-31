@@ -30,6 +30,7 @@
 
 #include "libavutil/avassert.h"
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avio_internal.h"
 #include "avformat.h"
 #include "demux.h"
@@ -795,7 +796,7 @@ const FFInputFormat ff_vividas_demuxer = {
     .p.name         = "vividas",
     .p.long_name    = NULL_IF_CONFIG_SMALL("Vividas VIV"),
     .priv_data_size = sizeof(VividasDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = viv_probe,
     .read_header    = viv_read_header,
     .read_packet    = viv_read_packet,

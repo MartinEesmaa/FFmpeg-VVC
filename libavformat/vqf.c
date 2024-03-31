@@ -25,7 +25,8 @@
 #include "libavutil/intreadwrite.h"
 #include "libavutil/dict.h"
 #include "libavutil/mathematics.h"
-#include "riff.h"
+#include "libavutil/mem.h"
+#include "metadata.h"
 
 typedef struct VqfContext {
     int frame_bit_len;
@@ -259,7 +260,7 @@ static int vqf_read_packet(AVFormatContext *s, AVPacket *pkt)
     c->last_frame_bits = pkt->data[size+1];
     c->remaining_bits  = (size << 3) - c->frame_bit_len + c->remaining_bits;
 
-    return size+2;
+    return 0;
 }
 
 static int vqf_read_seek(AVFormatContext *s,

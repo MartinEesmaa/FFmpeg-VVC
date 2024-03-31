@@ -27,6 +27,7 @@
 #include "libavcodec/codec_desc.h"
 #include "libavcodec/internal.h"
 #include "libavcodec/packet_internal.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/dict.h"
 #include "libavutil/timestamp.h"
@@ -188,6 +189,12 @@ static int init_muxer(AVFormatContext *s, AVDictionary **options)
     AVDictionary *tmp = NULL;
     const FFOutputFormat *of = ffofmt(s->oformat);
     AVDictionaryEntry *e;
+    static const unsigned default_codec_offsets[] = {
+        [AVMEDIA_TYPE_VIDEO]    = offsetof(AVOutputFormat, video_codec),
+        [AVMEDIA_TYPE_AUDIO]    = offsetof(AVOutputFormat, audio_codec),
+        [AVMEDIA_TYPE_SUBTITLE] = offsetof(AVOutputFormat, subtitle_codec),
+    };
+    unsigned nb_type[FF_ARRAY_ELEMS(default_codec_offsets)] = { 0 };
     int ret = 0;
 
     if (options)
@@ -261,6 +268,30 @@ static int init_muxer(AVFormatContext *s, AVDictionary **options)
                 }
             }
             break;
+        }
+        if (of->flags_internal & (FF_OFMT_FLAG_MAX_ONE_OF_EACH | FF_OFMT_FLAG_ONLY_DEFAULT_CODECS)) {
+            enum AVCodecID default_codec_id = AV_CODEC_ID_NONE;
+            unsigned nb;
+            if ((unsigned)par->codec_type < FF_ARRAY_ELEMS(default_codec_offsets)) {
+                nb = ++nb_type[par->codec_type];
+                if (default_codec_offsets[par->codec_type])
+                    default_codec_id = *(const enum AVCodecID*)((const char*)of + default_codec_offsets[par->codec_type]);
+            }
+            if (of->flags_internal & FF_OFMT_FLAG_ONLY_DEFAULT_CODECS &&
+                default_codec_id != AV_CODEC_ID_NONE && par->codec_id != default_codec_id) {
+                av_log(s, AV_LOG_ERROR, "%s muxer supports only codec %s for type %s\n",
+                       of->p.name, avcodec_get_name(default_codec_id), av_get_media_type_string(par->codec_type));
+                ret = AVERROR(EINVAL);
+                goto fail;
+            } else if (default_codec_id == AV_CODEC_ID_NONE ||
+                       (of->flags_internal & FF_OFMT_FLAG_MAX_ONE_OF_EACH && nb > 1)) {
+                const char *type = av_get_media_type_string(par->codec_type);
+                av_log(s, AV_LOG_ERROR, "%s muxer does not support %s stream of type %s\n",
+                       of->p.name, default_codec_id == AV_CODEC_ID_NONE ? "any" : "more than one",
+                       type ? type : "unknown");
+                ret = AVERROR(EINVAL);
+                goto fail;
+            }
         }
 
 #if FF_API_AVSTREAM_SIDE_DATA
@@ -1206,13 +1237,7 @@ int av_write_frame(AVFormatContext *s, AVPacket *in)
     int ret;
 
     if (!in) {
-#if FF_API_ALLOW_FLUSH || LIBAVFORMAT_VERSION_MAJOR >= 61
-        // Hint: The pulse audio output device has this set,
-        // so we can't switch the check to FF_FMT_ALLOW_FLUSH immediately.
-        if (s->oformat->flags & AVFMT_ALLOW_FLUSH) {
-#else
-        if (ffofmt(s->oformat)->flags_internal & FF_FMT_ALLOW_FLUSH) {
-#endif
+        if (ffofmt(s->oformat)->flags_internal & FF_OFMT_FLAG_ALLOW_FLUSH) {
             ret = ffofmt(s->oformat)->write_packet(s, NULL);
             flush_if_needed(s);
             if (ret >= 0 && s->pb && s->pb->error < 0)

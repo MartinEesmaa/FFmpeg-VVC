@@ -50,6 +50,7 @@
 #include "libavutil/lfg.h"
 #include "libavutil/mastering_display_metadata.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/parseutils.h"
 #include "libavutil/pixdesc.h"
@@ -3569,7 +3570,7 @@ const FFOutputFormat ff_matroska_muxer = {
     .query_codec       = mkv_query_codec,
     .check_bitstream   = mkv_check_bitstream,
     .p.priv_class      = &matroska_webm_class,
-    .flags_internal    = FF_FMT_ALLOW_FLUSH,
+    .flags_internal    = FF_OFMT_FLAG_ALLOW_FLUSH,
 };
 #endif
 
@@ -3606,7 +3607,7 @@ const FFOutputFormat ff_webm_muxer = {
                          AVFMT_TS_NONSTRICT,
 #endif
     .p.priv_class      = &matroska_webm_class,
-    .flags_internal    = FF_FMT_ALLOW_FLUSH,
+    .flags_internal    = FF_OFMT_FLAG_ALLOW_FLUSH,
 };
 #endif
 
@@ -3636,6 +3637,6 @@ const FFOutputFormat ff_matroska_audio_muxer = {
         ff_codec_wav_tags, additional_audio_tags, 0
     },
     .p.priv_class      = &matroska_webm_class,
-    .flags_internal    = FF_FMT_ALLOW_FLUSH,
+    .flags_internal    = FF_OFMT_FLAG_ALLOW_FLUSH,
 };
 #endif

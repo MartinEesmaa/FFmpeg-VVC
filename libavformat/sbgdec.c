@@ -26,6 +26,7 @@
 #include "libavutil/channel_layout.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/log.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/time_internal.h"
 #include "avformat.h"
@@ -387,7 +388,7 @@ static int parse_options(struct sbg_parser *p)
                 case 'L':
                     FORWARD_ERROR(parse_optarg(p, opt, &oarg));
                     r = str_to_time(oarg.s, &p->scs.opt_duration);
-                    if (oarg.e != oarg.s + r) {
+                    if (oarg.e != oarg.s + r || p->scs.opt_duration < 0) {
                         snprintf(p->err_msg, sizeof(p->err_msg),
                                  "syntax error for option -L");
                         return AVERROR_INVALIDDATA;

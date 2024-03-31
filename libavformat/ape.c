@@ -23,6 +23,7 @@
 #include <stdio.h>
 
 #include "libavutil/intreadwrite.h"
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "demux.h"
 #include "internal.h"
@@ -450,7 +451,7 @@ const FFInputFormat ff_ape_demuxer = {
     .p.long_name    = NULL_IF_CONFIG_SMALL("Monkey's Audio"),
     .p.extensions   = "ape,apl,mac",
     .priv_data_size = sizeof(APEContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = ape_probe,
     .read_header    = ape_read_header,
     .read_packet    = ape_read_packet,

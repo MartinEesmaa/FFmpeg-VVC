@@ -29,6 +29,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "libavutil/intfloat.h"
+#include "libavutil/mem.h"
 #include "libavcodec/internal.h"
 #include "avformat.h"
 #include "demux.h"
@@ -401,7 +402,7 @@ const FFInputFormat ff_fourxm_demuxer = {
     .p.name         = "4xm",
     .p.long_name    = NULL_IF_CONFIG_SMALL("4X Technologies"),
     .priv_data_size = sizeof(FourxmDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = fourxm_probe,
     .read_header    = fourxm_read_header,
     .read_packet    = fourxm_read_packet,

@@ -51,6 +51,7 @@
 #include "libavutil/avstring.h"
 #include "libavutil/mastering_display_metadata.h"
 #include "libavutil/mathematics.h"
+#include "libavutil/mem.h"
 #include "libavcodec/bytestream.h"
 #include "libavcodec/defs.h"
 #include "libavcodec/internal.h"
@@ -4265,7 +4266,7 @@ const FFInputFormat ff_mxf_demuxer = {
     .p.flags        = AVFMT_SEEK_TO_PTS,
     .p.priv_class   = &demuxer_class,
     .priv_data_size = sizeof(MXFContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = mxf_probe,
     .read_header    = mxf_read_header,
     .read_packet    = mxf_read_packet,

@@ -21,11 +21,13 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
-#include "libavutil/avstring.h"
+
+#include <stddef.h>
+
 #include "libavutil/intreadwrite.h"
 #include "libavutil/internal.h"
 #include "libavutil/macros.h"
-#include "libavutil/avassert.h"
+#include "libavutil/mem.h"
 #include "libavformat/internal.h"
 #include "avformat.h"
 #include "demux.h"
@@ -370,7 +372,7 @@ const FFInputFormat ff_scd_demuxer = {
     .p.name         = "scd",
     .p.long_name    = NULL_IF_CONFIG_SMALL("Square Enix SCD"),
     .priv_data_size = sizeof(SCDDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = scd_probe,
     .read_header    = scd_read_header,
     .read_packet    = scd_read_packet,

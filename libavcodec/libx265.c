@@ -28,17 +28,15 @@
 #include <float.h>
 
 #include "libavutil/avassert.h"
-#include "libavutil/bprint.h"
 #include "libavutil/buffer.h"
 #include "libavutil/internal.h"
-#include "libavutil/common.h"
 #include "libavutil/mastering_display_metadata.h"
+#include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "packet_internal.h"
 #include "atsc_a53.h"
 #include "sei.h"
@@ -178,17 +176,14 @@ static av_cold int libx265_param_parse_int(AVCodecContext *avctx,
     return 0;
 }
 
-static int handle_mdcv(const AVClass **avcl, const x265_api *api,
+static int handle_mdcv(void *logctx, const x265_api *api,
                        x265_param *params,
                        const AVMasteringDisplayMetadata *mdcv)
 {
-    int ret = AVERROR_BUG;
-    AVBPrint buf;
-    av_bprint_init(&buf, 0, AV_BPRINT_SIZE_AUTOMATIC);
+    char buf[10 /* # of PRId64s */ * 20 /* max strlen for %PRId64 */ + sizeof("G(,)B(,)R(,)WP(,)L(,)")];
 
     // G(%hu,%hu)B(%hu,%hu)R(%hu,%hu)WP(%hu,%hu)L(%u,%u)
-    av_bprintf(
-        &buf,
+    snprintf(buf, sizeof(buf),
         "G(%"PRId64",%"PRId64")B(%"PRId64",%"PRId64")R(%"PRId64",%"PRId64")"
         "WP(%"PRId64",%"PRId64")L(%"PRId64",%"PRId64")",
         av_rescale_q(1, mdcv->display_primaries[1][0], (AVRational){ 1, 50000 }),
@@ -202,40 +197,25 @@ static int handle_mdcv(const AVClass **avcl, const x265_api *api,
         av_rescale_q(1, mdcv->max_luminance,  (AVRational){ 1, 10000 }),
         av_rescale_q(1, mdcv->min_luminance,  (AVRational){ 1, 10000 }));
 
-    if (!av_bprint_is_complete(&buf)) {
-        av_log(avcl, AV_LOG_ERROR,
-          "MDCV string too long for its available space!\n");
-        ret = AVERROR(ENOMEM);
-        goto end;
-    }
-
-    if (api->param_parse(params, "master-display", buf.str) ==
+    if (api->param_parse(params, "master-display", buf) ==
             X265_PARAM_BAD_VALUE) {
-        av_log(avcl, AV_LOG_ERROR,
+        av_log(logctx, AV_LOG_ERROR,
                "Invalid value \"%s\" for param \"master-display\".\n",
-               buf.str);
-        ret = AVERROR(EINVAL);
-        goto end;
+               buf);
+        return AVERROR(EINVAL);
     }
 
-    ret = 0;
-
-end:
-    av_bprint_finalize(&buf, NULL);
-
-    return ret;
+    return 0;
 }
 
 static int handle_side_data(AVCodecContext *avctx, const x265_api *api,
                             x265_param *params)
 {
     const AVFrameSideData *cll_sd =
-        av_frame_side_data_get(
-            (const AVFrameSideData **)avctx->decoded_side_data,
+        av_frame_side_data_get(avctx->decoded_side_data,
             avctx->nb_decoded_side_data, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL);
     const AVFrameSideData *mdcv_sd =
-        av_frame_side_data_get(
-            (const AVFrameSideData **)avctx->decoded_side_data,
+        av_frame_side_data_get(avctx->decoded_side_data,
             avctx->nb_decoded_side_data,
             AV_FRAME_DATA_MASTERING_DISPLAY_METADATA);
 
@@ -249,7 +229,7 @@ static int handle_side_data(AVCodecContext *avctx, const x265_api *api,
 
     if (mdcv_sd) {
         int ret = handle_mdcv(
-            &avctx->av_class, api, params,
+            avctx, api, params,
             (AVMasteringDisplayMetadata *)mdcv_sd->data);
         if (ret < 0)
             return ret;

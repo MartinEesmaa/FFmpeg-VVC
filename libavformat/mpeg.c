@@ -22,6 +22,7 @@
 #include "config_components.h"
 
 #include "libavutil/channel_layout.h"
+#include "libavutil/mem.h"
 #include "avformat.h"
 #include "avio_internal.h"
 #include "demux.h"
@@ -1055,7 +1056,7 @@ const FFInputFormat ff_vobsub_demuxer = {
     .p.extensions   = "idx",
     .p.priv_class   = &vobsub_demuxer_class,
     .priv_data_size = sizeof(VobSubDemuxContext),
-    .flags_internal = FF_FMT_INIT_CLEANUP,
+    .flags_internal = FF_INFMT_FLAG_INIT_CLEANUP,
     .read_probe     = vobsub_probe,
     .read_header    = vobsub_read_header,
     .read_packet    = vobsub_read_packet,

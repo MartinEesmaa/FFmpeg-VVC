@@ -2228,7 +2228,6 @@ ARCH_EXT_LIST_RISCV="
 
 ARCH_EXT_LIST_X86="
     $ARCH_EXT_LIST_X86_SIMD
-    cpunop
     i686
 "
 
@@ -2777,7 +2776,6 @@ mipsdsp_deps="mips"
 mipsdspr2_deps="mips"
 msa_deps="mipsfpu"
 
-cpunop_deps="i686"
 x86_64_select="i686"
 x86_64_suggest="fast_cmov"
 
@@ -3550,7 +3548,7 @@ libwebp_encoder_deps="libwebp"
 libwebp_anim_encoder_deps="libwebp"
 libx262_encoder_deps="libx262"
 libx264_encoder_deps="libx264"
-libx264_encoder_select="atsc_a53"
+libx264_encoder_select="atsc_a53 golomb"
 libx264rgb_encoder_deps="libx264"
 libx264rgb_encoder_select="libx264_encoder"
 libx265_encoder_deps="libx265"
@@ -3601,7 +3599,7 @@ flac_demuxer_select="flac_parser"
 flv_muxer_select="aac_adtstoasc_bsf"
 gxf_muxer_select="pcm_rechunk_bsf"
 hds_muxer_select="flv_muxer"
-hls_demuxer_select="adts_header ac3_parser mov_demuxer mpegts_demuxer"
+hls_demuxer_select="aac_demuxer ac3_demuxer adts_header ac3_parser eac3_demuxer mov_demuxer mpegts_demuxer"
 hls_muxer_select="mov_muxer mpegts_muxer"
 iamf_demuxer_select="iamfdec"
 iamf_muxer_select="iamfenc"
@@ -3722,6 +3720,8 @@ xcbgrab_indev_suggest="libxcb_shm libxcb_shape libxcb_xfixes"
 xv_outdev_deps="xlib_xv xlib_x11 xlib_xext"
 
 # protocols
+android_content_protocol_deps="jni"
+android_content_protocol_select="file_protocol"
 async_protocol_deps="threads"
 bluray_protocol_deps="libbluray"
 ffrtmpcrypt_protocol_conflict="librtmp_protocol"
@@ -5600,6 +5600,19 @@ check_cxxflags_cc -std=$stdcxx ctype.h "__cplusplus >= 201103L" ||
 check_cflags_cc -std=$stdc ctype.h "__STDC_VERSION__ >= 201112L" ||
     { check_cflags_cc -std=c11 ctype.h "__STDC_VERSION__ >= 201112L" && stdc="c11" || die "Compiler lacks C11 support"; }
 
+test_cc <<EOF || die "Compiler lacks support for C11 static assertions"
+#include <assert.h>
+#include <stddef.h>
+struct Foo {
+    int a;
+    void *ptr;
+} obj;
+static_assert(offsetof(struct Foo, a) == 0,
+              "First element of struct does not have offset 0");
+_Static_assert(offsetof(struct Foo, ptr) >= offsetof(struct Foo, a) + sizeof(obj.a),
+               "elements not properly ordered in struct");
+EOF
+
 check_cppflags -D_FILE_OFFSET_BITS=64
 check_cppflags -D_LARGEFILE_SOURCE
 
@@ -6410,7 +6423,6 @@ EOF
         done
         disabled x86asm && die "nasm/yasm not found or too old. Use --disable-x86asm for a crippled build."
         X86ASMFLAGS="-f $objformat"
-        enabled pic               && append X86ASMFLAGS "-DPIC"
         test -n "$extern_prefix"  && append X86ASMFLAGS "-DPREFIX"
         case "$objformat" in
             elf*) enabled debug && append X86ASMFLAGS $x86asm_debug ;;
@@ -6421,7 +6433,6 @@ EOF
         enabled avx2      && check_x86asm avx2_external      "vextracti128 xmm0, ymm0, 0"
         enabled xop       && check_x86asm xop_external       "vpmacsdd xmm0, xmm1, xmm2, xmm3"
         enabled fma4      && check_x86asm fma4_external      "vfmaddps ymm0, ymm1, ymm2, ymm3"
-        check_x86asm cpunop          "CPU amdnop"
     fi
 
     case "$cpu" in
@@ -6619,8 +6630,8 @@ check_headers asm/types.h
 # some configurations also require linking to libatomic, so try
 # both with -latomic and without
 for LATOMIC in "-latomic" ""; do
-    check_builtin stdatomic stdatomic.h                                                 \
-        "atomic_int foo, bar = ATOMIC_VAR_INIT(-1); atomic_store(&foo, 0); foo += bar"  \
+    check_builtin stdatomic stdatomic.h                                \
+        "atomic_int foo, bar = -1; atomic_store(&foo, 0); foo += bar"  \
         $LATOMIC && eval stdatomic_extralibs="\$LATOMIC" && break
 done
 
@@ -7304,8 +7315,8 @@ enabled vdpau &&
     check_lib vdpau_x11 "vdpau/vdpau.h vdpau/vdpau_x11.h" vdp_device_create_x11 -lvdpau -lX11
 
 if enabled vulkan; then
-    check_pkg_config_header_only vulkan "vulkan >= 1.3.255" "vulkan/vulkan.h" "defined VK_VERSION_1_3" ||
-        check_cpp_condition vulkan "vulkan/vulkan.h" "defined(VK_VERSION_1_4) || (defined(VK_VERSION_1_3) && VK_HEADER_VERSION >= 255)"
+    check_pkg_config_header_only vulkan "vulkan >= 1.3.277" "vulkan/vulkan.h" "defined VK_VERSION_1_3" ||
+        check_cpp_condition vulkan "vulkan/vulkan.h" "defined(VK_VERSION_1_4) || (defined(VK_VERSION_1_3) && VK_HEADER_VERSION >= 277)"
 fi
 
 if disabled vulkan; then

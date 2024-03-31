@@ -84,13 +84,6 @@ static void rcwt_flush_cluster(AVFormatContext *avf)
 
 static int rcwt_write_header(AVFormatContext *avf)
 {
-    if (avf->nb_streams != 1 || avf->streams[0]->codecpar->codec_id != AV_CODEC_ID_EIA_608) {
-        av_log(avf, AV_LOG_ERROR,
-                "RCWT supports only one CC (608/708) stream, more than one stream was "
-                "provided or its codec type was not CC (608/708)\n");
-        return AVERROR(EINVAL);
-    }
-
     avpriv_set_pts_info(avf->streams[0], 64, 1, 1000);
 
     /* magic number */
@@ -168,7 +161,11 @@ const FFOutputFormat ff_rcwt_muxer = {
     .p.long_name        = NULL_IF_CONFIG_SMALL("RCWT (Raw Captions With Time)"),
     .p.extensions       = "bin",
     .p.flags            = AVFMT_GLOBALHEADER | AVFMT_VARIABLE_FPS | AVFMT_TS_NONSTRICT,
+    .p.video_codec      = AV_CODEC_ID_NONE,
+    .p.audio_codec      = AV_CODEC_ID_NONE,
     .p.subtitle_codec   = AV_CODEC_ID_EIA_608,
+    .flags_internal     = FF_OFMT_FLAG_MAX_ONE_OF_EACH |
+                          FF_OFMT_FLAG_ONLY_DEFAULT_CODECS,
     .priv_data_size     = sizeof(RCWTContext),
     .write_header       = rcwt_write_header,
     .write_packet       = rcwt_write_packet,
