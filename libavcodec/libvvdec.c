@@ -28,6 +28,7 @@
 #include "libavutil/avutil.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
+#include "libavutil/mem.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/frame.h"
 #include "libavutil/mastering_display_metadata.h"
