@@ -83,6 +83,15 @@ typedef void ID3D11Device;
 #define NVENC_NO_DEPRECATED_RC
 #endif
 
+// SDK 12.2 compile time feature checks
+#if NVENCAPI_CHECK_VERSION(12, 2)
+#define NVENC_HAVE_NEW_BIT_DEPTH_API
+#define NVENC_HAVE_TEMPORAL_FILTER
+#define NVENC_HAVE_LOOKAHEAD_LEVEL
+#define NVENC_HAVE_UHQ_TUNING
+#define NVENC_HAVE_UNIDIR_B
+#endif
+
 typedef struct NvencSurface
 {
     NV_ENC_INPUT_PTR input_surface;
@@ -217,6 +226,8 @@ typedef struct NvencContext
 
     void *nvencoder;
 
+    uint32_t frame_idx_counter;
+
     int preset;
     int profile;
     int level;
@@ -266,6 +277,9 @@ typedef struct NvencContext
     int highbitdepth;
     int max_slice_size;
     int rgb_mode;
+    int tf_level;
+    int lookahead_level;
+    int unidir_b;
 } NvencContext;
 
 int ff_nvenc_encode_init(AVCodecContext *avctx);
