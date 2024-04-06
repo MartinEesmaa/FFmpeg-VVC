@@ -140,6 +140,7 @@ Component options:
   --disable-error-resilience disable error resilience code
   --disable-lsp            disable LSP code
   --disable-faan           disable floating point AAN (I)DCT code
+  --disable-iamf           disable support for Immersive Audio Model
   --disable-pixelutils     disable pixel utils in libavutil
 
 Individual component options:
@@ -244,6 +245,7 @@ External library support:
   --enable-libjxl          enable JPEG XL de/encoding via libjxl [no]
   --enable-libklvanc       enable Kernel Labs VANC processing [no]
   --enable-libkvazaar      enable HEVC encoding via libkvazaar [no]
+  --enable-liblc3          enable LC3 de/encoding via liblc3 [no]
   --enable-liblensfun      enable lensfun lens correction [no]
   --enable-libmodplug      enable ModPlug via libmodplug [no]
   --enable-libmp3lame      enable MP3 encoding via libmp3lame [no]
@@ -1929,6 +1931,7 @@ EXTERNAL_LIBRARY_LIST="
     libjxl
     libklvanc
     libkvazaar
+    liblc3
     libmodplug
     libmp3lame
     libmysofa
@@ -2076,6 +2079,7 @@ SUBSYSTEM_LIST="
     error_resilience
     faan
     fast_unaligned
+    iamf
     lsp
     pixelutils
     network
@@ -2857,6 +2861,9 @@ h264_sei_select="atsc_a53 golomb"
 hevcparse_select="golomb"
 hevc_sei_select="atsc_a53 golomb"
 frame_thread_encoder_deps="encoders threads"
+iamfdec_deps="iamf"
+iamfdec_select="iso_media mpeg4audio"
+iamfenc_deps="iamf"
 inflate_wrapper_deps="zlib"
 intrax8_select="blockdsp wmv2dsp"
 iso_media_select="mpeg4audio"
@@ -2900,7 +2907,7 @@ asv1_encoder_select="aandcttables bswapdsp fdctdsp pixblockdsp"
 asv2_decoder_select="blockdsp bswapdsp idctdsp"
 asv2_encoder_select="aandcttables bswapdsp fdctdsp pixblockdsp"
 atrac1_decoder_select="sinewin"
-av1_decoder_select="cbs_av1 atsc_a53"
+av1_decoder_select="atsc_a53 cbs_av1 dovi_rpu"
 bink_decoder_select="blockdsp hpeldsp"
 binkaudio_dct_decoder_select="wma_freqs"
 binkaudio_rdft_decoder_select="wma_freqs"
@@ -3489,7 +3496,7 @@ libcelt_decoder_deps="libcelt"
 libcodec2_decoder_deps="libcodec2"
 libcodec2_encoder_deps="libcodec2"
 libdav1d_decoder_deps="libdav1d"
-libdav1d_decoder_select="atsc_a53"
+libdav1d_decoder_select="atsc_a53 dovi_rpu"
 libdavs2_decoder_deps="libdavs2"
 libdavs2_decoder_select="avs2_parser"
 libfdk_aac_decoder_deps="libfdk_aac"
@@ -3505,6 +3512,9 @@ libilbc_encoder_deps="libilbc"
 libjxl_decoder_deps="libjxl libjxl_threads"
 libjxl_encoder_deps="libjxl libjxl_threads"
 libkvazaar_encoder_deps="libkvazaar"
+liblc3_decoder_deps="liblc3"
+liblc3_encoder_deps="liblc3"
+liblc3_encoder_select="audio_frame_queue"
 libmodplug_demuxer_deps="libmodplug"
 libmp3lame_encoder_deps="libmp3lame"
 libmp3lame_encoder_select="audio_frame_queue mpegaudioheader"
@@ -3617,9 +3627,10 @@ matroska_demuxer_suggest="bzlib zlib"
 matroska_muxer_select="mpeg4audio riffenc aac_adtstoasc_bsf pgs_frame_merge_bsf vp9_superframe_bsf"
 mlp_demuxer_select="mlp_parser"
 mmf_muxer_select="riffenc"
-mov_demuxer_select="iso_media riffdec iamfdec"
-mov_demuxer_suggest="zlib"
-mov_muxer_select="iso_media riffenc rtpenc_chain vp9_superframe_bsf aac_adtstoasc_bsf ac3_parser iamfenc"
+mov_demuxer_select="iso_media riffdec"
+mov_demuxer_suggest="iamfdec zlib"
+mov_muxer_select="iso_media riffenc rtpenc_chain vp9_superframe_bsf aac_adtstoasc_bsf ac3_parser"
+mov_muxer_suggest="iamfenc"
 mp3_demuxer_select="mpegaudio_parser"
 mp3_muxer_select="mpegaudioheader"
 mp4_muxer_select="mov_muxer"
@@ -4090,6 +4101,7 @@ enable asm
 enable debug
 enable doc
 enable faan faandct faanidct
+enable iamf
 enable large_tests
 enable optimizations
 enable ptx_compression
@@ -6833,7 +6845,7 @@ enabled gnutls            && require_pkg_config gnutls gnutls gnutls/gnutls.h gn
 enabled jni               && { [ $target_os = "android" ] && check_headers jni.h && enabled pthreads || die "ERROR: jni not found"; }
 enabled ladspa            && require_headers "ladspa.h dlfcn.h"
 enabled lcms2             && require_pkg_config lcms2 "lcms2 >= 2.13" lcms2.h cmsCreateContext
-enabled libaom            && require_pkg_config libaom "aom >= 1.0.0" aom/aom_codec.h aom_codec_version
+enabled libaom            && require_pkg_config libaom "aom >= 2.0.0" aom/aom_codec.h aom_codec_version
 enabled libaribb24        && { check_pkg_config libaribb24 "aribb24 > 1.0.3" "aribb24/aribb24.h" arib_instance_new ||
                                { enabled gpl && require_pkg_config libaribb24 aribb24 "aribb24/aribb24.h" arib_instance_new; } ||
                                die "ERROR: libaribb24 requires version higher than 1.0.3 or --enable-gpl."; }
@@ -6880,6 +6892,7 @@ enabled libjxl            && require_pkg_config libjxl "libjxl >= 0.7.0" jxl/dec
                              require_pkg_config libjxl_threads "libjxl_threads >= 0.7.0" jxl/thread_parallel_runner.h JxlThreadParallelRunner
 enabled libklvanc         && require libklvanc libklvanc/vanc.h klvanc_context_create -lklvanc
 enabled libkvazaar        && require_pkg_config libkvazaar "kvazaar >= 2.0.0" kvazaar.h kvz_api_get
+enabled liblc3            && require_pkg_config liblc3 "lc3 >= 1.1.0" lc3.h lc3_hr_setup_encoder
 enabled liblensfun        && require_pkg_config liblensfun lensfun lensfun.h lf_db_create
 
 if enabled libmfx && enabled libvpl; then
