@@ -2700,20 +2700,68 @@ computer-generated compositions.
 
 This muxer accepts a single audio stream containing PCM data.
 
+@section ivf
+On2 IVF muxer.
+
+IVF was developed by On2 Technologies (formerly known as Duck
+Corporation), to store internally developed codecs.
+
+This muxer accepts a single @samp{vp8}, @samp{vp9}, or @samp{av1}
+video stream.
+
+@section jacosub
+JACOsub subtitle format muxer.
+
+This muxer accepts a single @samp{jacosub} subtitles stream.
+
+For more information about the format, see
+@url{http://unicorn.us.com/jacosub/jscripts.html}.
+
+@section kvag
+Simon & Schuster Interactive VAG muxer.
+
+This custom VAG container is used by some Simon & Schuster Interactive
+games such as "Real War", and "Real War: Rogue States".
+
+This muxer accepts a single @samp{adpcm_ima_ssi} audio stream.
+
 @section lc3
 Bluetooth SIG Low Complexity Communication Codec audio (LC3), or
 ETSI TS 103 634 Low Complexity Communication Codec plus (LC3plus).
 
-This muxer accepts a single @code{lc3} audio stream.
+This muxer accepts a single @samp{lc3} audio stream.
+
+@section lrc
+LRC lyrics file format muxer.
+
+LRC (short for LyRiCs) is a computer file format that synchronizes
+song lyrics with an audio file, such as MP3, Vorbis, or MIDI.
+
+This muxer accepts a single @samp{subrip} or @samp{text} subtitles stream.
+
+@subsection Metadata
+The following metadata tags are converted to the format corresponding
+metadata:
+
+@table @option
+@item title
+@item album
+@item artist
+@item author
+@item creator
+@item encoder
+@item encoder_version
+@end table
+
+If @samp{encoder_version} is not explicitly set, it is automatically
+set to the libavformat version.
 
 @section matroska
-
 Matroska container muxer.
 
 This muxer implements the matroska and webm container specs.
 
 @subsection Metadata
-
 The recognized metadata settings in this muxer are:
 
 @table @option
@@ -2773,18 +2821,15 @@ ffmpeg -i sample_left_right_clip.mpg -an -c:v libvpx -metadata stereo_mode=left_
 @end example
 
 @subsection Options
-
-This muxer supports the following options:
-
 @table @option
-@item reserve_index_space
+@item reserve_index_space @var{size}
 By default, this muxer writes the index for seeking (called cues in Matroska
 terms) at the end of the file, because it cannot know in advance how much space
 to leave for the index at the beginning of the file. However for some use cases
 -- e.g.  streaming where seeking is possible but slow -- it is useful to put the
 index at the beginning of the file.
 
-If this option is set to a non-zero value, the muxer will reserve a given amount
+If this option is set to a non-zero value, the muxer will reserve @var{size} bytes
 of space in the file header and then try to write the cues there when the muxing
 finishes. If the reserved space does not suffice, no Cues will be written, the
 file will be finalized and writing the trailer will return an error.
@@ -2793,7 +2838,7 @@ A safe size for most use cases should be about 50kB per hour of video.
 Note that cues are only written if the output is seekable and this option will
 have no effect if it is not.
 
-@item cues_to_front
+@item cues_to_front @var{bool}
 If set, the muxer will write the index at the beginning of the file
 by shifting the main data if necessary. This can be combined with
 reserve_index_space in which case the data is only shifted if
@@ -2801,7 +2846,7 @@ the initially reserved space turns out to be insufficient.
 
 This option is ignored if the output is unseekable.
 
-@item default_mode
+@item default_mode @var{mode}
 This option controls how the FlagDefault of the output tracks will be set.
 It influences which tracks players should play by default. The default mode
 is @samp{passthrough}.
@@ -2821,12 +2866,11 @@ In this mode the FlagDefault is set if and only if the AV_DISPOSITION_DEFAULT
 flag is set in the disposition of the corresponding stream.
 @end table
 
-@item flipped_raw_rgb
+@item flipped_raw_rgb @var{bool}
 If set to true, store positive height for raw RGB bitmaps, which indicates
 bitmap is stored bottom-up. Note that this option does not flip the bitmap
 which has to be done manually beforehand, e.g. by using the vflip filter.
 Default is @var{false} and indicates bitmap is stored top down.
-
 @end table
 
 @anchor{md5}

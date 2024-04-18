@@ -263,19 +263,66 @@ typedef struct InputFilterOptions {
     AVFrame            *fallback;
 } InputFilterOptions;
 
+enum OFilterFlags {
+    OFILTER_FLAG_DISABLE_CONVERT    = (1 << 0),
+    // produce 24-bit audio
+    OFILTER_FLAG_AUDIO_24BIT        = (1 << 1),
+    OFILTER_FLAG_AUTOSCALE          = (1 << 2),
+};
+
+typedef struct OutputFilterOptions {
+    // Caller-provided name for this output
+    char               *name;
+
+    // Codec used for encoding, may be NULL
+    const AVCodec      *enc;
+    // Overrides encoder pixel formats when set.
+    const enum AVPixelFormat *pix_fmts;
+
+    int64_t             trim_start_us;
+    int64_t             trim_duration_us;
+    int64_t             ts_offset;
+
+    /* Desired output timebase.
+     * Numerator can be one of EncTimeBase values, or 0 when no preference.
+     */
+    AVRational          output_tb;
+
+    AVDictionary       *sws_opts;
+    AVDictionary       *swr_opts;
+
+    const char         *nb_threads;
+
+    // A combination of OFilterFlags.
+    unsigned            flags;
+
+    int                 format;
+    int                 width;
+    int                 height;
+
+    enum VideoSyncMethod vsync_method;
+
+    int                 sample_rate;
+    AVChannelLayout     ch_layout;
+} OutputFilterOptions;
+
 typedef struct InputFilter {
     struct FilterGraph *graph;
     uint8_t            *name;
 } InputFilter;
 
 typedef struct OutputFilter {
-    struct OutputStream *ost;
+    const AVClass       *class;
+
     struct FilterGraph  *graph;
     uint8_t             *name;
 
     /* for filters that are not yet bound to an output stream,
      * this stores the output linklabel, if any */
+    int                  bound;
     uint8_t             *linklabel;
+
+    char                *apad;
 
     enum AVMediaType     type;
 
@@ -515,21 +562,16 @@ typedef struct OutputStream {
 
     AVStream *st;            /* stream in the output file */
 
-    AVRational enc_timebase;
-
     Encoder *enc;
     AVCodecContext *enc_ctx;
 
     /* video only */
     AVRational frame_rate;
     AVRational max_frame_rate;
-    enum VideoSyncMethod vsync_method;
-    int is_cfr;
     int force_fps;
 #if FFMPEG_OPT_TOP
     int top_field_first;
 #endif
-    int autoscale;
     int bitexact;
     int bits_per_raw_sample;
 
@@ -540,16 +582,13 @@ typedef struct OutputStream {
     char *logfile_prefix;
     FILE *logfile;
 
+    // simple filtergraph feeding this stream, if any
+    FilterGraph  *fg_simple;
     OutputFilter *filter;
 
     AVDictionary *encoder_opts;
-    AVDictionary *sws_dict;
-    AVDictionary *swr_opts;
-    char *apad;
 
     char *attachment_filename;
-
-    int keep_pix_fmt;
 
     /* stats */
     // number of packets send to the muxer
@@ -576,7 +615,6 @@ typedef struct OutputFile {
 
     int index;
 
-    const AVOutputFormat *format;
     const char           *url;
 
     OutputStream **streams;
@@ -585,7 +623,6 @@ typedef struct OutputFile {
     int64_t recording_time;  ///< desired length of the resulting file in microseconds == AV_TIME_BASE units
     int64_t start_time;      ///< start time in microseconds == AV_TIME_BASE units
 
-    int shortest;
     int bitexact;
 } OutputFile;
 
@@ -618,6 +655,7 @@ extern int        nb_input_files;
 extern OutputFile   **output_files;
 extern int         nb_output_files;
 
+// complex filtergraphs
 extern FilterGraph **filtergraphs;
 extern int        nb_filtergraphs;
 
@@ -684,8 +722,9 @@ int parse_and_set_vsync(const char *arg, int *vsync_var, int file_idx, int st_id
 int filtergraph_is_simple(const FilterGraph *fg);
 int init_simple_filtergraph(InputStream *ist, OutputStream *ost,
                             char *graph_desc,
-                            Scheduler *sch, unsigned sch_idx_enc);
-int fg_finalise_bindings(FilterGraph *fg);
+                            Scheduler *sch, unsigned sch_idx_enc,
+                            const OutputFilterOptions *opts);
+int fg_finalise_bindings(void);
 
 /**
  * Get our axiliary frame data attached to the frame, allocating it
@@ -699,7 +738,8 @@ FrameData       *packet_data  (AVPacket *pkt);
 const FrameData *packet_data_c(AVPacket *pkt);
 
 int ofilter_bind_ost(OutputFilter *ofilter, OutputStream *ost,
-                     unsigned sched_idx_enc);
+                     unsigned sched_idx_enc,
+                     const OutputFilterOptions *opts);
 
 /**
  * Create a new filtergraph in the global filtergraph list.
