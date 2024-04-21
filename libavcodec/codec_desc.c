@@ -3432,6 +3432,13 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .long_name = NULL_IF_CONFIG_SMALL("LC3 (Low Complexity Communication Codec)"),
         .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSY,
     },
+    {
+        .id        = AV_CODEC_ID_SAC,
+        .type      = AVMEDIA_TYPE_AUDIO,
+        .name      = "sac",
+        .long_name = NULL_IF_CONFIG_SMALL("SAC (State of the Art Codec)"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
+    },
 
     /* subtitle codecs */
     {
