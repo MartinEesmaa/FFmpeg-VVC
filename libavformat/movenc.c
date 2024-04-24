@@ -2539,16 +2539,21 @@ static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
         const AVPacketSideData *spherical_mapping = av_packet_side_data_get(track->st->codecpar->coded_side_data,
                                                                             track->st->codecpar->nb_coded_side_data,
                                                                             AV_PKT_DATA_SPHERICAL);
-        const AVPacketSideData *dovi = av_packet_side_data_get(track->st->codecpar->coded_side_data,
-                                                               track->st->codecpar->nb_coded_side_data,
-                                                               AV_PKT_DATA_DOVI_CONF);
-
         if (stereo_3d)
             mov_write_st3d_tag(s, pb, (AVStereo3D*)stereo_3d->data);
         if (spherical_mapping)
             mov_write_sv3d_tag(mov->fc, pb, (AVSphericalMapping*)spherical_mapping->data);
-        if (dovi)
+    }
+
+    if (track->mode == MODE_MP4) {
+        const AVPacketSideData *dovi = av_packet_side_data_get(track->st->codecpar->coded_side_data,
+                                                               track->st->codecpar->nb_coded_side_data,
+                                                               AV_PKT_DATA_DOVI_CONF);
+        if (dovi && mov->fc->strict_std_compliance <= FF_COMPLIANCE_UNOFFICIAL) {
             mov_write_dvcc_dvvc_tag(s, pb, (AVDOVIDecoderConfigurationRecord *)dovi->data);
+        } else if (dovi) {
+            av_log(mov->fc, AV_LOG_WARNING, "Not writing 'dvcC'/'dvvC' box. Requires -strict unofficial.\n");
+        }
     }
 
     if (track->par->sample_aspect_ratio.den && track->par->sample_aspect_ratio.num) {
@@ -6680,6 +6685,7 @@ static int mov_write_subtitle_end_packet(AVFormatContext *s,
 #if CONFIG_IAMFENC
 static int mov_build_iamf_packet(AVFormatContext *s, MOVTrack *trk, AVPacket *pkt)
 {
+    uint8_t *data;
     int ret;
 
     if (pkt->stream_index == trk->first_iamf_idx) {
@@ -6693,40 +6699,34 @@ static int mov_build_iamf_packet(AVFormatContext *s, MOVTrack *trk, AVPacket *pk
     if (ret < 0)
         return ret;
 
-    if (pkt->stream_index == trk->last_iamf_idx) {
-        uint8_t *data;
+    if (pkt->stream_index != trk->last_iamf_idx)
+        return AVERROR(EAGAIN);
 
-        ret = avio_close_dyn_buf(trk->iamf_buf, &data);
-        trk->iamf_buf = NULL;
-
-        if (!ret) {
-            if (pkt->size) {
-                // Either all or none of the packets for a single
-                // IA Sample may be empty.
-                av_log(s, AV_LOG_ERROR, "Unexpected packet from "
-                                        "stream #%d\n", pkt->stream_index);
-                ret = AVERROR_INVALIDDATA;
-            }
-            av_free(data);
-            return ret;
+    ret = avio_close_dyn_buf(trk->iamf_buf, &data);
+    trk->iamf_buf = NULL;
+    if (!ret) {
+        if (pkt->size) {
+            // Either all or none of the packets for a single
+            // IA Sample may be empty.
+            av_log(s, AV_LOG_ERROR, "Unexpected packet from "
+                                     "stream #%d\n", pkt->stream_index);
+            ret = AVERROR_INVALIDDATA;
         }
-        av_buffer_unref(&pkt->buf);
-        pkt->buf = av_buffer_create(data, ret, NULL, NULL, 0);
-        if (!pkt->buf) {
-            av_free(data);
-            return AVERROR(ENOMEM);
-        }
-        pkt->data = data;
-        pkt->size = ret;
-        pkt->stream_index = trk->first_iamf_idx;
+        av_free(data);
+        return ret;
+    }
 
-        ret = avio_open_dyn_buf(&trk->iamf_buf);
-        if (ret < 0)
-            return ret;
-    } else
-        ret = AVERROR(EAGAIN);
+    av_buffer_unref(&pkt->buf);
+    pkt->buf = av_buffer_create(data, ret, NULL, NULL, 0);
+    if (!pkt->buf) {
+        av_free(data);
+        return AVERROR(ENOMEM);
+    }
+    pkt->data = data;
+    pkt->size = ret;
+    pkt->stream_index = trk->first_iamf_idx;
 
-    return ret;
+    return avio_open_dyn_buf(&trk->iamf_buf);
 }
 #endif
 

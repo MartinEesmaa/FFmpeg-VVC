@@ -179,6 +179,7 @@ Setting entry with key 'array_int' to value ''
 Setting entry with key 'array_str' to value 'str0|str\|1|str\\2'
 Setting entry with key 'array_dict' to value 'k00=v\\\\00:k01=v\,01,k10=v\\=1\\:0'
 num=0,toggle=1,rational=1/1,string=default,escape=\\\=\,,flags=0x00000001,size=200x300,pix_fmt=0bgr,sample_fmt=s16,video_rate=25/1,duration=0.001,color=0xffc0cbff,cl=hexagonal,bin=62696E00,bin1=,bin2=,num64=1,flt=0.333333,dbl=0.333333,bool1=auto,bool2=true,bool3=false,dict1=,dict2=happy\=\\:-),array_int=,array_str=str0|str\\|1|str\\\\2,array_dict=k00\=v\\\\\\\\00:k01\=v\\\,01\,k10\=v\\\\\=1\\\\:0
+child_num=0,flt=0.333333,dbl=0.333333,array_int=
 
 Testing av_set_options_string()
 Setting options string ''
@@ -448,3 +449,10 @@ Setting options string 'a_very_long_option_name_that_will_need_to_be_ellipsized_
 Setting 'a_very_long_option_name_that_will_need_to_be_ellipsized_around_here' to value '42'
 Option 'a_very_long_option_name_that_will_need_to_be_ellipsized_around_here' not found
 Error 'a_very_long_option_name_that_will_need_to_be_ellipsized_around_here=42'
+
+Testing av_opt_find2()
+OK    'num'
+Error 'num64'
+Error 'child_num'
+OK    'child_num'
+Error 'foo'

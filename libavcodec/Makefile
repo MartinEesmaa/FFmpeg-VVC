@@ -64,6 +64,7 @@ OBJS = ac3_parser.o                                                     \
        xiph.o                                                           \
 
 # subsystems
+include $(SRC_PATH)/libavcodec/aac/Makefile
 include $(SRC_PATH)/libavcodec/vvc/Makefile
 -include $(SRC_PATH)/libavcodec/$(ARCH)/vvc/Makefile
 OBJS-$(CONFIG_AANDCTTABLES)            += aandcttab.o
@@ -86,7 +87,8 @@ OBJS-$(CONFIG_CBS_MPEG2)               += cbs_mpeg2.o
 OBJS-$(CONFIG_CBS_VP8)                 += cbs_vp8.o vp8data.o
 OBJS-$(CONFIG_CBS_VP9)                 += cbs_vp9.o
 OBJS-$(CONFIG_DEFLATE_WRAPPER)         += zlib_wrapper.o
-OBJS-$(CONFIG_DOVI_RPU)                += dovi_rpu.o
+OBJS-$(CONFIG_DOVI_RPUDEC)             += dovi_rpu.o dovi_rpudec.o
+OBJS-$(CONFIG_DOVI_RPUENC)             += dovi_rpu.o dovi_rpuenc.o
 OBJS-$(CONFIG_ERROR_RESILIENCE)        += error_resilience.o
 OBJS-$(CONFIG_EVCPARSE)                += evc_parse.o evc_ps.o
 OBJS-$(CONFIG_EXIF)                    += exif.o tiff_common.o
@@ -178,11 +180,11 @@ OBJS-$(CONFIG_WMV2DSP)                 += wmv2dsp.o
 OBJS-$(CONFIG_ZERO12V_DECODER)         += 012v.o
 OBJS-$(CONFIG_A64MULTI_ENCODER)        += a64multienc.o elbg.o
 OBJS-$(CONFIG_A64MULTI5_ENCODER)       += a64multienc.o elbg.o
-OBJS-$(CONFIG_AAC_DECODER)             += aacdec.o aacdec_common.o aactab.o \
+OBJS-$(CONFIG_AAC_DECODER)             += aactab.o \
                                           aacsbr.o aacps_common.o aacps_float.o \
                                           kbdwin.o \
                                           sbrdsp.o aacpsdsp_float.o cbrt_data.o
-OBJS-$(CONFIG_AAC_FIXED_DECODER)       += aacdec_fixed.o aacdec_common.o aactab.o \
+OBJS-$(CONFIG_AAC_FIXED_DECODER)       += aactab.o \
                                           aacsbr_fixed.o aacps_common.o aacps_fixed.o \
                                           kbdwin.o \
                                           sbrdsp_fixed.o aacpsdsp_fixed.o cbrt_data_fixed.o

@@ -30,6 +30,7 @@
 
 typedef struct TestContext {
     const AVClass *class;
+    struct ChildContext *child;
     int num;
     int toggle;
     char *string;
@@ -123,10 +124,46 @@ static const char *test_get_name(void *ctx)
     return "test";
 }
 
+typedef struct ChildContext {
+    const AVClass *class;
+    int64_t child_num64;
+    int child_num;
+} ChildContext;
+
+#undef OFFSET
+#define OFFSET(x) offsetof(ChildContext, x)
+
+static const AVOption child_options[]= {
+    {"child_num64", "set num 64bit", OFFSET(child_num64), AV_OPT_TYPE_INT64, { .i64 = 0 }, 0, 100, 1 },
+    {"child_num",   "set child_num", OFFSET(child_num),   AV_OPT_TYPE_INT,   { .i64 = 1 }, 0, 100, 1 },
+    { NULL },
+};
+
+static const char *child_get_name(void *ctx)
+{
+    return "child";
+}
+
+static const AVClass child_class = {
+    .class_name = "ChildContext",
+    .item_name  = child_get_name,
+    .option     = child_options,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
+
+static void *test_child_next(void *obj, void *prev)
+{
+    TestContext *test_ctx = obj;
+    if (!prev)
+        return test_ctx->child;
+    return NULL;
+}
+
 static const AVClass test_class = {
     .class_name = "TestContext",
     .item_name  = test_get_name,
     .option     = test_options,
+    .child_next = test_child_next,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
@@ -277,8 +314,19 @@ int main(void)
             av_set_options_string(&test_ctx, buf, "=", ",");
             av_free(buf);
             if (av_opt_serialize(&test_ctx, 0, 0, &buf, '=', ',') >= 0) {
+                ChildContext child_ctx = { 0 };
                 printf("%s\n", buf);
                 av_free(buf);
+                child_ctx.class = &child_class;
+                test_ctx.child = &child_ctx;
+                if (av_opt_serialize(&test_ctx, 0,
+                                     AV_OPT_SERIALIZE_SKIP_DEFAULTS|AV_OPT_SERIALIZE_SEARCH_CHILDREN,
+                                     &buf, '=', ',') >= 0) {
+                    printf("%s\n", buf);
+                    av_free(buf);
+                }
+                av_opt_free(&child_ctx);
+                test_ctx.child = NULL;
             }
         }
         av_opt_free(&test_ctx);
@@ -402,6 +450,55 @@ int main(void)
                 printf("OK    '%s'\n", options[i]);
         }
         av_opt_free(&test_ctx);
+    }
+
+    printf("\nTesting av_opt_find2()\n");
+    {
+        TestContext test_ctx = { 0 };
+        ChildContext child_ctx = { 0 };
+        void *target;
+        const AVOption *opt;
+
+        test_ctx.class = &test_class;
+        child_ctx.class = &child_class;
+        test_ctx.child = &child_ctx;
+
+        av_log_set_level(AV_LOG_QUIET);
+
+        // Should succeed. num exists and has opt_flags 1
+        opt = av_opt_find2(&test_ctx, "num", NULL, 1, 0, &target);
+        if (opt && target == &test_ctx)
+            printf("OK    '%s'\n", opt->name);
+        else
+            printf("Error 'num'\n");
+
+        // Should fail. num64 exists but has opt_flags 1, not 2
+        opt = av_opt_find(&test_ctx, "num64", NULL, 2, 0);
+        if (opt)
+            printf("OK    '%s'\n", opt->name);
+        else
+            printf("Error 'num64'\n");
+
+        // Should fail. child_num exists but in a child object we're not searching
+        opt = av_opt_find(&test_ctx, "child_num", NULL, 0, 0);
+        if (opt)
+            printf("OK    '%s'\n", opt->name);
+        else
+            printf("Error 'child_num'\n");
+
+        // Should succeed. child_num exists in a child object we're searching
+        opt = av_opt_find2(&test_ctx, "child_num", NULL, 0, AV_OPT_SEARCH_CHILDREN, &target);
+        if (opt && target == &child_ctx)
+            printf("OK    '%s'\n", opt->name);
+        else
+            printf("Error 'child_num'\n");
+
+        // Should fail. foo doesn't exist
+        opt = av_opt_find(&test_ctx, "foo", NULL, 0, 0);
+        if (opt)
+            printf("OK    '%s'\n", opt->name);
+        else
+            printf("Error 'foo'\n");
     }
 
     return 0;
