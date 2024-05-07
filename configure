@@ -2304,6 +2304,7 @@ HEADERS_LIST="
     OpenGL_gl3_h
     poll_h
     pthread_np_h
+    sys_hwprobe_h
     sys_param_h
     sys_resource_h
     sys_select_h
@@ -2495,6 +2496,7 @@ TYPES_LIST="
     struct_sockaddr_storage
     struct_stat_st_mtim_tv_nsec
     struct_v4l2_frmivalenum_discrete
+    struct_mfxConfigInterface
 "
 
 HAVE_LIST="
@@ -5548,6 +5550,8 @@ elif enabled ppc; then
 
 elif enabled riscv; then
 
+    check_headers sys/hwprobe.h
+
     if test_cpp_condition stddef.h "__riscv_zbb"; then
         enable fast_clz
     fi
@@ -6929,6 +6933,7 @@ elif enabled libvpl; then
     check_pkg_config libmfx "vpl >= 2.6" "mfxvideo.h mfxdispatcher.h" MFXLoad || \
             die "ERROR: libvpl >= 2.6 not found"
     add_cflags -DMFX_DEPRECATED_OFF
+    check_type "vpl/mfxdefs.h vpl/mfxvideo.h" "struct mfxConfigInterface"
 fi
 
 if enabled libmfx; then

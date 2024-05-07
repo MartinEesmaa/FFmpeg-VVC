@@ -23,25 +23,29 @@
 #include "libavutil/attributes.h"
 #include "libavutil/cpu.h"
 #include "libavutil/riscv/cpu.h"
-#include "libavcodec/blockdsp.h"
+#include "libavcodec/rv34dsp.h"
 
-void ff_clear_block_rvv(int16_t *block);
-void ff_clear_blocks_rvv(int16_t *block);
-void ff_fill_block16_rvv(uint8_t *block, uint8_t value, ptrdiff_t line_size,
-                           int h);
-void ff_fill_block8_rvv(uint8_t *block, uint8_t value, ptrdiff_t line_size,
-                           int h);
+void ff_put_rv40_chroma_mc8_rvv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                 int h, int x, int y);
+void ff_put_rv40_chroma_mc4_rvv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                 int h, int x, int y);
 
-av_cold void ff_blockdsp_init_riscv(BlockDSPContext *c)
+void ff_avg_rv40_chroma_mc8_rvv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                 int h, int x, int y);
+void ff_avg_rv40_chroma_mc4_rvv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                 int h, int x, int y);
+
+av_cold void ff_rv40dsp_init_riscv(RV34DSPContext *c)
 {
 #if HAVE_RVV
     int flags = av_get_cpu_flags();
 
-    if (flags & AV_CPU_FLAG_RVV_I64 && ff_get_rv_vlenb() >= 16) {
-        c->clear_block = ff_clear_block_rvv;
-        c->clear_blocks = ff_clear_blocks_rvv;
-        c->fill_block_tab[0] = ff_fill_block16_rvv;
-        c->fill_block_tab[1] = ff_fill_block8_rvv;
+    if ((flags & AV_CPU_FLAG_RVV_I32) && ff_get_rv_vlenb() >= 16 &&
+        (flags & AV_CPU_FLAG_RVB_ADDR)) {
+        c->put_chroma_pixels_tab[0] = ff_put_rv40_chroma_mc8_rvv;
+        c->put_chroma_pixels_tab[1] = ff_put_rv40_chroma_mc4_rvv;
+        c->avg_chroma_pixels_tab[0] = ff_avg_rv40_chroma_mc8_rvv;
+        c->avg_chroma_pixels_tab[1] = ff_avg_rv40_chroma_mc4_rvv;
     }
 #endif
 }

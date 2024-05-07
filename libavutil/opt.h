@@ -252,7 +252,7 @@ enum AVOptionType{
     AV_OPT_TYPE_DICT,
     AV_OPT_TYPE_UINT64,
     AV_OPT_TYPE_CONST,
-    AV_OPT_TYPE_IMAGE_SIZE, ///< offset must point to two consecutive integers
+    AV_OPT_TYPE_IMAGE_SIZE, ///< offset must point to two consecutive ints
     AV_OPT_TYPE_PIXEL_FMT,
     AV_OPT_TYPE_SAMPLE_FMT,
     AV_OPT_TYPE_VIDEO_RATE, ///< offset must point to AVRational
@@ -260,6 +260,7 @@ enum AVOptionType{
     AV_OPT_TYPE_COLOR,
     AV_OPT_TYPE_BOOL,
     AV_OPT_TYPE_CHLAYOUT,
+    AV_OPT_TYPE_UINT,
 
     /**
      * May be combined with another regular option type to declare an array
@@ -883,6 +884,7 @@ int av_opt_get_dict_val(void *obj, const char *name, int search_flags, AVDiction
  */
 int av_opt_eval_flags (void *obj, const AVOption *o, const char *val, int        *flags_out);
 int av_opt_eval_int   (void *obj, const AVOption *o, const char *val, int        *int_out);
+int av_opt_eval_uint  (void *obj, const AVOption *o, const char *val, unsigned   *uint_out);
 int av_opt_eval_int64 (void *obj, const AVOption *o, const char *val, int64_t    *int64_out);
 int av_opt_eval_float (void *obj, const AVOption *o, const char *val, float      *float_out);
 int av_opt_eval_double(void *obj, const AVOption *o, const char *val, double     *double_out);
