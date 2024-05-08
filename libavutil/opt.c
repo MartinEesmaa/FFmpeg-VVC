@@ -934,9 +934,8 @@ int av_opt_set_dict_val(void *obj, const char *name, const AVDictionary *val,
 
     dst = (AVDictionary **)(((uint8_t *)target_obj) + o->offset);
     av_dict_free(dst);
-    av_dict_copy(dst, val, 0);
 
-    return 0;
+    return av_dict_copy(dst, val, 0);
 }
 
 int av_opt_set_chlayout(void *obj, const char *name,
@@ -949,6 +948,8 @@ int av_opt_set_chlayout(void *obj, const char *name,
 
     if (!o || !target_obj)
         return AVERROR_OPTION_NOT_FOUND;
+    if (o->flags & AV_OPT_FLAG_READONLY)
+        return AVERROR(EINVAL);
 
     dst = (AVChannelLayout*)((uint8_t*)target_obj + o->offset);
 
@@ -1346,9 +1347,8 @@ int av_opt_get_dict_val(void *obj, const char *name, int search_flags, AVDiction
         return AVERROR(EINVAL);
 
     src = *(AVDictionary **)(((uint8_t *)target_obj) + o->offset);
-    av_dict_copy(out_val, src, 0);
 
-    return 0;
+    return av_dict_copy(out_val, src, 0);
 }
 
 int av_opt_flag_is_set(void *obj, const char *field_name, const char *flag_name)
@@ -2309,7 +2309,9 @@ int av_opt_is_set_to_default(void *obj, const AVOption *o)
             if ((ret = av_channel_layout_from_string(&ch_layout, o->default_val.str)) < 0)
                 return ret;
         }
-        return !av_channel_layout_compare((AVChannelLayout *)dst, &ch_layout);
+        ret = !av_channel_layout_compare((AVChannelLayout *)dst, &ch_layout);
+        av_channel_layout_uninit(&ch_layout);
+        return ret;
     }
     case AV_OPT_TYPE_STRING:
         str = *(char **)dst;
