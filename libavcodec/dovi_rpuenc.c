@@ -133,7 +133,7 @@ int ff_dovi_configure(DOVIContext *s, AVCodecContext *avctx)
     if (!dv_profile || bl_compat_id < 0) {
         if (s->enable > 0) {
             av_log(s->logctx, AV_LOG_ERROR, "Dolby Vision enabled, but could "
-                   "not determine profile and compaatibility mode. Double-check "
+                   "not determine profile and compatibility mode. Double-check "
                    "colorspace and format settings for compatibility?\n");
             return AVERROR(EINVAL);
         }
@@ -564,6 +564,8 @@ int ff_dovi_rpu_generate(DOVIContext *s, const AVDOVIMetadata *metadata,
     put_bits(pb, 1, use_prev_vdr_rpu);
     set_ue_golomb(pb, vdr_rpu_id);
     s->mapping = &s->vdr[vdr_rpu_id]->mapping;
+
+    profile = s->cfg.dv_profile ? s->cfg.dv_profile : ff_dovi_guess_profile_hevc(hdr);
 
     if (!use_prev_vdr_rpu) {
         set_ue_golomb(pb, mapping->mapping_color_space);

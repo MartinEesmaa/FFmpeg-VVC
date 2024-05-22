@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2023 Institue of Software Chinese Academy of Sciences (ISCAS).
+ * Copyright (c) 2024 Rémi Denis-Courmont.
  *
  * This file is part of FFmpeg.
  *
@@ -110,4 +111,104 @@ func ff_vc1_inv_trans_4x4_dc_rvv, zve32x
         vsetivli      zero, 4, e8, mf4, ta, ma
         vsse32.v      v0, (a0), a1
         ret
+endfunc
+
+.macro mspel_op op pos n1 n2
+        add           t1, \pos, a2
+        v\op\()e8.v   v\n1, (\pos)
+        sh1add        \pos, a2, \pos
+        v\op\()e8.v   v\n2, (t1)
+.endm
+
+.macro mspel_op_all op pos a1 a2 a3 a4 a5 a6 a7 a8 a9 a10 a11 a12 a13 a14 a15 a16
+        mspel_op      \op \pos \a1 \a2
+        mspel_op      \op \pos \a3 \a4
+        mspel_op      \op \pos \a5 \a6
+        mspel_op      \op \pos \a7 \a8
+        mspel_op      \op \pos \a9 \a10
+        mspel_op      \op \pos \a11 \a12
+        mspel_op      \op \pos \a13 \a14
+        mspel_op      \op \pos \a15 \a16
+.endm
+
+func ff_avg_pixels16x16_rvv, zve32x
+        csrwi         vxrm, 0
+        vsetivli      zero, 16, e8, m1, ta, ma
+        mspel_op_all  l a1 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
+        mspel_op_all  l a0 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+        vsetvli       t0, zero, e8, m8, ta, ma
+        sub           a0, a0, a2
+        vaaddu.vv     v0, v0, v16
+        neg           a2, a2
+        vaaddu.vv     v8, v8, v24
+        vsetivli      zero, 16, e8, m1, ta, ma
+        mspel_op_all  s a0 15 14 13 12 11 10 9 8 7 6 5 4 3 2 1 0
+
+        ret
+endfunc
+
+func ff_avg_pixels8x8_rvv, zve64x
+        csrwi         vxrm, 0
+        li            t0, 64
+        vsetivli      zero, 8, e8, mf2, ta, ma
+        vlse64.v      v16, (a1), a2
+        vlse64.v      v8, (a0), a2
+        vsetvli       zero, t0, e8, m4, ta, ma
+        vaaddu.vv     v16, v16, v8
+        vsetivli      zero, 8, e8, mf2, ta, ma
+        vsse64.v      v16, (a0), a2
+
+        ret
+endfunc
+
+func ff_vc1_unescape_buffer_rvv, zve32x
+        vsetivli       zero, 2, e8, m1, ta, ma
+        vmv.v.i        v8, -1
+        li             t4, 1
+        vmv.v.i        v12, -1
+        li             t3, -1
+        mv             t5, a2
+        blez           a1, 3f
+1:
+        vsetvli        t0, a1, e8, m4, ta, ma
+        vle8.v         v16, (a0)
+        vslideup.vi    v8, v16, 2
+        addi           t0, t0, -1 # we cannot fully process the last element
+        vslideup.vi    v12, v16, 1
+        vslide1down.vx v20, v16, t3
+        vsetvli        zero, t0, e8, m4, ta, ma
+        vmseq.vi       v0, v8, 0
+        vmseq.vi       v1, v12, 0
+        vmseq.vi       v2, v16, 3
+        vmand.mm       v0, v0, v1
+        vmsltu.vi      v3, v20, 4
+        vmand.mm       v0, v0, v2
+        vmand.mm       v0, v0, v3
+        vfirst.m       t2, v0
+        bgez           t2, 4f # found an escape byte?
+
+        vse8.v         v16, (a2)
+        addi           t2, t0, -2
+        add            a2, a2, t0
+2:
+        vslidedown.vx  v8, v16, t2
+        sub            a1, a1, t0
+        vslidedown.vi  v12, v8, 1
+        add            a0, a0, t0
+        bgtu           a1, t4, 1b // size > 1
+
+        lb             t0, (a0)
+        sb             t0, (a2) # copy last byte (cannot be escaped)
+        addi           a2, a2, 1
+3:
+        sub            a0, a2, t5
+        ret
+4:
+        vsetvli        zero, t2, e8, m4, ta, ma
+        vse8.v         v16, (a2)
+        addi           t0, t2, 1
+        add            a2, a2, t2
+        addi           t2, t2, -1
+        vsetvli        zero, t0, e8, m4, ta, ma
+        j              2b
 endfunc

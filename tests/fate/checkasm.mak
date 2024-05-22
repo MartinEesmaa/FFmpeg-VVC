@@ -8,6 +8,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-blockdsp                                  \
                 fate-checkasm-bswapdsp                                  \
                 fate-checkasm-exrdsp                                    \
+                fate-checkasm-fdctdsp                                   \
                 fate-checkasm-fixed_dsp                                 \
                 fate-checkasm-flacdsp                                   \
                 fate-checkasm-float_dsp                                 \
@@ -58,6 +59,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-vorbisdsp                                 \
                 fate-checkasm-vp8dsp                                    \
                 fate-checkasm-vp9dsp                                    \
+                fate-checkasm-vvc_alf                                   \
                 fate-checkasm-vvc_mc                                    \
 
 $(FATE_CHECKASM): tests/checkasm/checkasm$(EXESUF)

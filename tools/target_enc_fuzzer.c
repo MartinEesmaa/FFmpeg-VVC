@@ -89,7 +89,8 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         av_log_set_level(AV_LOG_PANIC);
     }
 
-    av_assert0(c->p.type == AVMEDIA_TYPE_VIDEO);
+    if (c->p.type != AVMEDIA_TYPE_VIDEO)
+        return 0;
 
     maxpixels = maxpixels_per_frame * maxiteration;
 
@@ -129,10 +130,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         flags64 = bytestream2_get_le64(&gbc);
 
-        int npixfmts = 0;
-        while (c->p.pix_fmts[npixfmts++] != AV_PIX_FMT_NONE)
-            ;
-        ctx->pix_fmt = c->p.pix_fmts[bytestream2_get_byte(&gbc) % npixfmts];
+        if (c->p.pix_fmts) {
+            int npixfmts = 0;
+            while (c->p.pix_fmts[npixfmts++] != AV_PIX_FMT_NONE)
+                ;
+            ctx->pix_fmt = c->p.pix_fmts[bytestream2_get_byte(&gbc) % npixfmts];
+        }
 
         switch (c->p.id) {
         case AV_CODEC_ID_FFV1:{

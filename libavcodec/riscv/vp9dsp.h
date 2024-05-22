@@ -60,6 +60,26 @@ void ff_dc_129_16x16_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
                          const uint8_t *a);
 void ff_dc_129_8x8_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
                        const uint8_t *a);
+void ff_v_32x32_rvi(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                    const uint8_t *a);
+void ff_v_16x16_rvi(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                    const uint8_t *a);
+void ff_v_8x8_rvi(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                  const uint8_t *a);
+void ff_h_32x32_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                    const uint8_t *a);
+void ff_h_16x16_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                    const uint8_t *a);
+void ff_h_8x8_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                  const uint8_t *a);
+void ff_tm_32x32_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                     const uint8_t *a);
+void ff_tm_16x16_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                     const uint8_t *a);
+void ff_tm_8x8_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                   const uint8_t *a);
+void ff_tm_4x4_rvv(uint8_t *dst, ptrdiff_t stride, const uint8_t *l,
+                   const uint8_t *a);
 
 #define VP9_8TAP_RISCV_RVV_FUNC(SIZE, type, type_idx)                         \
 void ff_put_8tap_##type##_##SIZE##h_rvv(uint8_t *dst, ptrdiff_t dststride,   \
@@ -161,6 +181,9 @@ void ff_copy##SIZE##_rvi(uint8_t *dst, ptrdiff_t dststride,        \
                          const uint8_t *src, ptrdiff_t srcstride,  \
                          int h, int mx, int my);
 
+VP9_COPY_RISCV_RVI_FUNC(64);
+VP9_COPY_RISCV_RVI_FUNC(32);
+VP9_COPY_RISCV_RVI_FUNC(16);
 VP9_COPY_RISCV_RVI_FUNC(8);
 VP9_COPY_RISCV_RVI_FUNC(4);
 

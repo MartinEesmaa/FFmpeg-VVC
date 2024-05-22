@@ -72,6 +72,9 @@
 void (*checkasm_checked_call)(void *func, int dummy, ...) = checkasm_checked_call_novfp;
 #endif
 
+/* Trade-off between speed and accuracy */
+uint64_t bench_runs = 1U << 10;
+
 /* List of tests to invoke */
 static const struct {
     const char *name;
@@ -105,6 +108,9 @@ static const struct {
     #endif
     #if CONFIG_EXR_DECODER
         { "exrdsp", checkasm_check_exrdsp },
+    #endif
+    #if CONFIG_FDCTDSP
+        { "fdctdsp", checkasm_check_fdctdsp },
     #endif
     #if CONFIG_FLAC_DECODER
         { "flacdsp", checkasm_check_flacdsp },
@@ -201,7 +207,8 @@ static const struct {
         { "vorbisdsp", checkasm_check_vorbisdsp },
     #endif
     #if CONFIG_VVC_DECODER
-        { "vvc_mc", checkasm_check_vvc_mc },
+        { "vvc_alf", checkasm_check_vvc_alf },
+        { "vvc_mc",  checkasm_check_vvc_mc  },
     #endif
 #endif
 #if CONFIG_AVFILTER
@@ -282,6 +289,8 @@ static const struct {
     { "RVVf32",   "rvv_f32",  AV_CPU_FLAG_RVV_F32 },
     { "RVVi64",   "rvv_i64",  AV_CPU_FLAG_RVV_I64 },
     { "RVVf64",   "rvv_f64",  AV_CPU_FLAG_RVV_F64 },
+    { "RV_Zvbb",  "rv_zvbb",  AV_CPU_FLAG_RV_ZVBB },
+    { "misaligned", "misaligned", AV_CPU_FLAG_RV_MISALIGNED },
 #elif ARCH_MIPS
     { "MMI",      "mmi",      AV_CPU_FLAG_MMI },
     { "MSA",      "msa",      AV_CPU_FLAG_MSA },
@@ -814,7 +823,7 @@ static void bench_uninit(void)
 static int usage(const char *path)
 {
     fprintf(stderr,
-            "Usage: %s [--bench] [--test=<pattern>] [--verbose] [seed]\n",
+            "Usage: %s [--bench] [--runs=<ptwo>] [--test=<pattern>] [--verbose] [seed]\n",
             path);
     return 1;
 }
@@ -861,6 +870,17 @@ int main(int argc, char *argv[])
             state.test_name = arg + 7;
         } else if (!strcmp(arg, "--verbose") || !strcmp(arg, "-v")) {
             state.verbose = 1;
+        } else if (!strncmp(arg, "--runs=", 7)) {
+            l = strtoul(arg + 7, &end, 10);
+            if (*end == '\0') {
+                if (l > 30) {
+                    fprintf(stderr, "checkasm: error: runs exponent must be within the range 0 <= 30\n");
+                    usage(argv[0]);
+                }
+                bench_runs = 1U << l;
+            } else {
+                return usage(argv[0]);
+            }
         } else if ((l = strtoul(arg, &end, 10)) <= UINT_MAX &&
                    *end == '\0') {
             seed = l;
@@ -871,6 +891,9 @@ int main(int argc, char *argv[])
 
     fprintf(stderr, "checkasm: using random seed %u\n", seed);
     av_lfg_init(&checkasm_lfg, seed);
+
+    if (state.bench_pattern)
+        fprintf(stderr, "checkasm: bench runs %" PRIu64 " (1 << %i)\n", bench_runs, av_log2(bench_runs));
 
     check_cpu_flag(NULL, 0);
     for (i = 0; cpus[i].flag; i++)

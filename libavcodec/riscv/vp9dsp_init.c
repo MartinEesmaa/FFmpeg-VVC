@@ -24,38 +24,100 @@
 #include "libavcodec/vp9dsp.h"
 #include "vp9dsp.h"
 
-static av_cold void vp9dsp_intrapred_init_rvv(VP9DSPContext *dsp, int bpp)
+static av_cold void vp9dsp_mc_init_riscv(VP9DSPContext *dsp, int bpp)
 {
-    #if HAVE_RVV
-        int flags = av_get_cpu_flags();
+#if HAVE_RV
+    int flags = av_get_cpu_flags();
 
-        if (bpp == 8 && flags & AV_CPU_FLAG_RVV_I64 && ff_get_rv_vlenb() >= 16) {
-            dsp->intra_pred[TX_8X8][DC_PRED] = ff_dc_8x8_rvv;
-            dsp->intra_pred[TX_8X8][LEFT_DC_PRED] = ff_dc_left_8x8_rvv;
-            dsp->intra_pred[TX_8X8][DC_127_PRED] = ff_dc_127_8x8_rvv;
-            dsp->intra_pred[TX_8X8][DC_128_PRED] = ff_dc_128_8x8_rvv;
-            dsp->intra_pred[TX_8X8][DC_129_PRED] = ff_dc_129_8x8_rvv;
-            dsp->intra_pred[TX_8X8][TOP_DC_PRED] = ff_dc_top_8x8_rvv;
-        }
+# if __riscv_xlen >= 64
+    if (bpp == 8 && (flags & AV_CPU_FLAG_RV_MISALIGNED)) {
 
-        if (bpp == 8 && flags & AV_CPU_FLAG_RVV_I32 && ff_get_rv_vlenb() >= 16) {
-            dsp->intra_pred[TX_32X32][DC_PRED] = ff_dc_32x32_rvv;
-            dsp->intra_pred[TX_16X16][DC_PRED] = ff_dc_16x16_rvv;
-            dsp->intra_pred[TX_32X32][LEFT_DC_PRED] = ff_dc_left_32x32_rvv;
-            dsp->intra_pred[TX_16X16][LEFT_DC_PRED] = ff_dc_left_16x16_rvv;
-            dsp->intra_pred[TX_32X32][DC_127_PRED] = ff_dc_127_32x32_rvv;
-            dsp->intra_pred[TX_16X16][DC_127_PRED] = ff_dc_127_16x16_rvv;
-            dsp->intra_pred[TX_32X32][DC_128_PRED] = ff_dc_128_32x32_rvv;
-            dsp->intra_pred[TX_16X16][DC_128_PRED] = ff_dc_128_16x16_rvv;
-            dsp->intra_pred[TX_32X32][DC_129_PRED] = ff_dc_129_32x32_rvv;
-            dsp->intra_pred[TX_16X16][DC_129_PRED] = ff_dc_129_16x16_rvv;
-            dsp->intra_pred[TX_32X32][TOP_DC_PRED] = ff_dc_top_32x32_rvv;
-            dsp->intra_pred[TX_16X16][TOP_DC_PRED] = ff_dc_top_16x16_rvv;
-        }
-    #endif
+#define init_fpel(idx1, sz)                                           \
+    dsp->mc[idx1][FILTER_8TAP_SMOOTH ][0][0][0] = ff_copy##sz##_rvi;  \
+    dsp->mc[idx1][FILTER_8TAP_REGULAR][0][0][0] = ff_copy##sz##_rvi;  \
+    dsp->mc[idx1][FILTER_8TAP_SHARP  ][0][0][0] = ff_copy##sz##_rvi;  \
+    dsp->mc[idx1][FILTER_BILINEAR    ][0][0][0] = ff_copy##sz##_rvi
+
+    init_fpel(0, 64);
+    init_fpel(1, 32);
+    init_fpel(2, 16);
+    init_fpel(3, 8);
+    init_fpel(4, 4);
+
+#undef init_fpel
+    }
+# endif
+
+#if HAVE_RVV
+    if (bpp == 8 && (flags & AV_CPU_FLAG_RVV_I32) && ff_rv_vlen_least(128)) {
+
+#define init_fpel(idx1, sz)                                           \
+    dsp->mc[idx1][FILTER_8TAP_SMOOTH ][1][0][0] = ff_avg##sz##_rvv;  \
+    dsp->mc[idx1][FILTER_8TAP_REGULAR][1][0][0] = ff_avg##sz##_rvv;  \
+    dsp->mc[idx1][FILTER_8TAP_SHARP  ][1][0][0] = ff_avg##sz##_rvv;  \
+    dsp->mc[idx1][FILTER_BILINEAR    ][1][0][0] = ff_avg##sz##_rvv
+
+    init_fpel(0, 64);
+    init_fpel(1, 32);
+    init_fpel(2, 16);
+    init_fpel(3, 8);
+    init_fpel(4, 4);
+
+#undef init_fpel
+    }
+#endif
+#endif
+}
+
+static av_cold void vp9dsp_intrapred_init_riscv(VP9DSPContext *dsp, int bpp)
+{
+#if HAVE_RV
+    int flags = av_get_cpu_flags();
+
+# if __riscv_xlen >= 64
+    if (bpp == 8 && (flags & AV_CPU_FLAG_RVB_ADDR)) {
+        dsp->intra_pred[TX_32X32][VERT_PRED] = ff_v_32x32_rvi;
+        dsp->intra_pred[TX_16X16][VERT_PRED] = ff_v_16x16_rvi;
+        dsp->intra_pred[TX_8X8][VERT_PRED] = ff_v_8x8_rvi;
+    }
+# endif
+#if HAVE_RVV
+    if (bpp == 8 && flags & AV_CPU_FLAG_RVV_I64 && ff_rv_vlen_least(128)) {
+        dsp->intra_pred[TX_8X8][DC_PRED] = ff_dc_8x8_rvv;
+        dsp->intra_pred[TX_8X8][LEFT_DC_PRED] = ff_dc_left_8x8_rvv;
+        dsp->intra_pred[TX_8X8][DC_127_PRED] = ff_dc_127_8x8_rvv;
+        dsp->intra_pred[TX_8X8][DC_128_PRED] = ff_dc_128_8x8_rvv;
+        dsp->intra_pred[TX_8X8][DC_129_PRED] = ff_dc_129_8x8_rvv;
+        dsp->intra_pred[TX_8X8][TOP_DC_PRED] = ff_dc_top_8x8_rvv;
+    }
+
+    if (bpp == 8 && flags & AV_CPU_FLAG_RVV_I32 && ff_rv_vlen_least(128)) {
+        dsp->intra_pred[TX_32X32][DC_PRED] = ff_dc_32x32_rvv;
+        dsp->intra_pred[TX_16X16][DC_PRED] = ff_dc_16x16_rvv;
+        dsp->intra_pred[TX_32X32][LEFT_DC_PRED] = ff_dc_left_32x32_rvv;
+        dsp->intra_pred[TX_16X16][LEFT_DC_PRED] = ff_dc_left_16x16_rvv;
+        dsp->intra_pred[TX_32X32][DC_127_PRED] = ff_dc_127_32x32_rvv;
+        dsp->intra_pred[TX_16X16][DC_127_PRED] = ff_dc_127_16x16_rvv;
+        dsp->intra_pred[TX_32X32][DC_128_PRED] = ff_dc_128_32x32_rvv;
+        dsp->intra_pred[TX_16X16][DC_128_PRED] = ff_dc_128_16x16_rvv;
+        dsp->intra_pred[TX_32X32][DC_129_PRED] = ff_dc_129_32x32_rvv;
+        dsp->intra_pred[TX_16X16][DC_129_PRED] = ff_dc_129_16x16_rvv;
+        dsp->intra_pred[TX_32X32][TOP_DC_PRED] = ff_dc_top_32x32_rvv;
+        dsp->intra_pred[TX_16X16][TOP_DC_PRED] = ff_dc_top_16x16_rvv;
+        dsp->intra_pred[TX_32X32][HOR_PRED] = ff_h_32x32_rvv;
+        dsp->intra_pred[TX_16X16][HOR_PRED] = ff_h_16x16_rvv;
+        dsp->intra_pred[TX_8X8][HOR_PRED] = ff_h_8x8_rvv;
+        dsp->intra_pred[TX_32X32][TM_VP8_PRED] = ff_tm_32x32_rvv;
+        dsp->intra_pred[TX_16X16][TM_VP8_PRED] = ff_tm_16x16_rvv;
+        dsp->intra_pred[TX_8X8][TM_VP8_PRED] = ff_tm_8x8_rvv;
+        dsp->intra_pred[TX_4X4][TM_VP8_PRED] = ff_tm_4x4_rvv;
+    }
+#endif
+#endif
 }
 
 av_cold void ff_vp9dsp_init_riscv(VP9DSPContext *dsp, int bpp, int bitexact)
 {
-    vp9dsp_intrapred_init_rvv(dsp, bpp);
+    vp9dsp_intrapred_init_riscv(dsp, bpp);
+    vp9dsp_mc_init_riscv(dsp, bpp);
 }

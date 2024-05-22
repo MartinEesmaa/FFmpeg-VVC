@@ -68,23 +68,6 @@ NOHWF   fmv.x.w  a0, fa0
         ret
 endfunc
 
-#if __riscv_xlen >= 64
-func ff_sbr_neg_odd_64_rvv, zve64x
-        li      a1, 32
-        li      t1, 1 << 63
-1:
-        vsetvli t0, a1, e64, m8, ta, ma
-        vle64.v v8, (a0)
-        sub     a1, a1, t0
-        vxor.vx v8, v8, t1
-        vse64.v v8, (a0)
-        sh3add  a0, t0, a0
-        bnez    t0, 1b
-
-        ret
-endfunc
-#endif
-
 func ff_sbr_autocorrelate_rvv, zve32f
         vsetvli t0, zero, e32, m4, ta, ma
         vmv.v.x v0, zero
@@ -290,16 +273,16 @@ endfunc
         ret
 .endm
 
-func ff_sbr_hf_apply_noise_0_rvv, zve32f
+func ff_sbr_hf_apply_noise_0_rvv, zve32f, zbb
         hf_apply_noise 0
 endfunc
 
-func ff_sbr_hf_apply_noise_3_rvv, zve32f
+func ff_sbr_hf_apply_noise_3_rvv, zve32f, zbb
        not     a4, a4 // invert parity of kx
        // fall through
 endfunc
 
-func ff_sbr_hf_apply_noise_1_rvv, zve32f
+func ff_sbr_hf_apply_noise_1_rvv, zve32f, zbb
         vsetvli t0, zero, e32, m4, ta, ma
         vid.v   v4
         vxor.vx v4, v4, a4
@@ -307,6 +290,6 @@ func ff_sbr_hf_apply_noise_1_rvv, zve32f
         hf_apply_noise 1
 endfunc
 
-func ff_sbr_hf_apply_noise_2_rvv, zve32f
+func ff_sbr_hf_apply_noise_2_rvv, zve32f, zbb
         hf_apply_noise 2
 endfunc

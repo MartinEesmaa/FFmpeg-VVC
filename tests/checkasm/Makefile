@@ -4,6 +4,7 @@ AVCODECOBJS-$(CONFIG_AC3DSP)            += ac3dsp.o
 AVCODECOBJS-$(CONFIG_AUDIODSP)          += audiodsp.o
 AVCODECOBJS-$(CONFIG_BLOCKDSP)          += blockdsp.o
 AVCODECOBJS-$(CONFIG_BSWAPDSP)          += bswapdsp.o
+AVCODECOBJS-$(CONFIG_FDCTDSP)           += fdctdsp.o
 AVCODECOBJS-$(CONFIG_FMTCONVERT)        += fmtconvert.o
 AVCODECOBJS-$(CONFIG_G722DSP)           += g722dsp.o
 AVCODECOBJS-$(CONFIG_H264CHROMA)        += h264chroma.o
@@ -42,7 +43,7 @@ AVCODECOBJS-$(CONFIG_V210_DECODER)      += v210dec.o
 AVCODECOBJS-$(CONFIG_V210_ENCODER)      += v210enc.o
 AVCODECOBJS-$(CONFIG_VORBIS_DECODER)    += vorbisdsp.o
 AVCODECOBJS-$(CONFIG_VP9_DECODER)       += vp9dsp.o
-AVCODECOBJS-$(CONFIG_VVC_DECODER)       += vvc_mc.o
+AVCODECOBJS-$(CONFIG_VVC_DECODER)       += vvc_alf.o vvc_mc.o
 
 CHECKASMOBJS-$(CONFIG_AVCODEC)          += $(AVCODECOBJS-yes)
 
