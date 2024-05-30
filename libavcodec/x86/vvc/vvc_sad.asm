@@ -29,6 +29,7 @@ SECTION_RODATA
 pw_1: times 2 dw 1
 
 ; DMVR SAD is only calculated on even rows to reduce complexity
+; Additionally the only valid sizes are 8x16, 16x8, and 16x16
 SECTION .text
 
 %macro MIN_MAX_SAD 3
@@ -77,14 +78,14 @@ cglobal vvc_sad, 6, 9, 5, src1, src2, dx, dy, block_w, block_h, off1, off2, row_
     vpbroadcastd       m4, [pw_1]
 
     cmp          block_wd, 16
-    jge    vvc_sad_16_128
+    je         vvc_sad_16
 
     vvc_sad_8:
         .loop_height:
         movu              xm0, [src1q]
-        vinserti128        m0, [src1q + MAX_PB_SIZE * ROWS * 2], 1
+        vinserti128        m0, m0, [src1q + MAX_PB_SIZE * ROWS * 2], 1
         movu              xm1, [src2q]
-        vinserti128        m1, [src2q + MAX_PB_SIZE * ROWS * 2], 1
+        vinserti128        m1, m1, [src2q + MAX_PB_SIZE * ROWS * 2], 1
 
         MIN_MAX_SAD        m1, m0, m2
         pmaddwd            m1, m4
@@ -100,7 +101,7 @@ cglobal vvc_sad, 6, 9, 5, src1, src2, dx, dy, block_w, block_h, off1, off2, row_
         movd          eax, xm0
     RET
 
-    vvc_sad_16_128:
+    vvc_sad_16:
         sar      block_wd, 4
         .loop_height:
         mov         off1q, src1q

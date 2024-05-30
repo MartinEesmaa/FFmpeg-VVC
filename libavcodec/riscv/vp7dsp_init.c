@@ -1,5 +1,5 @@
 /*
- * Copyright © 2022 Rémi Denis-Courmont.
+ * Copyright (c) 2024 Rémi Denis-Courmont.
  *
  * This file is part of FFmpeg.
  *
@@ -23,22 +23,22 @@
 #include "libavutil/attributes.h"
 #include "libavutil/cpu.h"
 #include "libavutil/riscv/cpu.h"
-#include "libavcodec/lpc.h"
+#include "libavcodec/vp8dsp.h"
 
-void ff_lpc_apply_welch_window_rvv(const int32_t *, ptrdiff_t, double *);
-void ff_lpc_compute_autocorr_rvv(const double *, ptrdiff_t, int, double *);
+void ff_vp7_luma_dc_wht_rvv(int16_t block[4][4][16], int16_t dc[16]);
+void ff_vp7_idct_add_rvv(uint8_t *dst, int16_t block[16], ptrdiff_t stride);
 
-av_cold void ff_lpc_init_riscv(LPCContext *c)
+av_cold void ff_vp7dsp_init_riscv(VP8DSPContext *c)
 {
-#if HAVE_RVV && (__riscv_xlen >= 64)
+#if HAVE_RVV
     int flags = av_get_cpu_flags();
 
-    if ((flags & AV_CPU_FLAG_RVV_F64) && (flags & AV_CPU_FLAG_RVB_ADDR)) {
-        c->lpc_apply_welch_window = ff_lpc_apply_welch_window_rvv;
-
-        if ((flags & AV_CPU_FLAG_RVB_BASIC) &&
-            ff_get_rv_vlenb() > c->max_order)
-            c->lpc_compute_autocorr = ff_lpc_compute_autocorr_rvv;
+    if ((flags & AV_CPU_FLAG_RVV_I32) && (flags & AV_CPU_FLAG_RVB_ADDR) &&
+        ff_rv_vlen_least(128)) {
+#if __riscv_xlen >= 64
+        c->vp8_luma_dc_wht = ff_vp7_luma_dc_wht_rvv;
+#endif
+        c->vp8_idct_add = ff_vp7_idct_add_rvv;
     }
 #endif
 }
