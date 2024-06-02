@@ -37,8 +37,8 @@ extern "C" {
 }
 
 typedef struct THModel {
+    DNNModel model;
     DnnContext *ctx;
-    DNNModel *model;
     torch::jit::Module *jit_model;
     SafeQueue *request_queue;
     Queue *task_queue;
@@ -119,7 +119,7 @@ static void dnn_free_model_th(DNNModel **model)
     if (!model || !*model)
         return;
 
-    th_model = (THModel *) (*model)->model;
+    th_model = (THModel *) (*model);
     while (ff_safe_queue_size(th_model->request_queue) != 0) {
         THRequestItem *item = (THRequestItem *)ff_safe_queue_pop_front(th_model->request_queue);
         destroy_request_item(&item);
@@ -141,10 +141,10 @@ static void dnn_free_model_th(DNNModel **model)
     ff_queue_destroy(th_model->task_queue);
     delete th_model->jit_model;
     av_freep(&th_model);
-    av_freep(model);
+    *model = NULL;
 }
 
-static int get_input_th(void *model, DNNData *input, const char *input_name)
+static int get_input_th(DNNModel *model, DNNData *input, const char *input_name)
 {
     input->dt = DNN_FLOAT;
     input->order = DCO_RGB;
@@ -179,7 +179,7 @@ static int fill_model_input_th(THModel *th_model, THRequestItem *request)
     task = lltask->task;
     infer_request = request->infer_request;
 
-    ret = get_input_th(th_model, &input, NULL);
+    ret = get_input_th(&th_model->model, &input, NULL);
     if ( ret != 0) {
         goto err;
     }
@@ -195,19 +195,19 @@ static int fill_model_input_th(THModel *th_model, THRequestItem *request)
     infer_request->input_tensor = new torch::Tensor();
     infer_request->output = new torch::Tensor();
 
-    switch (th_model->model->func_type) {
+    switch (th_model->model.func_type) {
     case DFT_PROCESS_FRAME:
         input.scale = 255;
         if (task->do_ioproc) {
-            if (th_model->model->frame_pre_proc != NULL) {
-                th_model->model->frame_pre_proc(task->in_frame, &input, th_model->model->filter_ctx);
+            if (th_model->model.frame_pre_proc != NULL) {
+                th_model->model.frame_pre_proc(task->in_frame, &input, th_model->model.filter_ctx);
             } else {
                 ff_proc_from_frame_to_dnn(task->in_frame, &input, ctx);
             }
         }
         break;
     default:
-        avpriv_report_missing_feature(NULL, "model function type %d", th_model->model->func_type);
+        avpriv_report_missing_feature(NULL, "model function type %d", th_model->model.func_type);
         break;
     }
     *infer_request->input_tensor = torch::from_blob(input.data,
@@ -282,13 +282,13 @@ static void infer_completion_callback(void *args) {
         goto err;
     }
 
-    switch (th_model->model->func_type) {
+    switch (th_model->model.func_type) {
     case DFT_PROCESS_FRAME:
         if (task->do_ioproc) {
             outputs.scale = 255;
             outputs.data = output->data_ptr();
-            if (th_model->model->frame_post_proc != NULL) {
-                th_model->model->frame_post_proc(task->out_frame, &outputs, th_model->model->filter_ctx);
+            if (th_model->model.frame_post_proc != NULL) {
+                th_model->model.frame_post_proc(task->out_frame, &outputs, th_model->model.filter_ctx);
             } else {
                 ff_proc_from_dnn_to_frame(task->out_frame, &outputs, th_model->ctx);
             }
@@ -298,7 +298,7 @@ static void infer_completion_callback(void *args) {
         }
         break;
     default:
-        avpriv_report_missing_feature(th_model->ctx, "model function type %d", th_model->model->func_type);
+        avpriv_report_missing_feature(th_model->ctx, "model function type %d", th_model->model.func_type);
         goto err;
     }
     task->inference_done++;
@@ -356,7 +356,7 @@ err:
     return ret;
 }
 
-static int get_output_th(void *model, const char *input_name, int input_width, int input_height,
+static int get_output_th(DNNModel *model, const char *input_name, int input_width, int input_height,
                                    const char *output_name, int *output_width, int *output_height)
 {
     int ret = 0;
@@ -417,18 +417,10 @@ static DNNModel *dnn_load_model_th(DnnContext *ctx, DNNFunctionType func_type, A
     THRequestItem *item = NULL;
     const char *device_name = ctx->device ? ctx->device : "cpu";
 
-    model = (DNNModel *)av_mallocz(sizeof(DNNModel));
-    if (!model) {
-        return NULL;
-    }
-
     th_model = (THModel *)av_mallocz(sizeof(THModel));
-    if (!th_model) {
-        av_freep(&model);
+    if (!th_model)
         return NULL;
-    }
-    th_model->model = model;
-    model->model = th_model;
+    model = &th_model->model;
     th_model->ctx = ctx;
 
     c10::Device device = c10::Device(device_name);
@@ -496,7 +488,7 @@ fail:
 
 static int dnn_execute_model_th(const DNNModel *model, DNNExecBaseParams *exec_params)
 {
-    THModel *th_model = (THModel *)model->model;
+    THModel *th_model = (THModel *)model;
     DnnContext *ctx = th_model->ctx;
     TaskItem *task;
     THRequestItem *request;
@@ -545,13 +537,13 @@ static int dnn_execute_model_th(const DNNModel *model, DNNExecBaseParams *exec_p
 
 static DNNAsyncStatusType dnn_get_result_th(const DNNModel *model, AVFrame **in, AVFrame **out)
 {
-    THModel *th_model = (THModel *)model->model;
+    THModel *th_model = (THModel *)model;
     return ff_dnn_get_result_common(th_model->task_queue, in, out);
 }
 
 static int dnn_flush_th(const DNNModel *model)
 {
-    THModel *th_model = (THModel *)model->model;
+    THModel *th_model = (THModel *)model;
     THRequestItem *request;
 
     if (ff_queue_size(th_model->lltask_queue) == 0)
@@ -569,6 +561,7 @@ static int dnn_flush_th(const DNNModel *model)
 
 extern const DNNModule ff_dnn_backend_torch = {
     .clazz          = DNN_DEFINE_CLASS(dnn_th),
+    .type           = DNN_TH,
     .load_model     = dnn_load_model_th,
     .execute_model  = dnn_execute_model_th,
     .get_result     = dnn_get_result_th,
