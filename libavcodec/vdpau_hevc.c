@@ -23,8 +23,8 @@
 #include <vdpau/vdpau.h>
 
 #include "avcodec.h"
-#include "hevc_data.h"
-#include "hevcdec.h"
+#include "hevc/data.h"
+#include "hevc/hevcdec.h"
 #include "hwaccel_internal.h"
 #include "vdpau.h"
 #include "vdpau_internal.h"
@@ -35,7 +35,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
                                   const uint8_t *buffer, uint32_t size)
 {
     HEVCContext *h = avctx->priv_data;
-    HEVCFrame *pic = h->ref;
+    HEVCFrame *pic = h->cur_frame;
     struct vdpau_picture_context *pic_ctx = pic->hwaccel_picture_private;
 
     VdpPictureInfoHEVC *info = &pic_ctx->info.hevc;
@@ -238,7 +238,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
     }
     for (size_t i = 0, j = 0; i < FF_ARRAY_ELEMS(h->DPB); i++) {
         const HEVCFrame *frame = &h->DPB[i];
-        if (frame != h->ref && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF |
+        if (frame != h->cur_frame && (frame->flags & (HEVC_FRAME_FLAG_LONG_REF |
                                                 HEVC_FRAME_FLAG_SHORT_REF))) {
             if (j > 15) {
                 av_log(avctx, AV_LOG_WARNING,
@@ -248,7 +248,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
             }
             /* Array of video reference surfaces.
                Set any unused positions to VDP_INVALID_HANDLE. */
-            info->RefPics[j] = ff_vdpau_get_surface_id(frame->frame);
+            info->RefPics[j] = ff_vdpau_get_surface_id(frame->f);
             /* Array of picture order counts. These correspond to positions
                in the RefPics array. */
             info->PicOrderCntVal[j] = frame->poc;
@@ -295,7 +295,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
         HEVCFrame *frame = h->rps[ST_CURR_BEF].ref[i];
         if (frame) {
             uint8_t found = 0;
-            uintptr_t id = ff_vdpau_get_surface_id(frame->frame);
+            uintptr_t id = ff_vdpau_get_surface_id(frame->f);
             for (size_t k = 0; k < 16; k++) {
                 if (id == info->RefPics[k]) {
                     info->RefPicSetStCurrBefore[j] = k;
@@ -318,7 +318,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
         HEVCFrame *frame = h->rps[ST_CURR_AFT].ref[i];
         if (frame) {
             uint8_t found = 0;
-            uintptr_t id = ff_vdpau_get_surface_id(frame->frame);
+            uintptr_t id = ff_vdpau_get_surface_id(frame->f);
             for (size_t k = 0; k < 16; k++) {
                 if (id == info->RefPics[k]) {
                     info->RefPicSetStCurrAfter[j] = k;
@@ -341,7 +341,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
         HEVCFrame *frame = h->rps[LT_CURR].ref[i];
         if (frame) {
             uint8_t found = 0;
-            uintptr_t id = ff_vdpau_get_surface_id(frame->frame);
+            uintptr_t id = ff_vdpau_get_surface_id(frame->f);
             for (size_t k = 0; k < 16; k++) {
                 if (id == info->RefPics[k]) {
                     info->RefPicSetLtCurr[j] = k;
@@ -403,7 +403,7 @@ static int vdpau_hevc_decode_slice(AVCodecContext *avctx,
                                    const uint8_t *buffer, uint32_t size)
 {
     HEVCContext *h = avctx->priv_data;
-    struct vdpau_picture_context *pic_ctx = h->ref->hwaccel_picture_private;
+    struct vdpau_picture_context *pic_ctx = h->cur_frame->hwaccel_picture_private;
     int val;
 
     val = ff_vdpau_add_buffer(pic_ctx, start_code_prefix, 3);
@@ -420,10 +420,10 @@ static int vdpau_hevc_decode_slice(AVCodecContext *avctx,
 static int vdpau_hevc_end_frame(AVCodecContext *avctx)
 {
     HEVCContext *h = avctx->priv_data;
-    struct vdpau_picture_context *pic_ctx = h->ref->hwaccel_picture_private;
+    struct vdpau_picture_context *pic_ctx = h->cur_frame->hwaccel_picture_private;
     int val;
 
-    val = ff_vdpau_common_end_frame(avctx, h->ref->frame, pic_ctx);
+    val = ff_vdpau_common_end_frame(avctx, h->cur_frame->f, pic_ctx);
     if (val < 0)
         return val;
 

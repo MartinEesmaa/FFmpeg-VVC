@@ -33,7 +33,7 @@
 #include "decode.h"
 #include "internal.h"
 #include "h264dec.h"
-#include "hevcdec.h"
+#include "hevc/hevcdec.h"
 #include "hwaccel_internal.h"
 #include "mpegvideo.h"
 #include "proresdec.h"
@@ -1075,7 +1075,7 @@ static int videotoolbox_hevc_decode_params(AVCodecContext *avctx,
 static int videotoolbox_hevc_end_frame(AVCodecContext *avctx)
 {
     HEVCContext *h = avctx->priv_data;
-    AVFrame *frame = h->ref->frame;
+    AVFrame *frame = h->cur_frame->f;
     VTContext *vtctx = avctx->internal->hwaccel_priv_data;
     int ret;
 

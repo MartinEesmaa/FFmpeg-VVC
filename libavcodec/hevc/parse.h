@@ -1,6 +1,4 @@
 /*
- * Copyright (c) 2014 Seppo Tomperi <seppo.tomperi@vtt.fi>
- *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -18,17 +16,21 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/attributes.h"
-#include "libavutil/cpu.h"
-#include "libavutil/arm/cpu.h"
+/**
+ * @file
+ * H.265 parser code
+ */
 
-#include "libavcodec/hevc/dsp.h"
-#include "hevcdsp_arm.h"
+#ifndef AVCODEC_HEVC_PARSE_H
+#define AVCODEC_HEVC_PARSE_H
 
-av_cold void ff_hevc_dsp_init_arm(HEVCDSPContext *c, const int bit_depth)
-{
-    int cpu_flags = av_get_cpu_flags();
+#include <stdint.h>
 
-    if (have_neon(cpu_flags))
-        ff_hevc_dsp_init_neon(c, bit_depth);
-}
+#include "ps.h"
+#include "sei.h"
+
+int ff_hevc_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
+                             HEVCSEI *sei, int *is_nalff, int *nal_length_size,
+                             int err_recognition, int apply_defdispwin, void *logctx);
+
+#endif /* AVCODEC_HEVC_PARSE_H */

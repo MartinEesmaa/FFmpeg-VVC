@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2024 Lynne <dev@lynne.ee>
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,21 +18,20 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/**
- * @file
- * H.265 parser code
- */
+#ifndef AVCODEC_AAC_AACDEC_USAC_H
+#define AVCODEC_AAC_AACDEC_USAC_H
 
-#ifndef AVCODEC_HEVC_PARSE_H
-#define AVCODEC_HEVC_PARSE_H
+#include "aacdec.h"
 
-#include <stdint.h>
+#include "libavcodec/get_bits.h"
 
-#include "hevc_ps.h"
-#include "hevc_sei.h"
+int ff_aac_usac_config_decode(AACDecContext *ac, AVCodecContext *avctx,
+                              GetBitContext *gb, OutputConfiguration *oc,
+                              int channel_config);
 
-int ff_hevc_decode_extradata(const uint8_t *data, int size, HEVCParamSets *ps,
-                             HEVCSEI *sei, int *is_nalff, int *nal_length_size,
-                             int err_recognition, int apply_defdispwin, void *logctx);
+int ff_aac_usac_reset_state(AACDecContext *ac, OutputConfiguration *oc);
 
-#endif /* AVCODEC_HEVC_PARSE_H */
+int ff_aac_usac_decode_frame(AVCodecContext *avctx, AACDecContext *ac,
+                             GetBitContext *gb, int *got_frame_ptr);
+
+#endif /* AVCODEC_AAC_AACDEC_USAC_H */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Seppo Tomperi <seppo.tomperi@vtt.fi>
+ * Copyright (c) 2024 Lynne <dev@lynne.ee>
  *
  * This file is part of FFmpeg.
  *
@@ -18,17 +18,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/attributes.h"
-#include "libavutil/cpu.h"
-#include "libavutil/arm/cpu.h"
+#ifndef AVCODEC_AAC_AACDEC_LPD_H
+#define AVCODEC_AAC_AACDEC_LPD_H
 
-#include "libavcodec/hevc/dsp.h"
-#include "hevcdsp_arm.h"
+#include "aacdec.h"
+#include "libavcodec/get_bits.h"
 
-av_cold void ff_hevc_dsp_init_arm(HEVCDSPContext *c, const int bit_depth)
-{
-    int cpu_flags = av_get_cpu_flags();
+int ff_aac_parse_fac_data(AACUsacElemData *ce, GetBitContext *gb,
+                          int use_gain, int len);
 
-    if (have_neon(cpu_flags))
-        ff_hevc_dsp_init_neon(c, bit_depth);
-}
+int ff_aac_ldp_parse_channel_stream(AACDecContext *ac, AACUSACConfig *usac,
+                                    AACUsacElemData *ce, GetBitContext *gb);
+
+#endif /* AVCODEC_AAC_AACDEC_LPD_H */
