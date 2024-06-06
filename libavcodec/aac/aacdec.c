@@ -537,7 +537,7 @@ static av_cold void flush(AVCodecContext *avctx)
         }
     }
 
-    ff_aac_usac_reset_state(ac, &ac->oc[1]);
+    /*ff_aac_usac_reset_state(ac, &ac->oc[1]);*/
 }
 
 /**
@@ -1046,12 +1046,12 @@ static int decode_audio_specific_config_gb(AACDecContext *ac,
             return ret;
         break;
 #if CONFIG_AAC_DECODER
-    case AOT_USAC_NOSBR: /* fallthrough */
-    case AOT_USAC:
+    /*case AOT_USAC_NOSBR:*/ /* fallthrough */
+    /*case AOT_USAC:
         if ((ret = ff_aac_usac_config_decode(ac, avctx, gb,
                                              oc, m4ac->chan_config)) < 0)
             return ret;
-        break;
+        break;*/
 #endif
     default:
         avpriv_report_missing_feature(avctx,
@@ -2429,9 +2429,9 @@ static int aac_decode_frame_int(AVCodecContext *avctx, AVFrame *frame,
             return AVERROR_PATCHWELCOME;
         }
 #if CONFIG_AAC_DECODER
-        err = ff_aac_usac_decode_frame(avctx, ac, gb, got_frame_ptr);
+        /*err = ff_aac_usac_decode_frame(avctx, ac, gb, got_frame_ptr);
         if (err < 0)
-            goto fail;
+            goto fail;*/
 #endif
     } else {
         err = decode_frame_ga(avctx, ac, gb, got_frame_ptr);
