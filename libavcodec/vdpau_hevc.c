@@ -43,8 +43,8 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
     VdpPictureInfoHEVC444 *info2 = &pic_ctx->info.hevc_444;
 #endif
 
-    const HEVCSPS *sps = h->ps.sps;
-    const HEVCPPS *pps = h->ps.pps;
+    const HEVCPPS *pps = h->pps;
+    const HEVCSPS *sps = pps->sps;
     const SliceHeader *sh = &h->sh;
     const ScalingList *sl = pps->scaling_list_data_present_flag ?
                             &pps->scaling_list : &sps->scaling_list;
@@ -205,7 +205,7 @@ static int vdpau_hevc_start_frame(AVCodecContext *avctx,
         }
     }
     /* See section 7.4.7.2 of the specification. */
-    info->NumPocTotalCurr = ff_hevc_frame_nb_refs(h);
+    info->NumPocTotalCurr = ff_hevc_frame_nb_refs(&h->sh, pps);
     if (sh->short_term_ref_pic_set_sps_flag == 0 && sh->short_term_rps) {
         /* Corresponds to specification field, NumDeltaPocs[RefRpsIdx].
            Only applicable when short_term_ref_pic_set_sps_flag == 0.
