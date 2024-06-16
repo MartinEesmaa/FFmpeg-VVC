@@ -167,7 +167,7 @@ static void h261_encode_block(H261EncContext *h, int16_t *block, int n)
 {
     MpegEncContext *const s = &h->s;
     int level, run, i, j, last_index, last_non_zero, sign, slevel, code;
-    RLTable *rl;
+    const RLTable *rl;
 
     rl = &ff_h261_rl_tcoeff;
     if (s->mb_intra) {
@@ -253,7 +253,6 @@ void ff_h261_encode_mb(MpegEncContext *s, int16_t block[6][64],
 
         if ((cbp | mvd) == 0) {
             /* skip macroblock */
-            s->skip_count++;
             s->mb_skip_run++;
             s->last_mv[0][0][0] = 0;
             s->last_mv[0][0][1] = 0;

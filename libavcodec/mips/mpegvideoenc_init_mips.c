@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2015 Manojkumar Bhosale (Manojkumar.Bhosale@imgtec.com)
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,33 +18,16 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/**
- * @file
- * byte swapping routines
- */
-
-#ifndef AVUTIL_SH4_BSWAP_H
-#define AVUTIL_SH4_BSWAP_H
-
-#include <stdint.h>
-#include "config.h"
 #include "libavutil/attributes.h"
+#include "libavutil/mips/cpu.h"
+#include "libavcodec/mpegvideoenc.h"
+#include "mpegvideo_mips.h"
 
-#define av_bswap16 av_bswap16
-static av_always_inline av_const uint16_t av_bswap16(uint16_t x)
+av_cold void ff_mpvenc_dct_init_mips(MpegEncContext *s)
 {
-    __asm__("swap.b %0,%0" : "+r"(x));
-    return x;
-}
+    int cpu_flags = av_get_cpu_flags();
 
-#define av_bswap32 av_bswap32
-static av_always_inline av_const uint32_t av_bswap32(uint32_t x)
-{
-    __asm__("swap.b %0,%0\n"
-            "swap.w %0,%0\n"
-            "swap.b %0,%0\n"
-            : "+r"(x));
-    return x;
+    if (have_mmi(cpu_flags)) {
+        s->denoise_dct = ff_denoise_dct_mmi;
+    }
 }
-
-#endif /* AVUTIL_SH4_BSWAP_H */

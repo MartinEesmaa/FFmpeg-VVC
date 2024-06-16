@@ -253,12 +253,8 @@ func ff_vp78_idct_dc_add4uv_rvv, zve64x
         ret
 endfunc
 
-.macro bilin_load dst type mn
-.ifc \type,v
-        add             t5, a2, a3
-.else
+.macro bilin_load_h dst mn
         addi            t5, a2, 1
-.endif
         vle8.v          \dst, (a2)
         vle8.v          v2, (t5)
         vwmulu.vx       v28, \dst, t1
@@ -275,11 +271,35 @@ func ff_put_vp8_bilin4_\type\()_rvv, zve32x
         li              t4, 4
         sub             t1, t1, \mn
 1:
-        addi            a4, a4, -1
-        bilin_load      v0, \type, \mn
-        vse8.v          v0, (a0)
-        add             a2, a2, a3
-        add             a0, a0, a1
+        add             t0, a2, a3
+        add             t2, a0, a1
+        addi            a4, a4, -2
+.ifc \type,v
+        add             t3, t0, a3
+.else
+        addi            t5, a2, 1
+        addi            t3, t0, 1
+        vle8.v          v2, (t5)
+.endif
+        vle8.v          v0, (a2)
+        vle8.v          v4, (t0)
+        vle8.v          v6, (t3)
+        vwmulu.vx       v28, v0, t1
+        vwmulu.vx       v26, v4, t1
+.ifc \type,v
+        vwmaccu.vx      v28, \mn, v4
+.else
+        vwmaccu.vx      v28, \mn, v2
+.endif
+        vwmaccu.vx      v26, \mn, v6
+        vwaddu.wx       v24, v28, t4
+        vwaddu.wx       v22, v26, t4
+        vnsra.wi        v30, v24, 3
+        vnsra.wi        v0, v22, 3
+        vse8.v          v30, (a0)
+        vse8.v          v0, (t2)
+        add             a2, t0, a3
+        add             a0, t2, a1
         bnez            a4, 1b
 
         ret
@@ -296,12 +316,12 @@ func ff_put_vp8_bilin4_hv_rvv, zve32x
         sub             t1, t3, a5
         sub             t2, t3, a6
         li              t4, 4
-        bilin_load      v4, h, a5
+        bilin_load_h    v4, a5
         add             a2, a2, a3
 1:
         addi            a4, a4, -1
         vwmulu.vx       v20, v4, t2
-        bilin_load      v4, h, a5
+        bilin_load_h    v4, a5
         vwmaccu.vx      v20, a6, v4
         vwaddu.wx       v24, v20, t4
         vnsra.wi        v0, v24, 3

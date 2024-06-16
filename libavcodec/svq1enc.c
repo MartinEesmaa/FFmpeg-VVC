@@ -326,13 +326,11 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
 
     if (s->pict_type == AV_PICTURE_TYPE_P) {
         s->m.avctx                         = s->avctx;
-        s->m.current_picture_ptr           = &s->m.current_picture;
-        s->m.last_picture_ptr              = &s->m.last_picture;
-        s->m.last_picture.f->data[0]        = ref_plane;
+        s->m.last_pic.data[0]        = ref_plane;
         s->m.linesize                      =
-        s->m.last_picture.f->linesize[0]    =
-        s->m.new_picture->linesize[0]      =
-        s->m.current_picture.f->linesize[0] = stride;
+        s->m.last_pic.linesize[0]    =
+        s->m.new_pic->linesize[0]      =
+        s->m.cur_pic.linesize[0] = stride;
         s->m.width                         = width;
         s->m.height                        = height;
         s->m.mb_width                      = block_width;
@@ -370,9 +368,9 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
         s->m.mb_mean   = (uint8_t *)s->dummy;
         s->m.mb_var    = (uint16_t *)s->dummy;
         s->m.mc_mb_var = (uint16_t *)s->dummy;
-        s->m.current_picture.mb_type = s->dummy;
+        s->m.cur_pic.mb_type = s->dummy;
 
-        s->m.current_picture.motion_val[0]   = s->motion_val8[plane] + 2;
+        s->m.cur_pic.motion_val[0]   = s->motion_val8[plane] + 2;
         s->m.p_mv_table                      = s->motion_val16[plane] +
                                                s->m.mb_stride + 1;
         s->m.mecc                            = s->mecc; // move
@@ -381,7 +379,7 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
         s->m.me.dia_size      = s->avctx->dia_size;
         s->m.first_slice_line = 1;
         for (y = 0; y < block_height; y++) {
-            s->m.new_picture->data[0]  = src - y * 16 * stride; // ugly
+            s->m.new_pic->data[0]  = src - y * 16 * stride; // ugly
             s->m.mb_y                  = y;
 
             for (i = 0; i < 16 && i + 16 * y < height; i++) {
@@ -545,14 +543,14 @@ static av_cold int svq1_encode_end(AVCodecContext *avctx)
                s->rd_total / (double)(avctx->width * avctx->height *
                                       avctx->frame_num));
 
-    s->m.mb_type = NULL;
-    ff_mpv_common_end(&s->m);
-
     av_freep(&s->m.me.scratchpad);
     av_freep(&s->m.me.map);
     av_freep(&s->mb_type);
     av_freep(&s->dummy);
     av_freep(&s->scratchbuf);
+
+    s->m.mb_type = NULL;
+    ff_mpv_common_end(&s->m);
 
     for (i = 0; i < 3; i++) {
         av_freep(&s->motion_val8[i]);
@@ -561,7 +559,7 @@ static av_cold int svq1_encode_end(AVCodecContext *avctx)
 
     av_frame_free(&s->current_picture);
     av_frame_free(&s->last_picture);
-    av_frame_free(&s->m.new_picture);
+    av_frame_free(&s->m.new_pic);
 
     return 0;
 }
@@ -624,10 +622,10 @@ static av_cold int svq1_encode_init(AVCodecContext *avctx)
     s->dummy               = av_mallocz((s->y_block_width + 1) *
                                         s->y_block_height * sizeof(int32_t));
     s->m.me.map            = av_mallocz(2 * ME_MAP_SIZE * sizeof(*s->m.me.map));
-    s->m.new_picture       = av_frame_alloc();
+    s->m.new_pic       = av_frame_alloc();
 
     if (!s->m.me.scratchpad || !s->m.me.map ||
-        !s->mb_type || !s->dummy || !s->m.new_picture)
+        !s->mb_type || !s->dummy || !s->m.new_pic)
         return AVERROR(ENOMEM);
     s->m.me.score_map = s->m.me.map + ME_MAP_SIZE;
 

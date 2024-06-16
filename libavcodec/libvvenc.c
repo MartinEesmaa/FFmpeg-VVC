@@ -20,11 +20,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "config_components.h"
-
 #include <vvenc/vvenc.h>
 #include <vvenc/vvencCfg.h>
 #include <vvenc/version.h>
+
+#include "libavutil/avstring.h"
+#include "libavutil/avutil.h"
+#include "libavutil/common.h"
+#include "libavutil/frame.h"
+#include "libavutil/imgutils.h"
+#include "libavutil/log.h"
+#include "libavutil/mem.h"
+#include "libavutil/pixdesc.h"
+#include "libavutil/opt.h"
 
 #include "avcodec.h"
 #include "codec_internal.h"
@@ -33,402 +41,390 @@
 #include "packet_internal.h"
 #include "profiles.h"
 
-#include "libavutil/avutil.h"
-#include "libavutil/pixdesc.h"
-#include "libavutil/opt.h"
-#include "libavutil/mem.h"
-#include "libavutil/common.h"
-#include "libavutil/imgutils.h"
-#include "libavutil/frame.h"
-#include "libavutil/log.h"
-
-typedef struct VVenCOptions {
-    int preset;                 // preset 0: faster  4: slower
-    int qp;                     // quantization parameter 0-63
-    int subjectiveOptimization; // perceptually motivated QP adaptation, XPSNR based
-    int flag8bitCoding;         // encode in 8bit instead of 10bit
-    int intraRefreshSec;        // intra period/refresh in seconds
-    int levelIdc;               // vvc level_idc
-    int tier;                   // vvc tier
-    AVDictionary *vvenc_opts;
-} VVenCOptions;
+#define VVENC_VERSION_INT  AV_VERSION_INT(VVENC_VERSION_MAJOR, \
+                                          VVENC_VERSION_MINOR, \
+                                          VVENC_VERSION_PATCH)
 
 typedef struct VVenCContext {
-    AVClass         *av_class;
-    VVenCOptions    options;      // encoder options
-    vvencEncoder    *vvencEnc;
-    vvencAccessUnit *pAU;
-    bool            encodeDone;
+    AVClass         *class;
+    vvencEncoder    *encoder;
+    vvencAccessUnit *au;
+    bool             encode_done;
+    int   preset;
+    int   qp;
+    int   qpa;
+    int   intra_refresh_sec;
+    char *level;
+    int   tier;
+    char *stats;
+    AVDictionary *vvenc_opts;
 } VVenCContext;
 
-
-static av_cold void ff_vvenc_log_callback(void *avctx, int level,
-                                          const char *fmt, va_list args)
+static void vvenc_log_callback(void *ctx, int level,
+                               const char *fmt, va_list args)
 {
-    vfprintf(level == 1 ? stderr : stdout, fmt, args);
-}
-
-static void ff_vvenc_internalLog(void *ctx, int level, const char *fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    ff_vvenc_log_callback(ctx, level, fmt, args);
-    va_end(args);
-}
-
-static av_cold int ff_vvenc_encode_init(AVCodecContext *avctx)
-{
-    int ret;
-    int framerate, qp, parse_ret;
-    VVenCContext *s;
     vvenc_config params;
-    vvencPresetMode preset;
-    AVDictionaryEntry *en;
-    char statsfile[1024] = "vvenc-rcstats.json";
+    vvencEncoder *encoder = ctx;
+    if (encoder) {
+        vvenc_config_default(&params);
+        vvenc_get_config(encoder, &params);
+        if ((int)params.m_verbosity >= level)
+            vfprintf(level == 1 ? stderr : stdout, fmt, args);
+    }
+}
 
-    s = (VVenCContext *) avctx->priv_data;
-    qp = (vvencPresetMode) s->options.qp;
-    preset = (vvencPresetMode) s->options.preset;
+static void vvenc_set_verbository(vvenc_config *params)
+{
+    int loglevel = av_log_get_level();
+    params->m_verbosity = VVENC_SILENT;
+    if (loglevel >= AV_LOG_DEBUG)
+        params->m_verbosity = VVENC_DETAILS;
+    else if (loglevel >= AV_LOG_VERBOSE)
+        params->m_verbosity = VVENC_NOTICE;
+    else if (loglevel >= AV_LOG_INFO)
+        params->m_verbosity = VVENC_WARNING;
+}
 
-    if (avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) {
-        av_log(avctx, AV_LOG_ERROR,
-               "ff_vvenc_encode_init::init() interlaced encoding not supported yet\n");
-        return AVERROR_INVALIDDATA;
+static void vvenc_set_pic_format(AVCodecContext *avctx, vvenc_config *params)
+{
+    params->m_internChromaFormat = VVENC_CHROMA_420;
+    params->m_inputBitDepth[0]   = 10;
+}
+
+static void vvenc_set_color_format(AVCodecContext *avctx, vvenc_config *params)
+{
+    if (avctx->color_primaries != AVCOL_PRI_UNSPECIFIED)
+        params->m_colourPrimaries = (int) avctx->color_primaries;
+    if (avctx->colorspace != AVCOL_SPC_UNSPECIFIED)
+        params->m_matrixCoefficients = (int) avctx->colorspace;
+    if (avctx->color_trc != AVCOL_TRC_UNSPECIFIED) {
+        params->m_transferCharacteristics = (int) avctx->color_trc;
+
+        if (avctx->color_trc == AVCOL_TRC_SMPTE2084)
+            params->m_HdrMode = (avctx->color_primaries == AVCOL_PRI_BT2020) ?
+                                VVENC_HDR_PQ_BT2020 : VVENC_HDR_PQ;
+        else if (avctx->color_trc == AVCOL_TRC_BT2020_10 || avctx->color_trc == AVCOL_TRC_ARIB_STD_B67)
+            params->m_HdrMode = (avctx->color_trc == AVCOL_TRC_BT2020_10 ||
+                                 avctx->color_primaries == AVCOL_PRI_BT2020 ||
+                                 avctx->colorspace == AVCOL_SPC_BT2020_NCL ||
+                                 avctx->colorspace == AVCOL_SPC_BT2020_CL) ?
+                                VVENC_HDR_HLG_BT2020 : VVENC_HDR_HLG;
     }
 
-    vvenc_config_default(&params);
+    if (params->m_HdrMode == VVENC_HDR_OFF &&
+        (avctx->color_primaries != AVCOL_PRI_UNSPECIFIED || avctx->colorspace != AVCOL_SPC_UNSPECIFIED)) {
+        params->m_vuiParametersPresent = 1;
+        params->m_colourDescriptionPresent = true;
+    }
+}
 
-    // set desired encoding options
-    framerate = avctx->time_base.den / avctx->time_base.num;
-    vvenc_init_default(&params, avctx->width, avctx->height, framerate,
-                       (qp >= 0) ? 0 : avctx->bit_rate, (qp < 0) ? 32 : qp, preset);
-    params.m_FrameRate = avctx->time_base.den;
-    params.m_FrameScale = avctx->time_base.num;
-
-    params.m_verbosity = VVENC_VERBOSE;
-    if (av_log_get_level() >= AV_LOG_DEBUG)
-        params.m_verbosity = VVENC_DETAILS;
-    else if (av_log_get_level() >= AV_LOG_VERBOSE)
-        params.m_verbosity = VVENC_NOTICE;      // output per picture info
-    else if (av_log_get_level() >= AV_LOG_INFO)
-        params.m_verbosity = VVENC_WARNING;     // ffmpeg default ffmpeg loglevel
-    else
-        params.m_verbosity = VVENC_SILENT;
+static void vvenc_set_framerate(AVCodecContext *avctx, vvenc_config *params)
+{
+    if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
+        params->m_FrameRate = avctx->framerate.num;
+        params->m_FrameScale = avctx->framerate.den;
+    } else {
+        params->m_FrameRate = avctx->time_base.den;
+        params->m_FrameScale = avctx->time_base.num;
+    }
 
 FF_DISABLE_DEPRECATION_WARNINGS
 
 #if FF_API_TICKS_PER_FRAME
     if (avctx->ticks_per_frame == 1) {
 #endif
-        params.m_TicksPerSecond = -1;   // auto mode for ticks per frame = 1
+        params->m_TicksPerSecond = -1;   /* auto mode for ticks per frame = 1 */
 #if FF_API_TICKS_PER_FRAME
     } else {
-        params.m_TicksPerSecond =
+        params->m_TicksPerSecond =
             ceil((avctx->time_base.den / (double) avctx->time_base.num) *
                  (double) avctx->ticks_per_frame);
     }
 #endif
 FF_ENABLE_DEPRECATION_WARNINGS
+}
+
+static int vvenc_parse_vvenc_params(AVCodecContext *avctx, vvenc_config *params)
+{
+    VVenCContext *s = avctx->priv_data;
+    const AVDictionaryEntry *en = NULL;
+    int parse_ret;
+    int ret = 0;
+
+    while ((en = av_dict_iterate(s->vvenc_opts, en))) {
+        av_log(avctx, AV_LOG_DEBUG, "vvenc_set_param: '%s:%s'\n", en->key,
+               en->value);
+        parse_ret = vvenc_set_param(params, en->key, en->value);
+        switch (parse_ret) {
+        case VVENC_PARAM_BAD_NAME:
+            av_log(avctx, AV_LOG_ERROR, "Unknown vvenc option: %s.\n", en->key);
+            ret = AVERROR(EINVAL);
+            break;
+        case VVENC_PARAM_BAD_VALUE:
+            av_log(avctx, AV_LOG_ERROR, "Invalid vvenc value for %s: %s.\n", en->key, en->value);
+            ret = AVERROR(EINVAL);
+            break;
+        default:
+            break;
+        }
+
+        if (!av_strcasecmp(en->key, "rcstatsfile")) {
+            av_log(avctx, AV_LOG_ERROR, "vvenc-params 2pass option 'rcstatsfile' "
+                   "not available. Use option 'passlogfile'\n");
+            ret = AVERROR(EINVAL);
+        }
+        if (!av_strcasecmp(en->key, "passes") || !av_strcasecmp(en->key, "pass")) {
+            av_log(avctx, AV_LOG_ERROR, "vvenc-params 2pass option '%s' "
+                   "not available. Use option 'pass'\n", en->key);
+            ret = AVERROR(EINVAL);
+        }
+    }
+    return ret;
+}
+
+static int vvenc_set_rc_mode(AVCodecContext *avctx, vvenc_config *params)
+{
+    params->m_RCNumPasses = 1;
+    if ((avctx->flags & AV_CODEC_FLAG_PASS1 || avctx->flags & AV_CODEC_FLAG_PASS2)) {
+        if (!avctx->bit_rate) {
+            av_log(avctx, AV_LOG_ERROR, "A bitrate must be set to use two pass mode.\n");
+            return AVERROR(EINVAL);
+        }
+        params->m_RCNumPasses = 2;
+        if (avctx->flags & AV_CODEC_FLAG_PASS1)
+            params->m_RCPass = 1;
+        else
+            params->m_RCPass = 2;
+    }
+
+    if (avctx->rc_max_rate) {
+#if VVENC_VERSION_INT >= AV_VERSION_INT(1,8,0)
+        params->m_RCMaxBitrate = avctx->rc_max_rate;
+#endif
+
+#if VVENC_VERSION_INT < AV_VERSION_INT(1,11,0)
+        /* rc_max_rate without a bit_rate enables capped CQF mode.
+        (QP + subj. optimization + max. bitrate) */
+        if (!avctx->bit_rate) {
+            av_log(avctx, AV_LOG_ERROR, "Capped Constant Quality Factor mode (capped CQF) "
+                   "needs at least vvenc version >= 1.11.0 (current version %s)\n", vvenc_get_version());
+            return AVERROR(EINVAL);
+        }
+#endif
+    }
+    return 0;
+}
+
+static int vvenc_init_extradata(AVCodecContext *avctx, VVenCContext *s)
+{
+    int ret;
+    if (avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) {
+        ret = vvenc_get_headers(s->encoder, s->au);
+        if (0 != ret) {
+            av_log(avctx, AV_LOG_ERROR, "cannot get (SPS,PPS) headers: %s\n",
+                   vvenc_get_last_error(s->encoder));
+            return AVERROR(EINVAL);
+        }
+
+        if (s->au->payloadUsedSize <= 0) {
+            return AVERROR_INVALIDDATA;
+        }
+
+        avctx->extradata_size = s->au->payloadUsedSize;
+        avctx->extradata = av_mallocz(avctx->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (!avctx->extradata) {
+            return AVERROR(ENOMEM);
+        }
+
+        memcpy(avctx->extradata, s->au->payload, avctx->extradata_size);
+    }
+    return 0;
+}
+
+static av_cold int vvenc_init(AVCodecContext *avctx)
+{
+    int ret;
+    int framerate;
+    VVenCContext *s = avctx->priv_data;
+    vvenc_config params;
+    vvencPresetMode preset = (vvencPresetMode) s->preset;
+
+    if (avctx->flags & AV_CODEC_FLAG_INTERLACED_DCT) {
+        av_log(avctx, AV_LOG_ERROR, "interlaced not supported\n");
+        return AVERROR(EINVAL);
+    }
+
+    vvenc_config_default(&params);
+
+    if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
+        framerate = avctx->framerate.num / avctx->framerate.den;
+    else
+        framerate = avctx->time_base.den / avctx->time_base.num;
+
+    vvenc_init_default(&params, avctx->width, avctx->height, framerate,
+                       avctx->bit_rate, s->qp, preset);
+
+    vvenc_set_verbository(&params);
 
     if (avctx->thread_count > 0)
         params.m_numThreads = avctx->thread_count;
 
-    // GOP settings (IDR/CRA)
+    /* GOP settings (IDR/CRA) */
     if (avctx->flags & AV_CODEC_FLAG_CLOSED_GOP)
         params.m_DecodingRefreshType = VVENC_DRT_IDR;
 
     if (avctx->gop_size == 1) {
         params.m_GOPSize = 1;
         params.m_IntraPeriod = 1;
-    } else {
-        params.m_IntraPeriodSec = s->options.intraRefreshSec;
-    }
-
-    params.m_usePerceptQPA = s->options.subjectiveOptimization;
-    params.m_level         = (vvencLevel) s->options.levelIdc;
-    params.m_levelTier     = (vvencTier) s->options.tier;
+    } else
+        params.m_IntraPeriodSec = s->intra_refresh_sec;
 
     params.m_AccessUnitDelimiter = true;
+    params.m_usePerceptQPA = s->qpa;
+    params.m_levelTier     = (vvencTier) s->tier;
 
-    params.m_internChromaFormat = VVENC_CHROMA_420;
-    params.m_inputBitDepth[0]   = 10;
+    if (avctx->level > 0)
+        params.m_level = (vvencLevel)avctx->level;
 
-    if ( avctx->pix_fmt != AV_PIX_FMT_YUV420P10LE ){
-        av_log(avctx, AV_LOG_ERROR,
-               "unsupported pixel format %s, currently only support for yuv420p10le\n",
-                av_get_pix_fmt_name(avctx->pix_fmt));
-        return AVERROR(EINVAL);
-    }
-
-    if ( s->options.flag8bitCoding ) {
-#if VVENC_VERSION_MAJOR > 1 || (VVENC_VERSION_MAJOR == 1 && VVENC_VERSION_MINOR > 9) || (VVENC_VERSION_MAJOR == 1 && VVENC_VERSION_MINOR >= 9 && VVENC_VERSION_PATCH >= 1)
-        params.m_internalBitDepth[0] = 8;
-#else
-        av_log(avctx, AV_LOG_ERROR,
-                "unsupported 8bit coding mode. 8bit coding needs at least vvenc version >= 1.9.1\n",
-                av_get_pix_fmt_name(avctx->pix_fmt));
-        return AVERROR(EINVAL);
-#endif
-    }
-
-    if (avctx->color_primaries != AVCOL_PRI_UNSPECIFIED)
-        params.m_colourPrimaries = (int) avctx->color_primaries;
-    if (avctx->colorspace != AVCOL_SPC_UNSPECIFIED)
-        params.m_matrixCoefficients = (int) avctx->colorspace;
-    if (avctx->color_trc != AVCOL_TRC_UNSPECIFIED) {
-        params.m_transferCharacteristics = (int) avctx->color_trc;
-
-        if (avctx->color_trc == AVCOL_TRC_SMPTE2084)
-            params.m_HdrMode = (avctx->color_primaries == AVCOL_PRI_BT2020) ?
-                VVENC_HDR_PQ_BT2020 : VVENC_HDR_PQ;
-        else if (avctx->color_trc == AVCOL_TRC_BT2020_10
-                 || avctx->color_trc == AVCOL_TRC_ARIB_STD_B67)
-            params.m_HdrMode = (avctx->color_trc == AVCOL_TRC_BT2020_10 ||
-                                avctx->color_primaries == AVCOL_PRI_BT2020 ||
-                                avctx->colorspace == AVCOL_SPC_BT2020_NCL ||
-                                avctx->colorspace == AVCOL_SPC_BT2020_CL) ?
-                               VVENC_HDR_HLG_BT2020 : VVENC_HDR_HLG;
-    }
-
-    if (params.m_HdrMode == VVENC_HDR_OFF
-        && (avctx->color_primaries != AVCOL_PRI_UNSPECIFIED
-            || avctx->colorspace != AVCOL_SPC_UNSPECIFIED)) {
-        params.m_vuiParametersPresent = 1;
-        params.m_colourDescriptionPresent = true;
-    }
-
-    params.m_RCNumPasses = 1;
-    en = NULL;
-    while ((en = av_dict_get(s->options.vvenc_opts, "", en,
-                             AV_DICT_IGNORE_SUFFIX))) {
-        av_log(avctx, AV_LOG_DEBUG, "vvenc_set_param: '%s:%s'\n", en->key,
-               en->value);
-        parse_ret = vvenc_set_param(&params, en->key, en->value);
-        switch (parse_ret) {
-        case VVENC_PARAM_BAD_NAME:
-            av_log(avctx, AV_LOG_WARNING, "Unknown vvenc option: %s.\n",
-                   en->key);
-            break;
-        case VVENC_PARAM_BAD_VALUE:
-            av_log(avctx, AV_LOG_WARNING,
-                   "Invalid vvenc value for %s: %s.\n", en->key, en->value);
-            break;
-        default:
-            break;
-        }
-
-        if (memcmp(en->key, "rcstatsfile", 11) == 0 ||
-            memcmp(en->key, "RCStatsFile", 11) == 0) {
-            strncpy(statsfile, en->value, sizeof(statsfile) - 1);
-            statsfile[sizeof(statsfile) - 1] = '\0';
-        }
-    }
-
-    if (params.m_RCPass != -1 && params.m_RCNumPasses == 1)
-        params.m_RCNumPasses = 2;       // enable 2pass mode
-
-#if VVENC_VERSION_MAJOR > 1 || (VVENC_VERSION_MAJOR == 1 && VVENC_VERSION_MINOR > 8)
-    if(avctx->rc_max_rate) {
-        if(!avctx->bit_rate) {
-            av_log( avctx, AV_LOG_ERROR, "Rate control parameters set without a bitrate\n");
+    if (s->level) {
+        if (VVENC_PARAM_BAD_VALUE == vvenc_set_param(&params, "level", s->level)) {
+            av_log(avctx, AV_LOG_ERROR, "Invalid level_idc: %s.\n", s->level);
             return AVERROR(EINVAL);
         }
-        else
-            params.m_RCMaxBitrate = avctx->rc_max_rate;
     }
-#endif
 
-    s->vvencEnc = vvenc_encoder_create();
-    if (NULL == s->vvencEnc) {
-        av_log(avctx, AV_LOG_ERROR, "cannot create vvc encoder (vvenc)\n");
+    vvenc_set_framerate(avctx, &params);
+
+    vvenc_set_pic_format(avctx, &params);
+
+    vvenc_set_color_format(avctx, &params);
+
+    ret = vvenc_parse_vvenc_params(avctx, &params);
+    if (ret != 0)
+        return ret;
+
+    ret = vvenc_set_rc_mode(avctx, &params);
+    if (ret != 0)
+        return ret;
+
+    s->encoder = vvenc_encoder_create();
+    if (!s->encoder) {
+        av_log(avctx, AV_LOG_ERROR, "cannot create libvvenc encoder\n");
         return AVERROR(ENOMEM);
     }
 
-    vvenc_set_msg_callback(&params, s->vvencEnc, ff_vvenc_log_callback);
-    ret = vvenc_encoder_open(s->vvencEnc, &params);
-    if (0 != ret) {
-        av_log(avctx, AV_LOG_ERROR, "cannot open vvc encoder (vvenc): %s\n",
-               vvenc_get_last_error(s->vvencEnc));
-        vvenc_encoder_close(s->vvencEnc);
-        return AVERROR(EINVAL);
+    vvenc_set_msg_callback(&params, s->encoder, vvenc_log_callback);
+    ret = vvenc_encoder_open(s->encoder, &params);
+    if (ret != 0) {
+        av_log(avctx, AV_LOG_ERROR, "cannot open libvvenc encoder: %s\n",
+               vvenc_get_last_error(s->encoder));
+        return AVERROR_EXTERNAL;
     }
 
-    vvenc_get_config(s->vvencEnc, &params);     // get the adapted config
+    vvenc_get_config(s->encoder, &params);     /* get the adapted config */
 
-    if (params.m_verbosity >= VVENC_INFO
-        && av_log_get_level() <= AV_LOG_INFO) {
-        ff_vvenc_internalLog(avctx, params.m_verbosity, "vvenc version: %s\n",
-                             vvenc_get_version());
-        ff_vvenc_internalLog(avctx, params.m_verbosity, "%s\n",
-                             vvenc_get_config_as_string(&params,
-                                                        params.m_verbosity));
-    } else {
-        vvencMsgLevel loglvl = VVENC_INFO;
-        if (av_log_get_level() >= AV_LOG_DEBUG)
-            loglvl = VVENC_DETAILS;
-        else if (av_log_get_level() >= AV_LOG_VERBOSE)
-            loglvl = VVENC_VERBOSE;
-
-        av_log(avctx, av_log_get_level(), "vvenc version: %s\n",
-              vvenc_get_version());
-        av_log(avctx, av_log_get_level(), "%s\n",
-              vvenc_get_config_as_string(&params, loglvl ));
-    }
+    av_log(avctx, AV_LOG_INFO, "libvvenc version: %s\n", vvenc_get_version());
+    if (av_log_get_level() >= AV_LOG_VERBOSE)
+        av_log(avctx, AV_LOG_INFO, "%s\n", vvenc_get_config_as_string(&params, params.m_verbosity));
 
     if (params.m_RCNumPasses == 2) {
-        ret = vvenc_init_pass(s->vvencEnc, params.m_RCPass - 1, &statsfile[0]);
-        if (0 != ret) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "cannot init pass %d for vvc encoder (vvenc): %s\n",
-                   params.m_RCPass, vvenc_get_last_error(s->vvencEnc));
-            vvenc_encoder_close(s->vvencEnc);
-            return AVERROR(EINVAL);
+        ret = vvenc_init_pass(s->encoder, params.m_RCPass - 1, s->stats);
+        if (ret != 0) {
+            av_log(avctx, AV_LOG_ERROR, "cannot init pass %d: %s\n",  params.m_RCPass,
+                   vvenc_get_last_error(s->encoder));
+            return AVERROR_EXTERNAL;
         }
     }
 
-    s->pAU = vvenc_accessUnit_alloc();
-    vvenc_accessUnit_alloc_payload(s->pAU, avctx->width * avctx->height);
-
-    if (avctx->flags & AV_CODEC_FLAG_GLOBAL_HEADER) {
-        ret = vvenc_get_headers(s->vvencEnc, s->pAU);
-        if (0 != ret) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "cannot get headers (SPS,PPS) from vvc encoder(vvenc): %s\n",
-                   vvenc_get_last_error(s->vvencEnc));
-            vvenc_encoder_close(s->vvencEnc);
-            return AVERROR(EINVAL);
-        }
-
-        if (s->pAU->payloadUsedSize <= 0) {
-            vvenc_encoder_close(s->vvencEnc);
-            return AVERROR_INVALIDDATA;
-        }
-
-        avctx->extradata_size = s->pAU->payloadUsedSize;
-        avctx->extradata =
-            av_malloc(avctx->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
-        if (!avctx->extradata) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "Cannot allocate VVC header of size %d.\n",
-                   avctx->extradata_size);
-            vvenc_encoder_close(s->vvencEnc);
-            return AVERROR(ENOMEM);
-        }
-
-        memcpy(avctx->extradata, s->pAU->payload, avctx->extradata_size);
-        memset(avctx->extradata + avctx->extradata_size, 0,
-               AV_INPUT_BUFFER_PADDING_SIZE);
+    s->au = vvenc_accessUnit_alloc();
+    if (!s->au) {
+        av_log(avctx, AV_LOG_FATAL, "cannot allocate memory for AU payload\n");
+        return AVERROR(ENOMEM);
     }
-    s->encodeDone = false;
+    vvenc_accessUnit_alloc_payload(s->au, avctx->width * avctx->height);
+    if (!s->au->payload) {
+        av_log(avctx, AV_LOG_FATAL, "cannot allocate payload memory of size %d\n",
+               avctx->width * avctx->height);
+        return AVERROR(ENOMEM);
+    }
+
+    ret = vvenc_init_extradata(avctx, s);
+    if (ret != 0)
+        return ret;
+
+    s->encode_done = false;
     return 0;
 }
 
-static av_cold int ff_vvenc_encode_close(AVCodecContext * avctx)
+static av_cold int vvenc_close(AVCodecContext *avctx)
 {
-    VVenCContext *s = (VVenCContext *) avctx->priv_data;
-    if (s->vvencEnc) {
-        if (av_log_get_level() >= AV_LOG_VERBOSE)
-            vvenc_print_summary(s->vvencEnc);
+    VVenCContext *s = avctx->priv_data;
 
-        if (0 != vvenc_encoder_close(s->vvencEnc)) {
-            av_log(avctx, AV_LOG_ERROR, "cannot close vvenc\n");
-            return -1;
-        }
+    if (s->au)
+        vvenc_accessUnit_free(s->au, true);
+
+    if (s->encoder) {
+        vvenc_print_summary(s->encoder);
+
+        if (0 != vvenc_encoder_close(s->encoder))
+            return AVERROR_EXTERNAL;
     }
-
-    vvenc_accessUnit_free(s->pAU, true);
 
     return 0;
 }
 
-static av_cold int ff_vvenc_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
-                                         const AVFrame *frame, int *got_packet)
+static av_cold int vvenc_frame(AVCodecContext *avctx, AVPacket *pkt, const AVFrame *frame,
+                               int *got_packet)
 {
-    VVenCContext *s = (VVenCContext *) avctx->priv_data;
+    VVenCContext *s = avctx->priv_data;
     vvencYUVBuffer *pyuvbuf;
     vvencYUVBuffer yuvbuf;
-    int pict_type;
     int ret;
 
     pyuvbuf = NULL;
     if (frame) {
-        if (avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE) {
-            vvenc_YUVBuffer_default(&yuvbuf);
-            yuvbuf.planes[0].ptr = (int16_t *) frame->data[0];
-            yuvbuf.planes[1].ptr = (int16_t *) frame->data[1];
-            yuvbuf.planes[2].ptr = (int16_t *) frame->data[2];
+        vvenc_YUVBuffer_default(&yuvbuf);
+        yuvbuf.planes[0].ptr = (int16_t *) frame->data[0];
+        yuvbuf.planes[1].ptr = (int16_t *) frame->data[1];
+        yuvbuf.planes[2].ptr = (int16_t *) frame->data[2];
 
-            yuvbuf.planes[0].width = frame->width;
-            yuvbuf.planes[0].height = frame->height;
-            yuvbuf.planes[0].stride = frame->linesize[0] >> 1;  // stride is used in samples (16bit) in vvenc, ffmpeg uses stride in bytes
+        yuvbuf.planes[0].width  = frame->width;
+        yuvbuf.planes[0].height = frame->height;
+        yuvbuf.planes[0].stride = frame->linesize[0] >> 1; /* stride is used in 16bit samples in vvenc */
 
-            yuvbuf.planes[1].width = frame->width >> 1;
-            yuvbuf.planes[1].height = frame->height >> 1;
-            yuvbuf.planes[1].stride = frame->linesize[1] >> 1;
+        yuvbuf.planes[1].width  = frame->width >> 1;
+        yuvbuf.planes[1].height = frame->height >> 1;
+        yuvbuf.planes[1].stride = frame->linesize[1] >> 1;
 
-            yuvbuf.planes[2].width = frame->width >> 1;
-            yuvbuf.planes[2].height = frame->height >> 1;
-            yuvbuf.planes[2].stride = frame->linesize[2] >> 1;
+        yuvbuf.planes[2].width  = frame->width >> 1;
+        yuvbuf.planes[2].height = frame->height >> 1;
+        yuvbuf.planes[2].stride = frame->linesize[2] >> 1;
 
-            yuvbuf.cts = frame->pts;
-            yuvbuf.ctsValid = true;
-            pyuvbuf = &yuvbuf;
-        } else {
-            av_log(avctx, AV_LOG_ERROR,
-                   "unsupported input colorspace! input must be yuv420p10le");
-            return AVERROR(EINVAL);
-        }
+        yuvbuf.cts = frame->pts;
+        yuvbuf.ctsValid = true;
+        pyuvbuf = &yuvbuf;
     }
 
-    if (!s->encodeDone) {
-        ret = vvenc_encode(s->vvencEnc, pyuvbuf, s->pAU, &s->encodeDone);
-        if (ret != 0) {
-            av_log(avctx, AV_LOG_ERROR, "error in vvenc::encode - ret:%d\n",
-                   ret);
-            return AVERROR(EINVAL);
-        }
-    } else {
-        *got_packet = 0;
-        return 0;
-    }
-
-    if (s->pAU->payloadUsedSize > 0) {
-        ret = ff_get_encode_buffer(avctx, pkt, s->pAU->payloadUsedSize, 0);
-        if (ret < 0) {
-            av_log(avctx, AV_LOG_ERROR, "Error getting output packet.\n");
-            return ret;
-        }
-
-        memcpy(pkt->data, s->pAU->payload, s->pAU->payloadUsedSize);
-
-        if (s->pAU->ctsValid)
-            pkt->pts = s->pAU->cts;
-        if (s->pAU->dtsValid)
-            pkt->dts = s->pAU->dts;
-        pkt->flags |= AV_PKT_FLAG_KEY * s->pAU->rap;
-
-        switch (s->pAU->sliceType) {
-        case VVENC_I_SLICE:
-            pict_type = AV_PICTURE_TYPE_I;
-            break;
-        case VVENC_P_SLICE:
-            pict_type = AV_PICTURE_TYPE_P;
-            break;
-        case VVENC_B_SLICE:
-            pict_type = AV_PICTURE_TYPE_B;
-            break;
-        default:
-            av_log(avctx, AV_LOG_ERROR, "Unknown picture type encountered.\n");
+    if (!s->encode_done) {
+        if (vvenc_encode(s->encoder, pyuvbuf, s->au, &s->encode_done) != 0)
             return AVERROR_EXTERNAL;
-        }
+    } else
+        return 0;
 
-        ff_side_data_set_encoder_stats(pkt, 0, NULL, 0, pict_type);
+    if (s->au->payloadUsedSize > 0) {
+        ret = ff_get_encode_buffer(avctx, pkt, s->au->payloadUsedSize, 0);
+        if (ret < 0)
+            return ret;
+
+        memcpy(pkt->data, s->au->payload, s->au->payloadUsedSize);
+
+        if (s->au->ctsValid)
+            pkt->pts = s->au->cts;
+        if (s->au->dtsValid)
+            pkt->dts = s->au->dts;
+        pkt->flags |= AV_PKT_FLAG_KEY * s->au->rap;
 
         *got_packet = 1;
-
-        return 0;
-    } else {
-        *got_packet = 0;
         return 0;
     }
 
@@ -436,66 +432,60 @@ static av_cold int ff_vvenc_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 }
 
 static const enum AVPixelFormat pix_fmts_vvenc[] = {
-    AV_PIX_FMT_YUV420P10LE,
+    AV_PIX_FMT_YUV420P10,
     AV_PIX_FMT_NONE
 };
 
 #define OFFSET(x) offsetof(VVenCContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
-static const AVOption libvvenc_options[] = {
-    {"preset", "set encoding preset(0: faster - 4: slower", OFFSET( options.preset), AV_OPT_TYPE_INT, {.i64 = 2} , 0 , 4 , VE, "preset"},
-        { "faster", "0", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_FASTER}, INT_MIN, INT_MAX, VE, "preset" },
-        { "fast",   "1", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_FAST},   INT_MIN, INT_MAX, VE, "preset" },
-        { "medium", "2", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_MEDIUM}, INT_MIN, INT_MAX, VE, "preset" },
-        { "slow",   "3", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_SLOW},   INT_MIN, INT_MAX, VE, "preset" },
-        { "slower", "4", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_SLOWER}, INT_MIN, INT_MAX, VE, "preset" },
-    { "qp"     , "set quantization", OFFSET(options.qp), AV_OPT_TYPE_INT,  {.i64 = -1}, -1 , 63 ,VE, "qp_mode" },
-    { "period" , "set (intra) refresh period in seconds", OFFSET(options.intraRefreshSec), AV_OPT_TYPE_INT,  {.i64 = 1},  1 , INT_MAX ,VE,"irefreshsec" },
-    { "subjopt", "set subjective (perceptually motivated) optimization", OFFSET(options.subjectiveOptimization), AV_OPT_TYPE_BOOL, {.i64 = 1},  0 , 1, VE},
-    { "bitdepth8", "set 8bit coding mode", OFFSET(options.flag8bitCoding), AV_OPT_TYPE_BOOL, {.i64 = 0},  0 , 1, VE},
-    { "vvenc-params", "set the vvenc configuration using a :-separated list of key=value parameters", OFFSET(options.vvenc_opts), AV_OPT_TYPE_DICT, { 0 }, 0, 0, VE },
-    { "levelidc", "vvc level_idc", OFFSET( options.levelIdc), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 105, VE, "levelidc"},
-        { "0",   "auto", 0, AV_OPT_TYPE_CONST, {.i64 = 0},  INT_MIN, INT_MAX, VE, "levelidc"},
-        { "1",   "1"   , 0, AV_OPT_TYPE_CONST, {.i64 = 16}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "2",   "2"   , 0, AV_OPT_TYPE_CONST, {.i64 = 32}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "2.1", "2.1" , 0, AV_OPT_TYPE_CONST, {.i64 = 35}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "3",   "3"   , 0, AV_OPT_TYPE_CONST, {.i64 = 48}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "3.1", "3.1" , 0, AV_OPT_TYPE_CONST, {.i64 = 51}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "4",   "4"   , 0, AV_OPT_TYPE_CONST, {.i64 = 64}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "4.1", "4.1" , 0, AV_OPT_TYPE_CONST, {.i64 = 67}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "5",   "5"   , 0, AV_OPT_TYPE_CONST, {.i64 = 80}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "5.1", "5.1" , 0, AV_OPT_TYPE_CONST, {.i64 = 83}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "5.2", "5.2" , 0, AV_OPT_TYPE_CONST, {.i64 = 86}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "6",   "6"   , 0, AV_OPT_TYPE_CONST, {.i64 = 96}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "6.1", "6.1" , 0, AV_OPT_TYPE_CONST, {.i64 = 99}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "6.2", "6.2" , 0, AV_OPT_TYPE_CONST, {.i64 = 102}, INT_MIN, INT_MAX, VE, "levelidc"},
-        { "6.3", "6.3" , 0, AV_OPT_TYPE_CONST, {.i64 = 105}, INT_MIN, INT_MAX, VE, "levelidc"},
-    { "tier", "set vvc tier", OFFSET( options.tier), AV_OPT_TYPE_INT, {.i64 = 0},  0 , 1 , VE, "tier"},
-        { "main", "main", 0, AV_OPT_TYPE_CONST, {.i64 = 0}, INT_MIN, INT_MAX, VE, "tier"},
-        { "high", "high", 0, AV_OPT_TYPE_CONST, {.i64 = 1}, INT_MIN, INT_MAX, VE, "tier"},
+static const AVOption options[] = {
+    { "preset",       "set encoding preset", OFFSET(preset), AV_OPT_TYPE_INT, {.i64 = 2}, 0, 4, VE, "preset"},
+    { "faster",       "0", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_FASTER}, INT_MIN, INT_MAX, VE, "preset" },
+    { "fast",         "1", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_FAST},   INT_MIN, INT_MAX, VE, "preset" },
+    { "medium",       "2", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_MEDIUM}, INT_MIN, INT_MAX, VE, "preset" },
+    { "slow",         "3", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_SLOW},   INT_MIN, INT_MAX, VE, "preset" },
+    { "slower",       "4", 0, AV_OPT_TYPE_CONST, {.i64 = VVENC_SLOWER}, INT_MIN, INT_MAX, VE, "preset" },
+    { "qp",           "set quantization",          OFFSET(qp), AV_OPT_TYPE_INT,  {.i64 = 32}, -1, 63, VE },
+    { "qpa",          "set subjective (perceptually motivated) optimization", OFFSET(qpa), AV_OPT_TYPE_BOOL, {.i64 = 1},  0, 1, VE},
+    { "passlogfile",  "Filename for 2 pass stats", OFFSET(stats), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, VE},
+    { "stats",        "Filename for 2 pass stats", OFFSET(stats), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, VE},
+    { "period",       "set (intra) refresh period in seconds", OFFSET(intra_refresh_sec), AV_OPT_TYPE_INT,  {.i64 = 1},  1, INT_MAX, VE },
+    { "vvenc-params", "set the vvenc configuration using a :-separated list of key=value parameters", OFFSET(vvenc_opts), AV_OPT_TYPE_DICT, { 0 }, 0, 0, VE },
+    { "level",        "Specify level (as defined by Annex A)", OFFSET(level), AV_OPT_TYPE_STRING, {.str = NULL}, 0, 0, VE},
+    { "tier",         "set vvc tier", OFFSET(tier), AV_OPT_TYPE_INT, {.i64 = 0},  0, 1, VE, "tier"},
+    { "main",         "main", 0, AV_OPT_TYPE_CONST, {.i64 = 0}, INT_MIN, INT_MAX, VE, "tier"},
+    { "high",         "high", 0, AV_OPT_TYPE_CONST, {.i64 = 1}, INT_MIN, INT_MAX, VE, "tier"},
     {NULL}
 };
 
-static const AVClass class_libvvenc = {
-    .class_name = "libvvenc-vvc encoder",
+static const AVClass class = {
+    .class_name = "libvvenc",
     .item_name  = av_default_item_name,
-    .option     = libvvenc_options,
+    .option     = options,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-FFCodec ff_libvvenc_encoder = {
+static const FFCodecDefault vvenc_defaults[] = {
+    { "b", "0" },
+    { "g", "-1" },
+    { NULL },
+};
+
+const FFCodec ff_libvvenc_encoder = {
     .p.name         = "libvvenc",
-    CODEC_LONG_NAME("H.266 / VVC Encoder VVenC"),
+    CODEC_LONG_NAME("libvvenc H.266 / VVC"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VVC,
-    .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_OTHER_THREADS,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+                      AV_CODEC_CAP_OTHER_THREADS,
     .p.profiles     = NULL_IF_CONFIG_SMALL(ff_vvc_profiles),
-    .p.priv_class   = &class_libvvenc,
+    .p.priv_class   = &class,
     .p.wrapper_name = "libvvenc",
     .priv_data_size = sizeof(VVenCContext),
     .p.pix_fmts     = pix_fmts_vvenc,
-    .init           = ff_vvenc_encode_init,
-    FF_CODEC_ENCODE_CB(ff_vvenc_encode_frame),
-    .close          = ff_vvenc_encode_close,
-    .caps_internal  = FF_CODEC_CAP_AUTO_THREADS,
+    .init           = vvenc_init,
+    FF_CODEC_ENCODE_CB(vvenc_frame),
+    .close          = vvenc_close,
+    .defaults       = vvenc_defaults,
+    .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_AUTO_THREADS
 };

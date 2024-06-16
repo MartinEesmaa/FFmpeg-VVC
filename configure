@@ -2134,12 +2134,7 @@ AUTODETECT_LIBS="
 
 ARCH_LIST="
     aarch64
-    alpha
     arm
-    avr32
-    avr32_ap
-    avr32_uc
-    bfin
     ia64
     loongarch
     loongarch32
@@ -2152,7 +2147,6 @@ ARCH_LIST="
     ppc64
     riscv
     s390
-    sh4
     sparc
     sparc64
     tilegx
@@ -2822,8 +2816,8 @@ for ext in $(filter_out mmx $ARCH_EXT_LIST_X86_SIMD); do
 done
 
 aligned_stack_if_any="aarch64 ppc x86"
-fast_64bit_if_any="aarch64 alpha ia64 mips64 parisc64 ppc64 riscv64 sparc64 x86_64"
-fast_clz_if_any="aarch64 alpha avr32 mips ppc x86"
+fast_64bit_if_any="aarch64 ia64 mips64 parisc64 ppc64 riscv64 sparc64 x86_64"
+fast_clz_if_any="aarch64 mips ppc x86"
 fast_unaligned_if_any="aarch64 ppc x86"
 simd_align_16_if_any="altivec neon sse"
 simd_align_32_if_any="avx"
@@ -5260,9 +5254,6 @@ case "$arch" in
     s390|s390x)
         arch="s390"
     ;;
-    sh4|sh)
-        arch="sh4"
-    ;;
     sun4*|sparc*)
         arch="sparc"
     ;;
@@ -5288,10 +5279,6 @@ if enabled aarch64; then
             cpuflags="-mcpu=$cpu"
         ;;
     esac
-
-elif enabled alpha; then
-
-    cpuflags="-mcpu=$cpu"
 
 elif enabled arm; then
 
@@ -5358,31 +5345,6 @@ elif enabled arm; then
     esac
 
     test_cflags -mfp16-format=ieee && add_cflags -mfp16-format=ieee
-
-elif enabled avr32; then
-
-    case $cpu in
-        ap7[02]0[0-2])
-            subarch="avr32_ap"
-            cpuflags="-mpart=$cpu"
-        ;;
-        ap)
-            subarch="avr32_ap"
-            cpuflags="-march=$cpu"
-        ;;
-        uc3[ab]*)
-            subarch="avr32_uc"
-            cpuflags="-mcpu=$cpu"
-        ;;
-        uc)
-            subarch="avr32_uc"
-            cpuflags="-march=$cpu"
-        ;;
-    esac
-
-elif enabled bfin; then
-
-    cpuflags="-mcpu=$cpu"
 
 elif enabled loongarch; then
 
@@ -5674,7 +5636,7 @@ check_64bit(){
 }
 
 case "$arch" in
-    aarch64|alpha|ia64)
+    aarch64|ia64)
         enabled shared && enable_weak pic
     ;;
     loongarch)
@@ -6252,10 +6214,6 @@ if enabled aarch64; then
         is_in $v $archext_list && continue
         enabled_any ${v}_external ${v}_inline || disable $v
     done
-
-elif enabled alpha; then
-
-    check_cflags -mieee
 
 elif enabled arm; then
 
@@ -7045,6 +7003,7 @@ enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vv
 
 enabled ia_mpegh
 
+enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
 enabled libwebp           && {
     enabled libwebp_encoder      && require_pkg_config libwebp "libwebp >= 0.2.0" webp/encode.h WebPGetEncoderVersion
     enabled libwebp_anim_encoder && check_pkg_config libwebp_anim_encoder "libwebpmux >= 0.4.0" webp/mux.h WebPAnimEncoderOptionsInit; }
