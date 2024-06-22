@@ -6138,7 +6138,7 @@ static int mov_read_smdm(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 
     avio_skip(pb, 3); /* flags */
 
-    sc->mastering = av_mastering_display_metadata_alloc();
+    sc->mastering = av_mastering_display_metadata_alloc_size(&sc->mastering_size);
     if (!sc->mastering)
         return AVERROR(ENOMEM);
 
@@ -6181,7 +6181,7 @@ static int mov_read_mdcv(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         return 0;
     }
 
-    sc->mastering = av_mastering_display_metadata_alloc();
+    sc->mastering = av_mastering_display_metadata_alloc_size(&sc->mastering_size);
     if (!sc->mastering)
         return AVERROR(ENOMEM);
 
@@ -6548,7 +6548,7 @@ static int mov_read_eyes(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     uint32_t tag, baseline = 0;
     enum AVStereo3DView view = AV_STEREO3D_VIEW_PACKED;
     enum AVStereo3DPrimaryEye primary_eye = AV_PRIMARY_EYE_NONE;
-    AVRational horizontal_disparity_adjustment = { 0, 0 };
+    AVRational horizontal_disparity_adjustment = { 0, 1 };
 
     if (c->fc->nb_streams < 1)
         return 0;
@@ -10043,7 +10043,7 @@ static int mov_read_header(AVFormatContext *s)
             if (sc->mastering) {
                 if (!av_packet_side_data_add(&st->codecpar->coded_side_data, &st->codecpar->nb_coded_side_data,
                                              AV_PKT_DATA_MASTERING_DISPLAY_METADATA,
-                                             (uint8_t *)sc->mastering, sizeof(*sc->mastering), 0))
+                                             (uint8_t *)sc->mastering, sc->mastering_size, 0))
                     return AVERROR(ENOMEM);
 
                 sc->mastering = NULL;

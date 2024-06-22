@@ -93,32 +93,6 @@ typedef struct Mpeg1Context {
     int64_t timecode_frame_start;  /*< GOP timecode frame start number, in non drop frame format */
 } Mpeg1Context;
 
-#define MB_TYPE_ZERO_MV   0x20000000
-
-static const uint32_t ptype2mb_type[7] = {
-                    MB_TYPE_INTRA,
-                    MB_TYPE_L0 | MB_TYPE_CBP | MB_TYPE_ZERO_MV | MB_TYPE_16x16,
-                    MB_TYPE_L0,
-                    MB_TYPE_L0 | MB_TYPE_CBP,
-    MB_TYPE_QUANT | MB_TYPE_INTRA,
-    MB_TYPE_QUANT | MB_TYPE_L0 | MB_TYPE_CBP | MB_TYPE_ZERO_MV | MB_TYPE_16x16,
-    MB_TYPE_QUANT | MB_TYPE_L0 | MB_TYPE_CBP,
-};
-
-static const uint32_t btype2mb_type[11] = {
-                    MB_TYPE_INTRA,
-                    MB_TYPE_L1,
-                    MB_TYPE_L1   | MB_TYPE_CBP,
-                    MB_TYPE_L0,
-                    MB_TYPE_L0   | MB_TYPE_CBP,
-                    MB_TYPE_L0L1,
-                    MB_TYPE_L0L1 | MB_TYPE_CBP,
-    MB_TYPE_QUANT | MB_TYPE_INTRA,
-    MB_TYPE_QUANT | MB_TYPE_L1   | MB_TYPE_CBP,
-    MB_TYPE_QUANT | MB_TYPE_L0   | MB_TYPE_CBP,
-    MB_TYPE_QUANT | MB_TYPE_L0L1 | MB_TYPE_CBP,
-};
-
 /* as H.263, but only 17 codes */
 static int mpeg_decode_motion(MpegEncContext *s, int fcode, int pred)
 {
@@ -438,7 +412,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
         if (s->pict_type == AV_PICTURE_TYPE_P) {
             s->mb_skipped = 1;
             s->cur_pic.mb_type[s->mb_x + s->mb_y * s->mb_stride] =
-                MB_TYPE_SKIP | MB_TYPE_L0 | MB_TYPE_16x16;
+                MB_TYPE_SKIP | MB_TYPE_FORWARD_MV | MB_TYPE_16x16;
         } else {
             int mb_type;
 
@@ -483,7 +457,6 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                    "Invalid mb type in P-frame at %d %d\n", s->mb_x, s->mb_y);
             return AVERROR_INVALIDDATA;
         }
-        mb_type = ptype2mb_type[mb_type];
         break;
     case AV_PICTURE_TYPE_B:
         mb_type = get_vlc2(&s->gb, ff_mb_btype_vlc, MB_BTYPE_VLC_BITS, 1);
@@ -492,7 +465,6 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                    "Invalid mb type in B-frame at %d %d\n", s->mb_x, s->mb_y);
             return AVERROR_INVALIDDATA;
         }
-        mb_type = btype2mb_type[mb_type];
         break;
     }
     ff_tlog(s->avctx, "mb_type=%x\n", mb_type);
@@ -579,7 +551,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
             s->mv[0][0][0]      = 0;
             s->mv[0][0][1]      = 0;
         } else {
-            av_assert2(mb_type & MB_TYPE_L0L1);
+            av_assert2(mb_type & MB_TYPE_BIDIR_MV);
             // FIXME decide if MBs in field pictures are MB_TYPE_INTERLACED
             /* get additional motion vector type */
             if (s->picture_structure == PICT_FRAME && s->frame_pred_frame_dct) {
@@ -594,7 +566,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                 s->qscale = mpeg_get_qscale(s);
 
             /* motion vectors */
-            s->mv_dir = (mb_type >> 13) & 3;
+            s->mv_dir = MB_TYPE_MV_2_MV_DIR(mb_type);
             ff_tlog(s->avctx, "motion_type=%d\n", motion_type);
             switch (motion_type) {
             case MT_FRAME: /* or MT_16X8 */
@@ -602,7 +574,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                     mb_type   |= MB_TYPE_16x16;
                     s->mv_type = MV_TYPE_16X16;
                     for (i = 0; i < 2; i++) {
-                        if (USES_LIST(mb_type, i)) {
+                        if (HAS_MV(mb_type, i)) {
                             /* MT_FRAME */
                             s->mv[i][0][0]      =
                             s->last_mv[i][0][0] =
@@ -625,7 +597,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                     mb_type   |= MB_TYPE_16x8 | MB_TYPE_INTERLACED;
                     s->mv_type = MV_TYPE_16X8;
                     for (i = 0; i < 2; i++) {
-                        if (USES_LIST(mb_type, i)) {
+                        if (HAS_MV(mb_type, i)) {
                             /* MT_16X8 */
                             for (j = 0; j < 2; j++) {
                                 s->field_select[i][j] = get_bits1(&s->gb);
@@ -645,7 +617,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                 if (s->picture_structure == PICT_FRAME) {
                     mb_type |= MB_TYPE_16x8 | MB_TYPE_INTERLACED;
                     for (i = 0; i < 2; i++) {
-                        if (USES_LIST(mb_type, i)) {
+                        if (HAS_MV(mb_type, i)) {
                             for (j = 0; j < 2; j++) {
                                 s->field_select[i][j] = get_bits1(&s->gb);
                                 val = mpeg_decode_motion(s, s->mpeg_f_code[i][0],
@@ -665,7 +637,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                     av_assert0(!s->progressive_sequence);
                     mb_type |= MB_TYPE_16x16 | MB_TYPE_INTERLACED;
                     for (i = 0; i < 2; i++) {
-                        if (USES_LIST(mb_type, i)) {
+                        if (HAS_MV(mb_type, i)) {
                             s->field_select[i][0] = get_bits1(&s->gb);
                             for (k = 0; k < 2; k++) {
                                 val = mpeg_decode_motion(s, s->mpeg_f_code[i][k],
@@ -685,7 +657,7 @@ static int mpeg_decode_mb(MpegEncContext *s, int16_t block[12][64])
                 }
                 s->mv_type = MV_TYPE_DMV;
                 for (i = 0; i < 2; i++) {
-                    if (USES_LIST(mb_type, i)) {
+                    if (HAS_MV(mb_type, i)) {
                         int dmx, dmy, mx, my, m;
                         const int my_shift = s->picture_structure == PICT_FRAME;
 
@@ -1028,6 +1000,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         if ((ret = ff_mpv_common_init(s)) < 0)
             return ret;
+        if (!s->avctx->lowres)
+            ff_mpv_framesize_disable(&s->sc);
     }
     return 0;
 }
@@ -1902,6 +1876,8 @@ static int vcr2_init_sequence(AVCodecContext *avctx)
 
     if ((ret = ff_mpv_common_init(s)) < 0)
         return ret;
+    if (!s->avctx->lowres)
+        ff_mpv_framesize_disable(&s->sc);
 
     for (i = 0; i < 64; i++) {
         int j = s->idsp.idct_permutation[i];

@@ -373,8 +373,7 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
         s->m.cur_pic.motion_val[0]   = s->motion_val8[plane] + 2;
         s->m.p_mv_table                      = s->motion_val16[plane] +
                                                s->m.mb_stride + 1;
-        s->m.mecc                            = s->mecc; // move
-        ff_init_me(&s->m);
+        ff_me_init_pic(&s->m);
 
         s->m.me.dia_size      = s->avctx->dia_size;
         s->m.first_slice_line = 1;
@@ -469,16 +468,14 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
 
                     put_bits(&s->reorder_pb[5], SVQ1_BLOCK_INTER_LEN, SVQ1_BLOCK_INTER_CODE);
 
-                    s->m.pb = s->reorder_pb[5];
                     mx      = motion_ptr[0];
                     my      = motion_ptr[1];
                     av_assert1(mx     >= -32 && mx     <= 31);
                     av_assert1(my     >= -32 && my     <= 31);
                     av_assert1(pred_x >= -32 && pred_x <= 31);
                     av_assert1(pred_y >= -32 && pred_y <= 31);
-                    ff_h263_encode_motion(&s->m.pb, mx - pred_x, 1);
-                    ff_h263_encode_motion(&s->m.pb, my - pred_y, 1);
-                    s->reorder_pb[5] = s->m.pb;
+                    ff_h263_encode_motion(&s->reorder_pb[5], mx - pred_x, 1);
+                    ff_h263_encode_motion(&s->reorder_pb[5], my - pred_y, 1);
                     score[1]        += lambda * put_bits_count(&s->reorder_pb[5]);
 
                     dxy = (mx & 1) + 2 * (my & 1);
@@ -589,6 +586,9 @@ static av_cold int svq1_encode_init(AVCodecContext *avctx)
 
     ff_hpeldsp_init(&s->hdsp, avctx->flags);
     ff_me_cmp_init(&s->mecc, avctx);
+    ret = ff_me_init(&s->m.me, avctx, &s->mecc, 0);
+    if (ret < 0)
+        return ret;
     ff_mpegvideoencdsp_init(&s->m.mpvencdsp, avctx);
 
     s->current_picture = av_frame_alloc();

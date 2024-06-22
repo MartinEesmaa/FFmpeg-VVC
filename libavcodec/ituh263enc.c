@@ -274,8 +274,6 @@ void ff_clean_h263_qscales(MpegEncContext *s){
     int i;
     int8_t * const qscale_table = s->cur_pic.qscale_table;
 
-    ff_init_qscale_tab(s);
-
     for(i=1; i<s->mb_num; i++){
         if(qscale_table[ s->mb_index2xy[i] ] - qscale_table[ s->mb_index2xy[i-1] ] >2)
             qscale_table[ s->mb_index2xy[i] ]= qscale_table[ s->mb_index2xy[i-1] ]+2;
@@ -697,11 +695,11 @@ void ff_h263_update_mb(MpegEncContext *s)
         s->cur_pic.mbskip_table[mb_xy] = s->mb_skipped;
 
     if (s->mv_type == MV_TYPE_8X8)
-        s->cur_pic.mb_type[mb_xy] = MB_TYPE_L0 | MB_TYPE_8x8;
+        s->cur_pic.mb_type[mb_xy] = MB_TYPE_FORWARD_MV | MB_TYPE_8x8;
     else if(s->mb_intra)
         s->cur_pic.mb_type[mb_xy] = MB_TYPE_INTRA;
     else
-        s->cur_pic.mb_type[mb_xy] = MB_TYPE_L0 | MB_TYPE_16x16;
+        s->cur_pic.mb_type[mb_xy] = MB_TYPE_FORWARD_MV | MB_TYPE_16x16;
 
     ff_h263_update_motion_val(s);
 }
@@ -711,9 +709,8 @@ void ff_h263_encode_motion(PutBitContext *pb, int val, int f_code)
     int range, bit_size, sign, code, bits;
 
     if (val == 0) {
-        /* zero vector */
-        code = 0;
-        put_bits(pb, ff_mvtab[code][1], ff_mvtab[code][0]);
+        /* zero vector -- corresponds to ff_mvtab[0] */
+        put_bits(pb, 1, 1);
     } else {
         bit_size = f_code - 1;
         range = 1 << bit_size;
@@ -743,7 +740,7 @@ static av_cold void init_mv_penalty_and_fcode(void)
         for(mv=-MAX_DMV; mv<=MAX_DMV; mv++){
             int len;
 
-            if(mv==0) len= ff_mvtab[0][1];
+            if (mv==0) len = 1; // ff_mvtab[0][1]
             else{
                 int val, bit_size, code;
 
@@ -757,7 +754,7 @@ static av_cold void init_mv_penalty_and_fcode(void)
                 if(code<33){
                     len= ff_mvtab[code][1] + 1 + bit_size;
                 }else{
-                    len= ff_mvtab[32][1] + av_log2(code>>5) + 2 + bit_size;
+                    len = 12 /* ff_mvtab[32][1] */ + av_log2(code>>5) + 2 + bit_size;
                 }
             }
 
