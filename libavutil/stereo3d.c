@@ -29,15 +29,24 @@
 static void get_defaults(AVStereo3D *stereo)
 {
     stereo->horizontal_disparity_adjustment = (AVRational) { 0, 1 };
+    stereo->horizontal_field_of_view = (AVRational) { 0, 1 };
 }
 
 AVStereo3D *av_stereo3d_alloc(void)
+{
+    return av_stereo3d_alloc_size(NULL);
+}
+
+AVStereo3D *av_stereo3d_alloc_size(size_t *size)
 {
     AVStereo3D *stereo = av_mallocz(sizeof(AVStereo3D));
     if (!stereo)
         return NULL;
 
     get_defaults(stereo);
+
+    if (size)
+        *size = sizeof(*stereo);
 
     return stereo;
 }
