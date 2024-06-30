@@ -73,26 +73,14 @@ static void dump_spherical(AVFilterContext *ctx, AVFrame *frame, const AVFrameSi
     const AVSphericalMapping *spherical = (const AVSphericalMapping *)sd->data;
     double yaw, pitch, roll;
 
-    if (sd->size < sizeof(*spherical)) {
-        av_log(ctx, AV_LOG_ERROR, "invalid data\n");
-        return;
-    }
+    av_log(ctx, AV_LOG_INFO, "%s ", av_spherical_projection_name(spherical->projection));
 
-    if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR)
-        av_log(ctx, AV_LOG_INFO, "equirectangular ");
-    else if (spherical->projection == AV_SPHERICAL_CUBEMAP)
-        av_log(ctx, AV_LOG_INFO, "cubemap ");
-    else if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR_TILE)
-        av_log(ctx, AV_LOG_INFO, "tiled equirectangular ");
-    else {
-        av_log(ctx, AV_LOG_WARNING, "unknown\n");
-        return;
+    if (spherical->yaw || spherical->pitch || spherical->roll) {
+        yaw = ((double)spherical->yaw) / (1 << 16);
+        pitch = ((double)spherical->pitch) / (1 << 16);
+        roll = ((double)spherical->roll) / (1 << 16);
+        av_log(ctx, AV_LOG_INFO, "(%f/%f/%f) ", yaw, pitch, roll);
     }
-
-    yaw = ((double)spherical->yaw) / (1 << 16);
-    pitch = ((double)spherical->pitch) / (1 << 16);
-    roll = ((double)spherical->roll) / (1 << 16);
-    av_log(ctx, AV_LOG_INFO, "(%f/%f/%f) ", yaw, pitch, roll);
 
     if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR_TILE) {
         size_t l, t, r, b;
@@ -108,19 +96,22 @@ static void dump_spherical(AVFilterContext *ctx, AVFrame *frame, const AVFrameSi
 
 static void dump_stereo3d(AVFilterContext *ctx, const AVFrameSideData *sd)
 {
-    const AVStereo3D *stereo;
-
-    if (sd->size < sizeof(*stereo)) {
-        av_log(ctx, AV_LOG_ERROR, "invalid data\n");
-        return;
-    }
-
-    stereo = (const AVStereo3D *)sd->data;
+    const AVStereo3D *stereo = (const AVStereo3D *)sd->data;
 
     av_log(ctx, AV_LOG_INFO, "type - %s", av_stereo3d_type_name(stereo->type));
 
     if (stereo->flags & AV_STEREO3D_FLAG_INVERT)
         av_log(ctx, AV_LOG_INFO, " (inverted)");
+
+    av_log(ctx, AV_LOG_INFO, ", view - %s, primary_eye - %s", av_stereo3d_view_name(stereo->view),
+                                                              av_stereo3d_primary_eye_name(stereo->primary_eye));
+    if (stereo->baseline)
+        av_log(ctx, AV_LOG_INFO, ", baseline: %"PRIu32"", stereo->baseline);
+    if (stereo->horizontal_disparity_adjustment.num && stereo->horizontal_disparity_adjustment.den)
+        av_log(ctx, AV_LOG_INFO, ", horizontal_disparity_adjustment: %0.4f",
+               av_q2d(stereo->horizontal_disparity_adjustment));
+    if (stereo->horizontal_field_of_view.num && stereo->horizontal_field_of_view.den)
+        av_log(ctx, AV_LOG_INFO, ", horizontal_field_of_view: %0.3f", av_q2d(stereo->horizontal_field_of_view));
 }
 
 static void dump_s12m_timecode(AVFilterContext *ctx, AVRational frame_rate, const AVFrameSideData *sd)

@@ -136,6 +136,11 @@ enum AVStereo3DType {
      * @endcode
      */
     AV_STEREO3D_COLUMNS,
+
+    /**
+     * Video is stereoscopic but the packing is unspecified.
+     */
+    AV_STEREO3D_UNSPEC,
 };
 
 /**
@@ -156,6 +161,11 @@ enum AVStereo3DView {
      * Frame contains only the right view.
      */
     AV_STEREO3D_VIEW_RIGHT,
+
+    /**
+     * Content is unspecified.
+     */
+    AV_STEREO3D_VIEW_UNSPEC,
 };
 
 /**
