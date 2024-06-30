@@ -55,6 +55,7 @@ const AVCodecTag ff_mp4_obj_type[] = {
     { AV_CODEC_ID_MJPEG       , 0x6C }, /* 10918-1 */
     { AV_CODEC_ID_PNG         , 0x6D },
     { AV_CODEC_ID_JPEG2000    , 0x6E }, /* 15444-1 */
+    { AV_CODEC_ID_JPEGXS      , 0x6F }, /* ??? */
     { AV_CODEC_ID_VC1         , 0xA3 },
     { AV_CODEC_ID_DIRAC       , 0xA4 },
     { AV_CODEC_ID_AC3         , 0xA5 },

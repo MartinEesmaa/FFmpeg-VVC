@@ -1151,6 +1151,7 @@ OBJS-$(CONFIG_LIBVPX_VP8_DECODER)         += libvpxdec.o
 OBJS-$(CONFIG_LIBVPX_VP8_ENCODER)         += libvpxenc.o
 OBJS-$(CONFIG_LIBVPX_VP9_DECODER)         += libvpxdec.o
 OBJS-$(CONFIG_LIBVPX_VP9_ENCODER)         += libvpxenc.o
+OBJS-$(CONFIG_LIBSVT_VP9_ENCODER)         += libsvt_vp9.o
 OBJS-$(CONFIG_LIBVVDEC_DECODER)           += libvvdec.o vvc_parse_extradata.o vvc_paramset.o
 OBJS-$(CONFIG_LIBVVENC_ENCODER)           += libvvenc.o
 OBJS-$(CONFIG_LIBWEBP_ENCODER)            += libwebpenc_common.o libwebpenc.o
@@ -1158,12 +1159,15 @@ OBJS-$(CONFIG_LIBWEBP_ANIM_ENCODER)       += libwebpenc_common.o libwebpenc_anim
 OBJS-$(CONFIG_LIBX262_ENCODER)            += libx264.o
 OBJS-$(CONFIG_LIBX264_ENCODER)            += libx264.o
 OBJS-$(CONFIG_LIBX265_ENCODER)            += libx265.o
+OBJS-$(CONFIG_LIBSVT_HEVC_ENCODER)        += libsvt_hevc.o
 OBJS-$(CONFIG_LIBXAVS_ENCODER)            += libxavs.o
 OBJS-$(CONFIG_LIBXAVS2_ENCODER)           += libxavs2.o
 OBJS-$(CONFIG_LIBXEVD_DECODER)            += libxevd.o
 OBJS-$(CONFIG_LIBXEVE_ENCODER)            += libxeve.o
 OBJS-$(CONFIG_LIBXVID_ENCODER)            += libxvid.o
 OBJS-$(CONFIG_LIBZVBI_TELETEXT_DECODER)   += libzvbi-teletextdec.o ass.o
+OBJS-$(CONFIG_LIBSVTJPEGXS_ENCODER)       += libsvtjpegxsenc.o
+OBJS-$(CONFIG_LIBSVTJPEGXS_DECODER)       += libsvtjpegxsdec.o
 
 # parsers
 OBJS-$(CONFIG_AAC_LATM_PARSER)         += latm_parser.o

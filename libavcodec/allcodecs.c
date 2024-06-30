@@ -801,6 +801,7 @@ extern const FFCodec ff_libvpx_vp8_decoder;
 extern FFCodec ff_libvpx_vp9_encoder;
 extern const FFCodec ff_ia_mpegh_encoder;
 extern const FFCodec ff_libvpx_vp9_decoder;
+extern const FFCodec ff_libsvt_vp9_encoder;
 extern const FFCodec ff_libvvdec_decoder;
 extern const FFCodec ff_libvvenc_encoder;
 /* preferred over libwebp */
@@ -816,6 +817,9 @@ extern const FFCodec ff_libxavs_encoder;
 extern const FFCodec ff_libxavs2_encoder;
 extern const FFCodec ff_libxvid_encoder;
 extern const FFCodec ff_libzvbi_teletext_decoder;
+extern const FFCodec ff_libsvt_hevc_encoder;
+extern const FFCodec ff_libsvtjpegxs_encoder;
+extern const FFCodec ff_libsvtjpegxs_decoder;
 
 /* text */
 extern const FFCodec ff_bintext_decoder;
