@@ -155,6 +155,7 @@ typedef struct OptionsContext {
     SpecifierOptList hwaccel_devices;
     SpecifierOptList hwaccel_output_formats;
     SpecifierOptList autorotate;
+    SpecifierOptList apply_cropping;
 
     /* output options */
     StreamMap *stream_maps;
@@ -239,6 +240,7 @@ enum IFilterFlags {
     IFILTER_FLAG_AUTOROTATE     = (1 << 0),
     IFILTER_FLAG_REINIT         = (1 << 1),
     IFILTER_FLAG_CFR            = (1 << 2),
+    IFILTER_FLAG_CROP           = (1 << 3),
 };
 
 typedef struct InputFilterOptions {
@@ -253,6 +255,11 @@ typedef struct InputFilterOptions {
      * Otherwise, this is an estimate that should not be relied upon to be
      * accurate */
     AVRational          framerate;
+
+    unsigned            crop_top;
+    unsigned            crop_bottom;
+    unsigned            crop_left;
+    unsigned            crop_right;
 
     int                 sub2video_width;
     int                 sub2video_height;
@@ -539,6 +546,13 @@ typedef struct KeyframeForceCtx {
 
 typedef struct Encoder Encoder;
 
+enum CroppingType {
+    CROP_DISABLED = 0,
+    CROP_ALL,
+    CROP_CODEC,
+    CROP_CONTAINER,
+};
+
 typedef struct OutputStream {
     const AVClass *class;
 
@@ -585,8 +599,6 @@ typedef struct OutputStream {
     // simple filtergraph feeding this stream, if any
     FilterGraph  *fg_simple;
     OutputFilter *filter;
-
-    AVDictionary *encoder_opts;
 
     char *attachment_filename;
 
@@ -710,8 +722,10 @@ void term_exit(void);
 
 void show_usage(void);
 
+int check_avoptions_used(const AVDictionary *opts, const AVDictionary *opts_used,
+                         void *logctx, int decode);
+
 int assert_file_overwrite(const char *filename);
-AVDictionary *strip_specifiers(const AVDictionary *dict);
 int find_codec(void *logctx, const char *name,
                enum AVMediaType type, int encoder, const AVCodec **codec);
 int parse_and_set_vsync(const char *arg, int *vsync_var, int file_idx, int st_idx, int is_global);
@@ -865,7 +879,7 @@ void update_benchmark(const char *fmt, ...);
            namestr, st->index, o->optname.opt_canon->name, spec[0] ? ":" : "", spec, so->u.type);\
 }
 
-#define MATCH_PER_STREAM_OPT(name, type, outvar, fmtctx, st)\
+#define MATCH_PER_STREAM_OPT_CLEAN(name, type, outvar, fmtctx, st, clean)\
 {\
     int _ret, _matches = 0, _match_idx;\
     for (int _i = 0; _i < o->name.nb_opt; _i++) {\
@@ -875,10 +889,15 @@ void update_benchmark(const char *fmt, ...);
             _match_idx = _i;\
             _matches++;\
         } else if (_ret < 0)\
-            return _ret;\
+            clean;\
     }\
     if (_matches > 1 && o->name.opt_canon)\
        WARN_MULTIPLE_OPT_USAGE(name, type, _match_idx, st);\
+}
+
+#define MATCH_PER_STREAM_OPT(name, type, outvar, fmtctx, st)\
+{\
+    MATCH_PER_STREAM_OPT_CLEAN(name, type, outvar, fmtctx, st, return _ret)\
 }
 
 const char *opt_match_per_type_str(const SpecifierOptList *sol,

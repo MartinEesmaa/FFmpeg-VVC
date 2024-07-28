@@ -151,24 +151,6 @@ static int show_hwaccels(void *optctx, const char *opt, const char *arg)
     return 0;
 }
 
-/* return a copy of the input with the stream specifiers removed from the keys */
-AVDictionary *strip_specifiers(const AVDictionary *dict)
-{
-    const AVDictionaryEntry *e = NULL;
-    AVDictionary    *ret = NULL;
-
-    while ((e = av_dict_iterate(dict, e))) {
-        char *p = strchr(e->key, ':');
-
-        if (p)
-            *p = 0;
-        av_dict_set(&ret, e->key, e->value, 0);
-        if (p)
-            *p = ':';
-    }
-    return ret;
-}
-
 const char *opt_match_per_type_str(const SpecifierOptList *sol,
                                    char mediatype)
 {
@@ -1495,9 +1477,6 @@ const OptionDef options[] = {
     { "bitexact",               OPT_TYPE_BOOL, OPT_EXPERT | OPT_OFFSET | OPT_OUTPUT | OPT_INPUT,
         { .off = OFFSET(bitexact) },
         "bitexact mode" },
-    { "apad",                   OPT_TYPE_STRING, OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
-        { .off = OFFSET(apad) },
-        "audio pad", "" },
     { "dts_delta_threshold",    OPT_TYPE_FLOAT, OPT_EXPERT,
         { &dts_delta_threshold },
         "timestamp discontinuity delta threshold", "threshold" },
@@ -1726,12 +1705,15 @@ const OptionDef options[] = {
     { "hwaccels",                   OPT_TYPE_FUNC,   OPT_EXIT | OPT_EXPERT,
         { .func_arg = show_hwaccels },
         "show available HW acceleration methods" },
-    { "autorotate",                 OPT_TYPE_BOOL,   OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
+    { "autorotate",                 OPT_TYPE_BOOL,   OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
         { .off = OFFSET(autorotate) },
         "automatically insert correct rotate filters" },
-    { "autoscale",                  OPT_TYPE_BOOL,   OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
+    { "autoscale",                  OPT_TYPE_BOOL,   OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
         { .off = OFFSET(autoscale) },
         "automatically insert a scale filter at the end of the filter graph" },
+    { "apply_cropping",             OPT_TYPE_STRING, OPT_VIDEO | OPT_PERSTREAM | OPT_EXPERT | OPT_INPUT,
+        { .off = OFFSET(apply_cropping) },
+        "select the cropping to apply" },
     { "fix_sub_duration_heartbeat", OPT_TYPE_BOOL,   OPT_VIDEO | OPT_EXPERT | OPT_PERSTREAM | OPT_OUTPUT,
         { .off = OFFSET(fix_sub_duration_heartbeat) },
         "set this video output stream to be a heartbeat stream for "
@@ -1762,6 +1744,9 @@ const OptionDef options[] = {
     { "ab",               OPT_TYPE_FUNC,    OPT_AUDIO | OPT_FUNC_ARG | OPT_PERFILE | OPT_OUTPUT,
         { .func_arg = opt_bitrate },
         "alias for -b:a (select bitrate for audio streams)", "bitrate" },
+    { "apad",             OPT_TYPE_STRING,  OPT_AUDIO | OPT_PERSTREAM | OPT_EXPERT | OPT_OUTPUT,
+        { .off = OFFSET(apad) },
+        "audio pad", "" },
     { "atag",             OPT_TYPE_FUNC,    OPT_AUDIO | OPT_FUNC_ARG  | OPT_EXPERT | OPT_PERFILE | OPT_OUTPUT | OPT_HAS_CANON,
         { .func_arg = opt_old2new },
         "force audio tag/fourcc", "fourcc/tag",

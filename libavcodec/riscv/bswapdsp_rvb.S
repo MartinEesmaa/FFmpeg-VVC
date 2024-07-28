@@ -23,7 +23,8 @@
 #include "libavutil/riscv/bswap_rvb.S"
 
 #if (__riscv_xlen >= 64)
-func ff_bswap32_buf_rvb, zbb
+func ff_bswap32_buf_rvb, zba, zbb
+        lpad    0
         bswap32_rvb a0, a1, a2
 endfunc
 #endif

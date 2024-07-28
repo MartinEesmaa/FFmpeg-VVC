@@ -66,6 +66,7 @@ typedef struct DemuxStream {
     int                      have_sub2video;
     int                      reinit_filters;
     int                      autorotate;
+    int                      apply_cropping;
 
 
     int                      wrap_correction_done;
@@ -1000,11 +1001,23 @@ int ist_filter_add(InputStream *ist, InputFilter *ifilter, int is_simple,
     ist->filters[ist->nb_filters - 1] = ifilter;
 
     if (ist->par->codec_type == AVMEDIA_TYPE_VIDEO) {
+        const AVPacketSideData *sd = av_packet_side_data_get(ist->par->coded_side_data,
+                                                             ist->par->nb_coded_side_data,
+                                                             AV_PKT_DATA_FRAME_CROPPING);
         if (ist->framerate.num > 0 && ist->framerate.den > 0) {
             opts->framerate = ist->framerate;
             opts->flags |= IFILTER_FLAG_CFR;
         } else
             opts->framerate = av_guess_frame_rate(d->f.ctx, ist->st, NULL);
+        if (sd && sd->size >= sizeof(uint32_t) * 4) {
+            opts->crop_top    = AV_RL32(sd->data +  0);
+            opts->crop_bottom = AV_RL32(sd->data +  4);
+            opts->crop_left   = AV_RL32(sd->data +  8);
+            opts->crop_right  = AV_RL32(sd->data + 12);
+            if (ds->apply_cropping && ds->apply_cropping != CROP_CODEC &&
+                (opts->crop_top | opts->crop_bottom | opts->crop_left | opts->crop_right))
+                opts->flags |= IFILTER_FLAG_CROP;
+        }
     } else if (ist->par->codec_type == AVMEDIA_TYPE_SUBTITLE) {
         /* Compute the size of the canvas for the subtitles stream.
            If the subtitles codecpar has set a size, use it. Otherwise use the
@@ -1207,7 +1220,7 @@ static DemuxStream *demux_stream_alloc(Demuxer *d, AVStream *st)
     return ds;
 }
 
-static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
+static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictionary **opts_used)
 {
     AVFormatContext *ic = d->f.ctx;
     AVCodecParameters *par = st->codecpar;
@@ -1215,6 +1228,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
     InputStream *ist;
     char *framerate = NULL, *hwaccel_device = NULL;
     const char *hwaccel = NULL;
+    const char *apply_cropping = NULL;
     char *hwaccel_output_format = NULL;
     char *codec_tag = NULL;
     char *bsfs = NULL;
@@ -1240,6 +1254,33 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
 
     ds->autorotate = 1;
     MATCH_PER_STREAM_OPT(autorotate, i, ds->autorotate, ic, st);
+
+    ds->apply_cropping = CROP_ALL;
+    MATCH_PER_STREAM_OPT(apply_cropping, str, apply_cropping, ic, st);
+    if (apply_cropping) {
+        const AVOption opts[] = {
+            { "apply_cropping", NULL, 0, AV_OPT_TYPE_INT,
+                    { .i64 = CROP_ALL }, CROP_DISABLED, CROP_CONTAINER, AV_OPT_FLAG_DECODING_PARAM, .unit = "apply_cropping" },
+                { "none",      NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CROP_DISABLED  }, .unit = "apply_cropping" },
+                { "all",       NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CROP_ALL       }, .unit = "apply_cropping" },
+                { "codec",     NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CROP_CODEC     }, .unit = "apply_cropping" },
+                { "container", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = CROP_CONTAINER }, .unit = "apply_cropping" },
+            { NULL },
+        };
+        const AVClass class = {
+            .class_name = "apply_cropping",
+            .item_name  = av_default_item_name,
+            .option     = opts,
+            .version    = LIBAVUTIL_VERSION_INT,
+        };
+        const AVClass *pclass = &class;
+
+        ret = av_opt_eval_int(&pclass, opts, apply_cropping, &ds->apply_cropping);
+        if (ret < 0) {
+            av_log(ist, AV_LOG_ERROR, "Invalid apply_cropping value '%s'.\n", apply_cropping);
+            return ret;
+        }
+    }
 
     MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, ic, st);
     if (codec_tag) {
@@ -1334,7 +1375,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
 
     if (ist->dec) {
         ret = filter_codec_opts(o->g->codec_opts, ist->st->codecpar->codec_id,
-                                ic, st, ist->dec, &ds->decoder_opts);
+                                ic, st, ist->dec, &ds->decoder_opts, opts_used);
         if (ret < 0)
             return ret;
     }
@@ -1361,6 +1402,9 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st)
     }
 
     ds->dec_opts.flags |= DECODER_FLAG_BITEXACT * !!o->bitexact;
+
+    av_dict_set_int(&ds->decoder_opts, "apply_cropping",
+                    ds->apply_cropping && ds->apply_cropping != CROP_CONTAINER, 0);
 
     /* Attached pics are sparse, therefore we would not want to delay their decoding
      * till EOF. */
@@ -1553,8 +1597,7 @@ int ifile_open(const OptionsContext *o, const char *filename, Scheduler *sch)
     const AVInputFormat *file_iformat = NULL;
     int err, i, ret = 0;
     int64_t timestamp;
-    AVDictionary *unused_opts = NULL;
-    const AVDictionaryEntry *e = NULL;
+    AVDictionary *opts_used = NULL;
     const char*    video_codec_name = NULL;
     const char*    audio_codec_name = NULL;
     const char* subtitle_codec_name = NULL;
@@ -1826,48 +1869,21 @@ int ifile_open(const OptionsContext *o, const char *filename, Scheduler *sch)
 
     /* Add all the streams from the given input file to the demuxer */
     for (int i = 0; i < ic->nb_streams; i++) {
-        ret = ist_add(o, d, ic->streams[i]);
-        if (ret < 0)
+        ret = ist_add(o, d, ic->streams[i], &opts_used);
+        if (ret < 0) {
+            av_dict_free(&opts_used);
             return ret;
+        }
     }
 
     /* dump the file content */
     av_dump_format(ic, f->index, filename, 0);
 
     /* check if all codec options have been used */
-    unused_opts = strip_specifiers(o->g->codec_opts);
-    for (i = 0; i < f->nb_streams; i++) {
-        DemuxStream *ds = ds_from_ist(f->streams[i]);
-        e = NULL;
-        while ((e = av_dict_iterate(ds->decoder_opts, e)))
-            av_dict_set(&unused_opts, e->key, NULL, 0);
-    }
-
-    e = NULL;
-    while ((e = av_dict_iterate(unused_opts, e))) {
-        const AVClass *class = avcodec_get_class();
-        const AVOption *option = av_opt_find(&class, e->key, NULL, 0,
-                                             AV_OPT_SEARCH_CHILDREN | AV_OPT_SEARCH_FAKE_OBJ);
-        const AVClass *fclass = avformat_get_class();
-        const AVOption *foption = av_opt_find(&fclass, e->key, NULL, 0,
-                                             AV_OPT_SEARCH_CHILDREN | AV_OPT_SEARCH_FAKE_OBJ);
-        if (!option || foption)
-            continue;
-
-
-        if (!(option->flags & AV_OPT_FLAG_DECODING_PARAM)) {
-            av_log(d, AV_LOG_ERROR, "Codec AVOption %s (%s) is not a decoding "
-                   "option.\n", e->key, option->help ? option->help : "");
-            return AVERROR(EINVAL);
-        }
-
-        av_log(d, AV_LOG_WARNING, "Codec AVOption %s (%s) has not been used "
-               "for any stream. The most likely reason is either wrong type "
-               "(e.g. a video option with no video streams) or that it is a "
-               "private option of some decoder which was not actually used "
-               "for any stream.\n", e->key, option->help ? option->help : "");
-    }
-    av_dict_free(&unused_opts);
+    ret = check_avoptions_used(o->g->codec_opts, opts_used, d, 1);
+    av_dict_free(&opts_used);
+    if (ret < 0)
+        return ret;
 
     for (i = 0; i < o->dump_attachment.nb_opt; i++) {
         int j;

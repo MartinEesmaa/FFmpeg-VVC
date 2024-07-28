@@ -834,6 +834,7 @@ static int setup_sce(AACDecContext *ac, SingleChannelElement *sce,
                "Number of scalefactor bands in group (%d) "
                "exceeds limit (%d).\n",
                ics->max_sfb, ics->num_swb);
+        ics->max_sfb = 0;
         return AVERROR(EINVAL);
     }
 
@@ -1134,7 +1135,7 @@ static void complex_stereo_downmix_cur(AACDecContext *ac, ChannelElement *cpe,
     }
 }
 
-static void complex_stereo_interpolate_imag(float *im, float *re, const float f[6],
+static void complex_stereo_interpolate_imag(float *im, float *re, const float f[7],
                                             int len, int factor_even, int factor_odd)
 {
     int i = 0;

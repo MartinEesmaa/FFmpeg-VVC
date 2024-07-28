@@ -36,22 +36,31 @@
 #define HWD
 #endif
 
-        .macro func sym, ext1=, ext2=
-            .text
-            .align 2
+        .macro  archadd ext=, more:vararg
+            .ifnb   \ext
+                .ifc    \ext, b
+                # B was defined later, is known to fewer assemblers.
+                archadd zba, zbb, zbs
+                .else
+                    .option arch, +\ext
+                .endif
+                archadd \more
+            .endif
+        .endm
 
+        .macro func sym, exts:vararg
+            .text
             .option push
-            .ifnb \ext1
-            .option arch, +\ext1
-            .ifnb \ext2
-            .option arch, +\ext2
-            .endif
-            .endif
+            archadd \exts
 
             .global \sym
             .hidden \sym
             .type   \sym, %function
+            .option push
+            .option norvc
+            .align  2
             \sym:
+            .option pop
 
             .macro endfunc
                 .size   \sym, . - \sym
@@ -77,22 +86,9 @@
             .endm
         .endm
 
-#if !defined (__riscv_zba)
-        /* SH{1,2,3}ADD definitions for pre-Zba assemblers */
-        .macro  shnadd n, rd, rs1, rs2
-        .insn r OP, 2 * \n, 16, \rd, \rs1, \rs2
-        .endm
-
-        .macro  sh1add rd, rs1, rs2
-        shnadd  1, \rd, \rs1, \rs2
-        .endm
-
-        .macro  sh2add rd, rs1, rs2
-        shnadd  2, \rd, \rs1, \rs2
-        .endm
-
-        .macro  sh3add rd, rs1, rs2
-        shnadd  3, \rd, \rs1, \rs2
+#if !defined (__riscv_zicfilp)
+        .macro  lpad    lpl
+        auipc   zero, \lpl
         .endm
 #endif
 

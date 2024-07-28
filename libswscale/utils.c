@@ -1952,14 +1952,10 @@ static av_cold int sws_init_single_context(SwsContext *c, SwsFilter *srcFilter,
         av_log(c, AV_LOG_INFO, "%s scaler, from %s to %s%s ",
                scaler,
                av_get_pix_fmt_name(srcFormat),
-#ifdef DITHER1XBPP
                dstFormat == AV_PIX_FMT_BGR555   || dstFormat == AV_PIX_FMT_BGR565   ||
                dstFormat == AV_PIX_FMT_RGB444BE || dstFormat == AV_PIX_FMT_RGB444LE ||
                dstFormat == AV_PIX_FMT_BGR444BE || dstFormat == AV_PIX_FMT_BGR444LE ?
                                                              "dithered " : "",
-#else
-               "",
-#endif
                av_get_pix_fmt_name(dstFormat));
 
         if (INLINE_MMXEXT(cpu_flags))
@@ -2046,6 +2042,7 @@ static int context_init_threaded(SwsContext *c,
         if (!c->slice_ctx[i])
             return AVERROR(ENOMEM);
 
+        c->nb_slice_ctx++;
         c->slice_ctx[i]->parent = c;
 
         ret = av_opt_copy((void*)c->slice_ctx[i], (void*)c);
@@ -2057,8 +2054,6 @@ static int context_init_threaded(SwsContext *c,
         ret = sws_init_single_context(c->slice_ctx[i], src_filter, dst_filter);
         if (ret < 0)
             return ret;
-
-        c->nb_slice_ctx++;
 
         if (c->slice_ctx[i]->dither == SWS_DITHER_ED) {
             av_log(c, AV_LOG_VERBOSE,

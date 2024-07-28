@@ -285,8 +285,9 @@ static int read_key(void)
         }
         //Read it
         if(nchars != 0) {
-            read(0, &ch, 1);
-            return ch;
+            if (read(0, &ch, 1) == 1)
+                return ch;
+            return 0;
         }else{
             return -1;
         }
@@ -308,8 +309,8 @@ const AVIOInterruptCB int_cb = { decode_interrupt_cb, NULL };
 static void ffmpeg_cleanup(int ret)
 {
     if (do_benchmark) {
-        int maxrss = getmaxrss() / 1024;
-        av_log(NULL, AV_LOG_INFO, "bench: maxrss=%iKiB\n", maxrss);
+        int64_t maxrss = getmaxrss() / 1024;
+        av_log(NULL, AV_LOG_INFO, "bench: maxrss=%"PRId64"KiB\n", maxrss);
     }
 
     for (int i = 0; i < nb_filtergraphs; i++)
@@ -471,6 +472,56 @@ const FrameData *packet_data_c(AVPacket *pkt)
 {
     int ret = frame_data_ensure(&pkt->opaque_ref, 0);
     return ret < 0 ? NULL : (const FrameData*)pkt->opaque_ref->data;
+}
+
+int check_avoptions_used(const AVDictionary *opts, const AVDictionary *opts_used,
+                         void *logctx, int decode)
+{
+    const AVClass  *class = avcodec_get_class();
+    const AVClass *fclass = avformat_get_class();
+
+    const int flag = decode ? AV_OPT_FLAG_DECODING_PARAM :
+                              AV_OPT_FLAG_ENCODING_PARAM;
+    const AVDictionaryEntry *e = NULL;
+
+    while ((e = av_dict_iterate(opts, e))) {
+        const AVOption *option, *foption;
+        char *optname, *p;
+
+        if (av_dict_get(opts_used, e->key, NULL, 0))
+            continue;
+
+        optname = av_strdup(e->key);
+        if (!optname)
+            return AVERROR(ENOMEM);
+
+        p = strchr(optname, ':');
+        if (p)
+            *p = 0;
+
+        option = av_opt_find(&class, optname, NULL, 0,
+                             AV_OPT_SEARCH_CHILDREN | AV_OPT_SEARCH_FAKE_OBJ);
+        foption = av_opt_find(&fclass, optname, NULL, 0,
+                              AV_OPT_SEARCH_CHILDREN | AV_OPT_SEARCH_FAKE_OBJ);
+        av_freep(&optname);
+        if (!option || foption)
+            continue;
+
+        if (!(option->flags & flag)) {
+            av_log(logctx, AV_LOG_ERROR, "Codec AVOption %s (%s) is not a %s "
+                   "option.\n", e->key, option->help ? option->help : "",
+                   decode ? "decoding" : "encoding");
+            return AVERROR(EINVAL);
+        }
+
+        av_log(logctx, AV_LOG_WARNING, "Codec AVOption %s (%s) has not been used "
+               "for any stream. The most likely reason is either wrong type "
+               "(e.g. a video option with no video streams) or that it is a "
+               "private option of some decoder which was not actually used "
+               "for any stream.\n", e->key, option->help ? option->help : "");
+    }
+
+    return 0;
 }
 
 void update_benchmark(const char *fmt, ...)

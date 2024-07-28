@@ -292,7 +292,7 @@ static int decode_lt_rps(const HEVCSPS *sps, LongTermRPS *rps,
                 lt_idx_sps = get_bits(gb, av_ceil_log2(sps->num_long_term_ref_pics_sps));
 
             rps->poc[i]  = sps->lt_ref_pic_poc_lsb_sps[lt_idx_sps];
-            rps->used[i] = !!(sps->used_by_curr_pic_lt & (1 << lt_idx_sps));
+            rps->used[i] = !!(sps->used_by_curr_pic_lt & (1U << lt_idx_sps));
         } else {
             rps->poc[i]  = get_bits(gb, sps->log2_max_poc_lsb);
             rps->used[i] = get_bits1(gb);
@@ -526,8 +526,7 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
     return ff_get_format(s->avctx, pix_fmts);
 }
 
-static int set_sps(HEVCContext *s, const HEVCSPS *sps,
-                   enum AVPixelFormat pix_fmt)
+static int set_sps(HEVCContext *s, const HEVCSPS *sps)
 {
     int ret, i;
 
@@ -541,10 +540,6 @@ static int set_sps(HEVCContext *s, const HEVCSPS *sps,
     ret = pic_arrays_init(s, sps);
     if (ret < 0)
         goto fail;
-
-    export_stream_params(s, sps);
-
-    s->avctx->pix_fmt = pix_fmt;
 
     ff_hevc_pred_init(&s->hpc,     sps->bit_depth);
     ff_hevc_dsp_init (&s->hevcdsp, sps->bit_depth);
@@ -608,7 +603,7 @@ static int hls_slice_header(SliceHeader *sh, const HEVCContext *s, GetBitContext
         av_log(s->avctx, AV_LOG_ERROR, "PPS id out of range: %d\n", pps_id);
         return AVERROR_INVALIDDATA;
     }
-    if (!sh->first_slice_in_pic_flag && pps_id != sh->pps_id) {
+    if (!sh->first_slice_in_pic_flag && s->ps.pps_list[pps_id] != s->pps) {
         av_log(s->avctx, AV_LOG_ERROR, "PPS changed between slices.\n");
         return AVERROR_INVALIDDATA;
     }
@@ -626,6 +621,10 @@ static int hls_slice_header(SliceHeader *sh, const HEVCContext *s, GetBitContext
 
         if (pps->dependent_slice_segments_enabled_flag)
             sh->dependent_slice_segment_flag = get_bits1(gb);
+        if (sh->dependent_slice_segment_flag && !s->slice_initialized) {
+            av_log(s->avctx, AV_LOG_ERROR, "Independent slice segment missing.\n");
+            return AVERROR_INVALIDDATA;
+        }
 
         slice_address_length = av_ceil_log2(sps->ctb_width *
                                             sps->ctb_height);
@@ -898,9 +897,6 @@ static int hls_slice_header(SliceHeader *sh, const HEVCContext *s, GetBitContext
         } else {
             sh->slice_loop_filter_across_slices_enabled_flag = pps->seq_loop_filter_across_slices_enabled_flag;
         }
-    } else if (!s->slice_initialized) {
-        av_log(s->avctx, AV_LOG_ERROR, "Independent slice segment missing.\n");
-        return AVERROR_INVALIDDATA;
     }
 
     sh->num_entry_point_offsets = 0;
@@ -2770,14 +2766,8 @@ static int decode_slice_data(HEVCContext *s, const H2645NAL *nal, GetBitContext 
     const HEVCPPS *pps = s->pps;
     int ret;
 
-    if (s->sh.dependent_slice_segment_flag) {
-        int ctb_addr_ts = pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
-        int prev_rs = pps->ctb_addr_ts_to_rs[ctb_addr_ts - 1];
-        if (s->tab_slice_address[prev_rs] != s->sh.slice_addr) {
-            av_log(s->avctx, AV_LOG_ERROR, "Previous slice segment missing\n");
-            return AVERROR_INVALIDDATA;
-        }
-    }
+    if (!s->sh.first_slice_in_pic_flag)
+        s->slice_idx += !s->sh.dependent_slice_segment_flag;
 
     if (!s->sh.dependent_slice_segment_flag && s->sh.slice_type != HEVC_SLICE_I) {
         ret = ff_hevc_slice_rpl(s);
@@ -2799,6 +2789,15 @@ static int decode_slice_data(HEVCContext *s, const H2645NAL *nal, GetBitContext 
         return AVERROR_PATCHWELCOME;
     }
 
+    if (s->sh.dependent_slice_segment_flag) {
+        int ctb_addr_ts = pps->ctb_addr_rs_to_ts[s->sh.slice_ctb_addr_rs];
+        int prev_rs = pps->ctb_addr_ts_to_rs[ctb_addr_ts - 1];
+        if (s->tab_slice_address[prev_rs] != s->sh.slice_addr) {
+            av_log(s->avctx, AV_LOG_ERROR, "Previous slice segment missing\n");
+            return AVERROR_INVALIDDATA;
+        }
+    }
+
     s->local_ctx[0].first_qp_group = !s->sh.dependent_slice_segment_flag;
 
     if (!pps->cu_qp_delta_enabled_flag)
@@ -2806,8 +2805,6 @@ static int decode_slice_data(HEVCContext *s, const H2645NAL *nal, GetBitContext 
 
     s->local_ctx[0].tu.cu_qp_offset_cb = 0;
     s->local_ctx[0].tu.cu_qp_offset_cr = 0;
-
-    s->slice_idx += !s->sh.dependent_slice_segment_flag;
 
     if (s->avctx->active_thread_type == FF_THREAD_SLICE  &&
         s->sh.num_entry_point_offsets > 0                &&
@@ -2918,9 +2915,11 @@ static int hevc_frame_start(HEVCContext *s)
 
         ff_hevc_clear_refs(s);
 
-        ret = set_sps(s, sps, sps->pix_fmt);
+        ret = set_sps(s, sps);
         if (ret < 0)
             return ret;
+
+        export_stream_params(s, sps);
 
         pix_fmt = get_format(s, sps);
         if (pix_fmt < 0)
@@ -2964,6 +2963,10 @@ static int hevc_frame_start(HEVCContext *s)
     if (pps->tiles_enabled_flag)
         s->local_ctx[0].end_of_tiles_x = pps->column_width[0] << sps->log2_ctb_size;
 
+    ret = export_stream_params_from_sei(s);
+    if (ret < 0)
+        return ret;
+
     ret = ff_hevc_set_new_ref(s, s->poc);
     if (ret < 0)
         goto fail;
@@ -2983,10 +2986,6 @@ static int hevc_frame_start(HEVCContext *s)
                               s->sei.common.aom_film_grain.enable) &&
         !(s->avctx->export_side_data & AV_CODEC_EXPORT_DATA_FILM_GRAIN) &&
         !s->avctx->hwaccel;
-
-    ret = export_stream_params_from_sei(s);
-    if (ret < 0)
-        return ret;
 
     ret = set_side_data(s);
     if (ret < 0)
@@ -3157,8 +3156,11 @@ static int decode_slice(HEVCContext *s, const H2645NAL *nal, GetBitContext *gb)
     int ret;
 
     ret = hls_slice_header(&s->sh, s, gb);
-    if (ret < 0)
+    if (ret < 0) {
+        // hls_slice_header() does not cleanup on failure thus the state now is inconsistant so we cannot use it on depandant slices
+        s->slice_initialized = 0;
         return ret;
+    }
 
     if ((s->avctx->skip_frame >= AVDISCARD_BIDIR && s->sh.slice_type == HEVC_SLICE_B) ||
         (s->avctx->skip_frame >= AVDISCARD_NONINTRA && s->sh.slice_type != HEVC_SLICE_I) ||
@@ -3592,7 +3594,7 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     ff_refstruct_unref(&s->pps);
 
     if (s->ps.sps != s0->ps.sps)
-        if ((ret = set_sps(s, s0->ps.sps, src->pix_fmt)) < 0)
+        if ((ret = set_sps(s, s0->ps.sps)) < 0)
             return ret;
 
     s->seq_decode = s0->seq_decode;
@@ -3636,10 +3638,6 @@ static int hevc_update_thread_context(AVCodecContext *dst,
     s->sei.common.mastering_display    = s0->sei.common.mastering_display;
     s->sei.common.content_light        = s0->sei.common.content_light;
     s->sei.common.aom_film_grain       = s0->sei.common.aom_film_grain;
-
-    ret = export_stream_params_from_sei(s);
-    if (ret < 0)
-        return ret;
 
     return 0;
 }

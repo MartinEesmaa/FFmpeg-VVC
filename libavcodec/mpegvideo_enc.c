@@ -1304,6 +1304,8 @@ static int load_input_picture(MpegEncContext *s, const AVFrame *pic_arg)
     /* shift buffer entries */
     for (int i = flush_offset; i <= MAX_B_FRAMES; i++)
         s->input_picture[i - flush_offset] = s->input_picture[i];
+    for (int i = MAX_B_FRAMES + 1 - flush_offset; i <= MAX_B_FRAMES; i++)
+        s->input_picture[i] = NULL;
 
     s->input_picture[encoding_delay] = pic;
 
@@ -1825,6 +1827,8 @@ int ff_mpv_encode_picture(AVCodecContext *avctx, AVPacket *pkt,
             s->mb_info_ptr = av_packet_new_side_data(pkt,
                                  AV_PKT_DATA_H263_MB_INFO,
                                  s->mb_width*s->mb_height*12);
+            if (!s->mb_info_ptr)
+                return AVERROR(ENOMEM);
             s->prev_mb_info = s->last_mb_info = s->mb_info_size = 0;
         }
 

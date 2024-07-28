@@ -49,6 +49,7 @@ saved_regs:
         .endr
 
 func checkasm_set_function
+        lpad    0
         la.tls.ie t0, checked_func
         add     t0, tp, t0
         sd      a0, (t0)
@@ -56,6 +57,7 @@ func checkasm_set_function
 endfunc
 
 func checkasm_get_wrapper, v
+        lpad    0
         addi    sp, sp, -16
         sd      fp,  (sp)
         sd      ra, 8(sp)
@@ -73,7 +75,10 @@ func checkasm_get_wrapper, v
         addi    sp, sp, 16
         ret
 
+        .option norvc
+        .align  2
 2:      /* <-- Entry point with the Vector extension --> */
+        lpad    0
         /* Clobber the vectors */
         vsetvli t0, zero, e32, m8, ta, ma
         li      t0, 0xdeadbeef
@@ -89,7 +94,9 @@ func checkasm_get_wrapper, v
         csrwi   vxrm, 3      /* Rounding mode: round-to-odd */
         csrwi   vxsat, 1     /* Saturation:    encountered */
 
+        .align  2
 3:      /* <-- Entry point without the Vector extension --> */
+        lpad    0
         /* Save RA, unallocatable and callee-saved registers */
         la.tls.ie t0, saved_regs
         add     t0, tp, t0

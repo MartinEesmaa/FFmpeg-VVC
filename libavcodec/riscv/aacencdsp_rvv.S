@@ -21,7 +21,8 @@
 
 #include "libavutil/riscv/asm.S"
 
-func ff_abs_pow34_rvv, zve32f
+func ff_abs_pow34_rvv, zve32f, zba
+        lpad    0
 1:
         vsetvli      t0, a2, e32, m8, ta, ma
         sub          a2, a2, t0
@@ -38,7 +39,8 @@ func ff_abs_pow34_rvv, zve32f
         ret
 endfunc
 
-func ff_aac_quant_bands_rvv, zve32f
+func ff_aac_quant_bands_rvv, zve32f, zba
+        lpad    0
 NOHWF   fmv.w.x     fa0, a6
 NOHWF   fmv.w.x     fa1, a7
         fcvt.s.w    ft0, a5

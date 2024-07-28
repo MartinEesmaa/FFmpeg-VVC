@@ -1080,12 +1080,10 @@ static PredMode pred_mode_decode(VVCLocalContext *lc,
         }
         if (pred_mode_ibc_flag)
             pred_mode = MODE_IBC;
+        return pred_mode;
     } else {
-        pred_mode_flag = is_4x4 || mode_type == MODE_TYPE_INTRA ||
-            mode_type != MODE_TYPE_INTER || IS_I(rsh);
-        pred_mode = pred_mode_flag ? MODE_INTRA : MODE_INTER;
+        return MODE_INTRA;
     }
-    return pred_mode;
 }
 
 static void sbt_info(VVCLocalContext *lc, const VVCSPS *sps)
@@ -1878,8 +1876,6 @@ static int hls_coding_unit(VVCLocalContext *lc, int x0, int y0, int cb_width, in
         cu->lfnst_idx = lfnst_idx_decode(lc);
         cu->mts_idx = mts_idx_decode(lc);
         set_qp_c(lc);
-        if (ret < 0)
-            return ret;
     } else {
         ret = skipped_transform_tree_unit(lc);
         if (ret < 0)
