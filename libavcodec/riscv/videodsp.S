@@ -1,4 +1,6 @@
 /*
+ * Copyright © 2022 Rémi Denis-Courmont.
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,39 +18,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVUTIL_RISCV_TIMER_H
-#define AVUTIL_RISCV_TIMER_H
-
 #include "config.h"
+#include "libavutil/riscv/asm.S"
 
-#if HAVE_INLINE_ASM
-#include <stdint.h>
+#if HAVE_RV_ZICBOP
+func ff_prefetch_rv_zicbop, zicbop
+1:
+        addi    a2, a2, -1
+        prefetch.r  0(a0)
+        add     a0, a0, a1
+        bnez    a2, 1b
 
-static inline uint64_t ff_read_time(void)
-{
-#if (__riscv_xlen >= 64)
-    uintptr_t cycles;
-
-    __asm__ volatile ("rdtime  %0" : "=r" (cycles));
-
-#else
-    uint64_t cycles;
-    uint32_t hi, lo, check;
-
-    __asm__ volatile (
-        "1: rdtimeh %0\n"
-        "   rdtime  %1\n"
-        "   rdtimeh %2\n"
-        "   bne %0, %2, 1b\n" : "=r" (hi), "=r" (lo), "=r" (check));
-
-    cycles = (((uint64_t)hi) << 32) | lo;
-
+        ret
+endfunc
 #endif
-    return cycles;
-}
-
-#define AV_READ_TIME ff_read_time
-#define FF_TIMER_UNITS "ticks"
-
-#endif
-#endif /* AVUTIL_RISCV_TIMER_H */

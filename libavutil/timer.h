@@ -61,8 +61,6 @@
 #   include "arm/timer.h"
 #elif ARCH_PPC
 #   include "ppc/timer.h"
-#elif ARCH_RISCV
-#   include "riscv/timer.h"
 #elif ARCH_X86
 #   include "x86/timer.h"
 #elif ARCH_LOONGARCH
@@ -82,6 +80,7 @@
             return ts.tv_sec * INT64_C(1000000000) + ts.tv_nsec;
         }
 #       define AV_READ_TIME ff_read_time
+#       define FF_TIMER_UNITS "ns"
 #   endif
 #endif
 

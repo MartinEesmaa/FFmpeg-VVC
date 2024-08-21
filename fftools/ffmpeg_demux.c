@@ -1077,14 +1077,15 @@ int ist_filter_add(InputStream *ist, InputFilter *ifilter, int is_simple,
     return ds->sch_idx_dec;
 }
 
-static int choose_decoder(const OptionsContext *o, AVFormatContext *s, AVStream *st,
+static int choose_decoder(const OptionsContext *o, void *logctx,
+                          AVFormatContext *s, AVStream *st,
                           enum HWAccelID hwaccel_id, enum AVHWDeviceType hwaccel_device_type,
                           const AVCodec **pcodec)
 
 {
-    char *codec_name = NULL;
+    const char *codec_name = NULL;
 
-    MATCH_PER_STREAM_OPT(codec_names, str, codec_name, s, st);
+    opt_match_per_stream_str(logctx, &o->codec_names, s, st, &codec_name);
     if (codec_name) {
         int ret = find_codec(NULL, codec_name, st->codecpar->codec_type, 0, pcodec);
         if (ret < 0)
@@ -1150,9 +1151,9 @@ static int add_display_matrix_to_stream(const OptionsContext *o,
     int hflip_set = 0, vflip_set = 0, rotation_set = 0;
     int32_t *buf;
 
-    MATCH_PER_STREAM_OPT(display_rotations, dbl, rotation, ctx, st);
-    MATCH_PER_STREAM_OPT(display_hflips,    i,   hflip,    ctx, st);
-    MATCH_PER_STREAM_OPT(display_vflips,    i,   vflip,    ctx, st);
+    opt_match_per_stream_dbl(ist, &o->display_rotations, ctx, st, &rotation);
+    opt_match_per_stream_int(ist, &o->display_hflips, ctx, st, &hflip);
+    opt_match_per_stream_int(ist, &o->display_vflips, ctx, st, &vflip);
 
     rotation_set = rotation != DBL_MAX;
     hflip_set    = hflip != -1;
@@ -1226,14 +1227,14 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     AVCodecParameters *par = st->codecpar;
     DemuxStream *ds;
     InputStream *ist;
-    char *framerate = NULL, *hwaccel_device = NULL;
+    const char *framerate = NULL, *hwaccel_device = NULL;
     const char *hwaccel = NULL;
     const char *apply_cropping = NULL;
-    char *hwaccel_output_format = NULL;
-    char *codec_tag = NULL;
-    char *bsfs = NULL;
+    const char *hwaccel_output_format = NULL;
+    const char *codec_tag = NULL;
+    const char *bsfs = NULL;
     char *next;
-    char *discard_str = NULL;
+    const char *discard_str = NULL;
     int ret;
 
     ds  = demux_stream_alloc(d, st);
@@ -1250,13 +1251,13 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     ds->dec_opts.time_base = st->time_base;
 
     ds->ts_scale = 1.0;
-    MATCH_PER_STREAM_OPT(ts_scale, dbl, ds->ts_scale, ic, st);
+    opt_match_per_stream_dbl(ist, &o->ts_scale, ic, st, &ds->ts_scale);
 
     ds->autorotate = 1;
-    MATCH_PER_STREAM_OPT(autorotate, i, ds->autorotate, ic, st);
+    opt_match_per_stream_int(ist, &o->autorotate, ic, st, &ds->autorotate);
 
     ds->apply_cropping = CROP_ALL;
-    MATCH_PER_STREAM_OPT(apply_cropping, str, apply_cropping, ic, st);
+    opt_match_per_stream_str(ist, &o->apply_cropping, ic, st, &apply_cropping);
     if (apply_cropping) {
         const AVOption opts[] = {
             { "apply_cropping", NULL, 0, AV_OPT_TYPE_INT,
@@ -1282,7 +1283,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
         }
     }
 
-    MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, ic, st);
+    opt_match_per_stream_str(ist, &o->codec_tags, ic, st, &codec_tag);
     if (codec_tag) {
         uint32_t tag = strtol(codec_tag, &next, 0);
         if (*next) {
@@ -1299,10 +1300,9 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
         if (ret < 0)
             return ret;
 
-        MATCH_PER_STREAM_OPT(hwaccels, str, hwaccel, ic, st);
-        MATCH_PER_STREAM_OPT(hwaccel_output_formats, str,
-                             hwaccel_output_format, ic, st);
-
+        opt_match_per_stream_str(ist, &o->hwaccels, ic, st, &hwaccel);
+        opt_match_per_stream_str(ist, &o->hwaccel_output_formats, ic, st,
+                                       &hwaccel_output_format);
         if (!hwaccel_output_format && hwaccel && !strcmp(hwaccel, "cuvid")) {
             av_log(ist, AV_LOG_WARNING,
                 "WARNING: defaulting hwaccel_output_format to cuda for compatibility "
@@ -1360,7 +1360,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
             }
         }
 
-        MATCH_PER_STREAM_OPT(hwaccel_devices, str, hwaccel_device, ic, st);
+        opt_match_per_stream_str(ist, &o->hwaccel_devices, ic, st, &hwaccel_device);
         if (hwaccel_device) {
             ds->dec_opts.hwaccel_device = av_strdup(hwaccel_device);
             if (!ds->dec_opts.hwaccel_device)
@@ -1368,7 +1368,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
         }
     }
 
-    ret = choose_decoder(o, ic, st, ds->dec_opts.hwaccel_id,
+    ret = choose_decoder(o, ist, ic, st, ds->dec_opts.hwaccel_id,
                          ds->dec_opts.hwaccel_device_type, &ist->dec);
     if (ret < 0)
         return ret;
@@ -1381,7 +1381,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     }
 
     ds->reinit_filters = -1;
-    MATCH_PER_STREAM_OPT(reinit_filters, i, ds->reinit_filters, ic, st);
+    opt_match_per_stream_int(ist, &o->reinit_filters, ic, st, &ds->reinit_filters);
 
     ist->user_set_discard = AVDISCARD_NONE;
 
@@ -1391,7 +1391,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
         (o->data_disable && ist->st->codecpar->codec_type == AVMEDIA_TYPE_DATA))
             ist->user_set_discard = AVDISCARD_ALL;
 
-    MATCH_PER_STREAM_OPT(discard, str, discard_str, ic, st);
+    opt_match_per_stream_str(ist, &o->discard, ic, st, &discard_str);
     if (discard_str) {
         ret = av_opt_set(ist->st, "discard", discard_str, 0);
         if (ret  < 0) {
@@ -1413,7 +1413,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
 
     switch (par->codec_type) {
     case AVMEDIA_TYPE_VIDEO:
-        MATCH_PER_STREAM_OPT(frame_rates, str, framerate, ic, st);
+        opt_match_per_stream_str(ist, &o->frame_rates, ic, st, &framerate);
         if (framerate) {
             ret = av_parse_video_rate(&ist->framerate, framerate);
             if (ret < 0) {
@@ -1425,13 +1425,14 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
 
 #if FFMPEG_OPT_TOP
         ist->top_field_first = -1;
-        MATCH_PER_STREAM_OPT(top_field_first, i, ist->top_field_first, ic, st);
+        opt_match_per_stream_int(ist, &o->top_field_first, ic, st, &ist->top_field_first);
 #endif
 
         break;
     case AVMEDIA_TYPE_AUDIO: {
-        char *ch_layout_str = NULL;
-        MATCH_PER_STREAM_OPT(audio_ch_layouts, str, ch_layout_str, ic, st);
+        const char *ch_layout_str = NULL;
+
+        opt_match_per_stream_str(ist, &o->audio_ch_layouts, ic, st, &ch_layout_str);
         if (ch_layout_str) {
             AVChannelLayout ch_layout;
             ret = av_channel_layout_from_string(&ch_layout, ch_layout_str);
@@ -1451,16 +1452,17 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
             }
         } else {
             int guess_layout_max = INT_MAX;
-            MATCH_PER_STREAM_OPT(guess_layout_max, i, guess_layout_max, ic, st);
+            opt_match_per_stream_int(ist, &o->guess_layout_max, ic, st, &guess_layout_max);
             guess_input_channel_layout(ist, par, guess_layout_max);
         }
         break;
     }
     case AVMEDIA_TYPE_DATA:
     case AVMEDIA_TYPE_SUBTITLE: {
-        char *canvas_size = NULL;
-        MATCH_PER_STREAM_OPT(fix_sub_duration, i, ist->fix_sub_duration, ic, st);
-        MATCH_PER_STREAM_OPT(canvas_sizes, str, canvas_size, ic, st);
+        const char *canvas_size = NULL;
+
+        opt_match_per_stream_int(ist, &o->fix_sub_duration, ic, st, &ist->fix_sub_duration);
+        opt_match_per_stream_str(ist, &o->canvas_sizes, ic, st, &canvas_size);
         if (canvas_size) {
             ret = av_parse_video_size(&par->width, &par->height,
                                       canvas_size);
@@ -1490,7 +1492,7 @@ static int ist_add(const OptionsContext *o, Demuxer *d, AVStream *st, AVDictiona
     if (ist->st->sample_aspect_ratio.num)
         ist->par->sample_aspect_ratio = ist->st->sample_aspect_ratio;
 
-    MATCH_PER_STREAM_OPT(bitstream_filters, str, bsfs, ic, st);
+    opt_match_per_stream_str(ist, &o->bitstream_filters, ic, st, &bsfs);
     if (bsfs) {
         ret = av_bsf_list_parse_str(bsfs, &ds->bsf);
         if (ret < 0) {
@@ -1752,7 +1754,7 @@ int ifile_open(const OptionsContext *o, const char *filename, Scheduler *sch)
     /* apply forced codec ids */
     for (i = 0; i < ic->nb_streams; i++) {
         const AVCodec *dummy;
-        ret = choose_decoder(o, ic, ic->streams[i], HWACCEL_NONE, AV_HWDEVICE_TYPE_NONE,
+        ret = choose_decoder(o, f, ic, ic->streams[i], HWACCEL_NONE, AV_HWDEVICE_TYPE_NONE,
                              &dummy);
         if (ret < 0)
             return ret;

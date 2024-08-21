@@ -291,9 +291,6 @@ static const struct {
 #elif ARCH_RISCV
     { "RVI",      "rvi",      AV_CPU_FLAG_RVI },
     { "misaligned", "misaligned", AV_CPU_FLAG_RV_MISALIGNED },
-    { "RVF",      "rvf",      AV_CPU_FLAG_RVF },
-    { "RVD",      "rvd",      AV_CPU_FLAG_RVD },
-    { "RVBaddr",  "rvb_a",    AV_CPU_FLAG_RVB_ADDR },
     { "RVBbasic", "rvb_b",    AV_CPU_FLAG_RVB_BASIC },
     { "RVB",      "rvb",      AV_CPU_FLAG_RVB },
     { "RVVi32",   "rvv_i32",  AV_CPU_FLAG_RVV_I32 },

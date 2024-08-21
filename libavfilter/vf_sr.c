@@ -26,7 +26,7 @@
  */
 
 #include "avfilter.h"
-#include "internal.h"
+#include "filters.h"
 #include "video.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
