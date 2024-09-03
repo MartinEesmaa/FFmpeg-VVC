@@ -30,8 +30,8 @@ static int h266_decode_nal_units(const uint8_t *buf, int buf_size,
     int ret = 0;
     H2645Packet pkt = { 0 };
 
-    ret = ff_h2645_packet_split(&pkt, buf, buf_size, logctx, is_nalff,
-                                nal_length_size, AV_CODEC_ID_VVC, 1, 0);
+    ret = ff_h2645_packet_split(&pkt, buf, buf_size, logctx, nal_length_size,
+                            AV_CODEC_ID_VVC, H2645_FLAG_IS_NALFF);
     if (ret < 0) {
         goto done;
     }
