@@ -19,6 +19,11 @@ version <next>:
 - Cropping metadata parsing and writing in Matroska and MP4/MOV de/muxers
 - Intel QSV-accelerated VVC decoding
 - MediaCodec AAC/AMR-NB/AMR-WB/MP3 decoding
+- YUV colorspace negotiation for codecs and filters, obsoleting the
+  YUVJ pixel format
+- Vulkan H.264 encoder
+- Vulkan H.265 encoder
+- stream specifiers in fftools can now match by stream disposition
 
 
 version 7.0:

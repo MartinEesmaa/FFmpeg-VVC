@@ -52,17 +52,17 @@ Miscellaneous Areas
 documentation                           Stefano Sabatini, Mike Melanson, Timothy Gu, Gyan Doshi
 project server day to day operations    (L: root@ffmpeg.org) Árpád Gereöffy, Michael Niedermayer, Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
 project server emergencies              (L: root@ffmpeg.org) Árpád Gereöffy, Reimar Doeffinger, Alexander Strasser, Nikolay Aleksandrov, Timo Rothenpieler
-presets                                 Robert Swain
+presets                             [0]
 metadata subsystem                      Aurelien Jacobs
 release management                      Michael Niedermayer
-API tests                               Ludmila Glinskih
+API tests                           [0]
 
 
 Communication
 =============
 
 website                                 (S: https://git.ffmpeg.org/ffmpeg-web) Deby Barbara Lepage
-fate.ffmpeg.org                         (L: fate-admin@ffmpeg.org) (W: https://fate.ffmpeg.org) (P: https://ffmpeg.org/fate.html) (S: https://git.ffmpeg.org/fateserver) Timothy Gu
+fate.ffmpeg.org                         (L: fate-admin@ffmpeg.org) (W: https://fate.ffmpeg.org) (P: https://ffmpeg.org/fate.html) (S: https://git.ffmpeg.org/fateserver) Timo Rothenpieler
 Trac bug tracker                        (W: https://trac.ffmpeg.org) Alexander Strasser, Michael Niedermayer, Carl Eugen Hoyos
 Patchwork                           [2] (W: https://patchwork.ffmpeg.org) Andriy Gelman
 mailing lists                           (W: https://ffmpeg.org/contact.html#MailingLists) Baptiste Coudurier
@@ -122,7 +122,7 @@ Generic Parts:
   DSP utilities:
     dsputils.c, dsputils.h              Michael Niedermayer
   entropy coding:
-    rangecoder.c, rangecoder.h          Michael Niedermayer
+    rangecoder.c, rangecoder.h      [2] Michael Niedermayer
     lzw.*                               Michael Niedermayer
   floating point AAN DCT:
     faandct.c, faandct.h            [2] Michael Niedermayer
@@ -190,6 +190,7 @@ Codecs:
   h263*                                 Michael Niedermayer
   h264*                                 Loren Merritt, Michael Niedermayer
   hap*                                  Tom Butterworth
+  hevc/*                                Anton Khirnov
   huffyuv*                              Michael Niedermayer
   idcinvideo.c                          Mike Melanson
   interplayvideo.c                      Mike Melanson
@@ -364,7 +365,7 @@ Generic parts:
 Muxers/Demuxers:
   4xm.c                                 Mike Melanson
   aadec.c                               Vesselin Bontchev (vesselin.bontchev at yandex dot com)
-  adtsenc.c                             Robert Swain
+  adtsenc.c                         [0]
   aiffdec.c                             Baptiste Coudurier, Matthieu Bouron
   aiffenc.c                             Baptiste Coudurier, Matthieu Bouron
   alp.c                                 Zane van Iperen
@@ -400,6 +401,7 @@ Muxers/Demuxers:
   gxf.c                                 Reimar Doeffinger
   gxfenc.c                              Baptiste Coudurier
   hlsenc.c                              Christian Suloway, Steven Liu
+  iamf*                             [2] James Almer
   idcin.c                               Mike Melanson
   idroqdec.c                            Mike Melanson
   iff.c                                 Jaikrishnan Menon
@@ -414,9 +416,9 @@ Muxers/Demuxers:
   libopenmpt.c                          Josh de Kock
   lmlm4.c                               Ivo van Poorten
   lxfdec.c                              Tomas Härdin
-  matroska.c                            Aurelien Jacobs, Andreas Rheinhardt
-  matroskadec.c                         Aurelien Jacobs, Andreas Rheinhardt
-  matroskaenc.c                         David Conrad, Andreas Rheinhardt
+  matroska.c                            Andreas Rheinhardt
+  matroskadec.c                         Andreas Rheinhardt
+  matroskaenc.c                         Andreas Rheinhardt
   matroska subtitles (matroskaenc.c)    John Peebles
   metadata*                             Aurelien Jacobs
   microdvd*                             Aurelien Jacobs
@@ -485,7 +487,7 @@ Protocols:
   libzmq.c                              Andriy Gelman
   mms*.c                                Ronald S. Bultje
   udp.c                                 Luca Abeni
-  icecast.c                             Marvin Scholz (CC <epirat07@gmail.com>)
+  icecast.c                         [2] Marvin Scholz (CC <epirat07@gmail.com>)
 
 
 libswresample

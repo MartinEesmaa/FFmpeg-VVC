@@ -186,6 +186,7 @@ static const struct FFVkFormatEntry {
     { VK_FORMAT_B8G8R8A8_UNORM,           AV_PIX_FMT_BGR0,    VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 1, { VK_FORMAT_B8G8R8A8_UNORM           } },
     { VK_FORMAT_R8G8B8A8_UNORM,           AV_PIX_FMT_RGB0,    VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 1, { VK_FORMAT_R8G8B8A8_UNORM           } },
     { VK_FORMAT_A2R10G10B10_UNORM_PACK32, AV_PIX_FMT_X2RGB10, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 1, { VK_FORMAT_A2R10G10B10_UNORM_PACK32 } },
+    { VK_FORMAT_A2B10G10R10_UNORM_PACK32, AV_PIX_FMT_X2BGR10, VK_IMAGE_ASPECT_COLOR_BIT, 1, 1, 1, { VK_FORMAT_A2B10G10R10_UNORM_PACK32 } },
 
     /* Planar RGB */
     { VK_FORMAT_R8_UNORM,   AV_PIX_FMT_GBRAP,    VK_IMAGE_ASPECT_COLOR_BIT, 1, 4, 4, { VK_FORMAT_R8_UNORM,   VK_FORMAT_R8_UNORM,   VK_FORMAT_R8_UNORM,   VK_FORMAT_R8_UNORM   } },
@@ -457,6 +458,9 @@ static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEX
 
     /* Ignore false positives */
     switch (data->messageIdNumber) {
+    case 0x086974c1: /* BestPractices-vkCreateCommandPool-command-buffer-reset */
+    case 0xfd92477a: /* BestPractices-vkAllocateMemory-small-allocation */
+    case 0x618ab1e7: /* VUID-VkImageViewCreateInfo-usage-02275 */
     case 0x30f4ac70: /* VUID-VkImageCreateInfo-pNext-06811 */
         return VK_FALSE;
     default:
@@ -1755,7 +1759,6 @@ FF_DISABLE_DEPRECATION_WARNINGS
         tx_index    = (ctx_qf == tx_index)    ? -1 : tx_index;                                  \
         enc_index   = (ctx_qf == enc_index)   ? -1 : enc_index;                                 \
         dec_index   = (ctx_qf == dec_index)   ? -1 : dec_index;                                 \
-        p->img_qfs[p->nb_img_qfs++] = ctx_qf;                                                   \
     } while (0)
 
     CHECK_QUEUE("graphics", 0, graph_index, hwctx->queue_family_index,        hwctx->nb_graphics_queues);
@@ -1796,6 +1799,22 @@ FF_ENABLE_DEPRECATION_WARNINGS
                                   VK_QUEUE_VIDEO_ENCODE_BIT_KHR)) {
             hwctx->qf[i].video_caps = qf_vid[hwctx->qf[i].idx].videoCodecOperations;
         }
+    }
+
+    /* Setup array for pQueueFamilyIndices with used queue families */
+    p->nb_img_qfs = 0;
+    for (int i = 0; i < hwctx->nb_qf; i++) {
+        int seen = 0;
+        /* Make sure each entry is unique
+         * (VUID-VkBufferCreateInfo-sharingMode-01419) */
+        for (int j = (i - 1); j >= 0; j--) {
+            if (hwctx->qf[i].idx == hwctx->qf[j].idx) {
+                seen = 1;
+                break;
+            }
+        }
+        if (!seen)
+            p->img_qfs[p->nb_img_qfs++] = hwctx->qf[i].idx;
     }
 
     if (!hwctx->lock_queue)
@@ -2187,6 +2206,7 @@ static int alloc_bind_mem(AVHWFramesContext *hwfc, AVVkFrame *f,
 }
 
 enum PrepMode {
+    PREP_MODE_GENERAL,
     PREP_MODE_WRITE,
     PREP_MODE_EXTERNAL_EXPORT,
     PREP_MODE_EXTERNAL_IMPORT,
@@ -2232,6 +2252,10 @@ static int prepare_frame(AVHWFramesContext *hwfc, FFVkExecPool *ectx,
         return err;
 
     switch (pmode) {
+    case PREP_MODE_GENERAL:
+        new_layout = VK_IMAGE_LAYOUT_GENERAL;
+        new_access = VK_ACCESS_TRANSFER_WRITE_BIT;
+        break;
     case PREP_MODE_WRITE:
         new_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         new_access = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -2520,8 +2544,10 @@ static AVBufferRef *vulkan_pool_alloc(void *opaque, size_t size)
         err = prepare_frame(hwfc, &fp->compute_exec, f, PREP_MODE_DECODING_DST);
     else if (hwctx->usage & VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR)
         err = prepare_frame(hwfc, &fp->compute_exec, f, PREP_MODE_ENCODING_DPB);
-    else
+    else if (hwctx->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT)
         err = prepare_frame(hwfc, &fp->compute_exec, f, PREP_MODE_WRITE);
+    else
+        err = prepare_frame(hwfc, &fp->compute_exec, f, PREP_MODE_GENERAL);
     if (err)
         goto fail;
 
@@ -2610,7 +2636,8 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
         err = vkfmt_from_pixfmt2(hwfc->device_ctx, hwfc->sw_format,
                                  hwctx->tiling, NULL,
                                  NULL, NULL, &supported_usage, 0,
-                                 hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT);
+                                 !hwctx->usage ||
+                                 (hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT));
         if (err < 0) {
             av_log(hwfc, AV_LOG_ERROR, "Unsupported sw format: %s!\n",
                    av_get_pix_fmt_name(hwfc->sw_format));
@@ -2621,7 +2648,8 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
                                  hwctx->tiling, hwctx->format, NULL,
                                  NULL, &supported_usage,
                                  disable_multiplane,
-                                 hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT);
+                                 !hwctx->usage ||
+                                 (hwctx->usage & VK_IMAGE_USAGE_STORAGE_BIT));
         if (err < 0)
             return err;
     }
@@ -2644,8 +2672,9 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
      * Only fill them in automatically if the image is not going to be used as
      * a DPB-only image, and we have SAMPLED/STORAGE bits set. */
     if (!hwctx->img_flags) {
-        int is_lone_dpb =  (hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR) &&
-                          !(hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR);
+        int is_lone_dpb = ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR) ||
+                           ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR) &&
+                            !(hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR)));
         int sampleable = hwctx->usage & (VK_IMAGE_USAGE_SAMPLED_BIT |
                                          VK_IMAGE_USAGE_STORAGE_BIT);
         if (sampleable && !is_lone_dpb) {
@@ -2779,6 +2808,10 @@ static const struct {
     { DRM_FORMAT_XRGB8888, VK_FORMAT_B8G8R8A8_UNORM },
     { DRM_FORMAT_ABGR8888, VK_FORMAT_R8G8B8A8_UNORM },
     { DRM_FORMAT_XBGR8888, VK_FORMAT_R8G8B8A8_UNORM },
+    { DRM_FORMAT_ARGB2101010, VK_FORMAT_A2B10G10R10_UNORM_PACK32 },
+    { DRM_FORMAT_ABGR2101010, VK_FORMAT_A2R10G10B10_UNORM_PACK32 },
+    { DRM_FORMAT_XRGB2101010, VK_FORMAT_A2B10G10R10_UNORM_PACK32 },
+    { DRM_FORMAT_XBGR2101010, VK_FORMAT_A2R10G10B10_UNORM_PACK32 },
 
     // All these DRM_FORMATs were added in the same libdrm commit.
 #ifdef DRM_FORMAT_XYUV8888

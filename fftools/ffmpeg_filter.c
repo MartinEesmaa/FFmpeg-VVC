@@ -202,6 +202,8 @@ typedef struct OutputFilterPriv {
     int                     width, height;
     int                     sample_rate;
     AVChannelLayout         ch_layout;
+    enum AVColorSpace       color_space;
+    enum AVColorRange       color_range;
 
     // time base in which the output is sent to our downstream
     // does not need to match the filtersink's timebase
@@ -220,6 +222,8 @@ typedef struct OutputFilterPriv {
     const int              *formats;
     const AVChannelLayout  *ch_layouts;
     const int              *sample_rates;
+    const enum AVColorSpace *color_spaces;
+    const enum AVColorRange *color_ranges;
 
     AVRational              enc_timebase;
     int64_t                 trim_start_us;
@@ -364,35 +368,6 @@ static void sub2video_update(InputFilterPriv *ifp, int64_t heartbeat_pts,
     ifp->sub2video.initialize = 0;
 }
 
-/* *dst may return be set to NULL (no pixel format found), a static string or a
- * string backed by the bprint. Nothing has been written to the AVBPrint in case
- * NULL is returned. The AVBPrint provided should be clean. */
-static int choose_pix_fmts(OutputFilter *ofilter, AVBPrint *bprint,
-                           const char **dst)
-{
-    OutputFilterPriv *ofp = ofp_from_ofilter(ofilter);
-
-    *dst = NULL;
-
-    if (ofp->flags & OFILTER_FLAG_DISABLE_CONVERT || ofp->format != AV_PIX_FMT_NONE) {
-        *dst = ofp->format == AV_PIX_FMT_NONE ? NULL :
-               av_get_pix_fmt_name(ofp->format);
-    } else if (ofp->formats) {
-        const enum AVPixelFormat *p = ofp->formats;
-
-        for (; *p != AV_PIX_FMT_NONE; p++) {
-            const char *name = av_get_pix_fmt_name(*p);
-            av_bprintf(bprint, "%s%c", name, p[1] == AV_PIX_FMT_NONE ? '\0' : '|');
-        }
-        if (!av_bprint_is_complete(bprint))
-            return AVERROR(ENOMEM);
-
-        *dst = bprint->str;
-    }
-
-    return 0;
-}
-
 /* Define a function for appending a list of allowed formats
  * to an AVBPrint. If nonempty, the list will have a header. */
 #define DEF_CHOOSE_FORMAT(name, type, var, supported_list, none, printf_format, get_name) \
@@ -415,14 +390,20 @@ static void choose_ ## name (OutputFilterPriv *ofp, AVBPrint *bprint)          \
     av_bprint_chars(bprint, ':', 1);                                           \
 }
 
-//DEF_CHOOSE_FORMAT(pix_fmts, enum AVPixelFormat, format, formats, AV_PIX_FMT_NONE,
-//                  GET_PIX_FMT_NAME)
+DEF_CHOOSE_FORMAT(pix_fmts, enum AVPixelFormat, format, formats,
+                  AV_PIX_FMT_NONE, "%s", av_get_pix_fmt_name)
 
 DEF_CHOOSE_FORMAT(sample_fmts, enum AVSampleFormat, format, formats,
                   AV_SAMPLE_FMT_NONE, "%s", av_get_sample_fmt_name)
 
 DEF_CHOOSE_FORMAT(sample_rates, int, sample_rate, sample_rates, 0,
                   "%d", )
+
+DEF_CHOOSE_FORMAT(color_spaces, enum AVColorSpace, color_space, color_spaces,
+                  AVCOL_SPC_UNSPECIFIED, "%s", av_color_space_name);
+
+DEF_CHOOSE_FORMAT(color_ranges, enum AVColorRange, color_range, color_ranges,
+                  AVCOL_RANGE_UNSPECIFIED, "%s", av_color_range_name);
 
 static void choose_channel_layouts(OutputFilterPriv *ofp, AVBPrint *bprint)
 {
@@ -668,6 +649,8 @@ static OutputFilter *ofilter_alloc(FilterGraph *fg, enum AVMediaType type)
     ofilter->graph    = fg;
     ofilter->type     = type;
     ofp->format       = -1;
+    ofp->color_space  = AVCOL_SPC_UNSPECIFIED;
+    ofp->color_range  = AVCOL_RANGE_UNSPECIFIED;
     ofp->index        = fg->nb_outputs - 1;
 
     snprintf(ofp->log_name, sizeof(ofp->log_name), "%co%d",
@@ -848,10 +831,18 @@ int ofilter_bind_ost(OutputFilter *ofilter, OutputStream *ost,
         ofp->height     = opts->height;
         if (opts->format != AV_PIX_FMT_NONE) {
             ofp->format = opts->format;
-        } else if (opts->pix_fmts)
-            ofp->formats = opts->pix_fmts;
-        else if (opts->enc)
-            ofp->formats = opts->enc->pix_fmts;
+        } else
+            ofp->formats = opts->formats;
+
+        if (opts->color_space != AVCOL_SPC_UNSPECIFIED)
+            ofp->color_space = opts->color_space;
+        else
+            ofp->color_spaces = opts->color_spaces;
+
+        if (opts->color_range != AVCOL_RANGE_UNSPECIFIED)
+            ofp->color_range = opts->color_range;
+        else
+            ofp->color_ranges = opts->color_ranges;
 
         fgp->disable_conversions |= !!(ofp->flags & OFILTER_FLAG_DISABLE_CONVERT);
 
@@ -863,7 +854,7 @@ int ofilter_bind_ost(OutputFilter *ofilter, OutputStream *ost,
         ofp->fps.framerate           = ost->frame_rate;
         ofp->fps.framerate_max       = ost->max_frame_rate;
         ofp->fps.framerate_supported = ost->force_fps || !opts->enc ?
-                                       NULL : opts->enc->supported_framerates;
+                                       NULL : opts->frame_rates;
 
         // reduce frame rate for mpeg4 to be within the spec limits
         if (opts->enc && opts->enc->id == AV_CODEC_ID_MPEG4)
@@ -875,21 +866,19 @@ int ofilter_bind_ost(OutputFilter *ofilter, OutputStream *ost,
     case AVMEDIA_TYPE_AUDIO:
         if (opts->format != AV_SAMPLE_FMT_NONE) {
             ofp->format = opts->format;
-        } else if (opts->enc) {
-            ofp->formats = opts->enc->sample_fmts;
+        } else {
+            ofp->formats = opts->formats;
         }
         if (opts->sample_rate) {
             ofp->sample_rate = opts->sample_rate;
-        } else if (opts->enc) {
-            ofp->sample_rates = opts->enc->supported_samplerates;
-        }
+        } else
+            ofp->sample_rates = opts->sample_rates;
         if (opts->ch_layout.nb_channels) {
-            int ret = set_channel_layout(ofp, opts->enc ? opts->enc->ch_layouts : NULL,
-                                         &opts->ch_layout);
+            int ret = set_channel_layout(ofp, opts->ch_layouts, &opts->ch_layout);
             if (ret < 0)
                 return ret;
-        } else if (opts->enc) {
-            ofp->ch_layouts = opts->enc->ch_layouts;
+        } else {
+            ofp->ch_layouts = opts->ch_layouts;
         }
         break;
     }
@@ -1481,7 +1470,6 @@ static int configure_output_video_filter(FilterGraph *fg, AVFilterGraph *graph,
     AVBPrint bprint;
     int pad_idx = out->pad_idx;
     int ret;
-    const char *pix_fmts;
     char name[255];
 
     snprintf(name, sizeof(name), "out_%s", ofp->name);
@@ -1515,17 +1503,21 @@ static int configure_output_video_filter(FilterGraph *fg, AVFilterGraph *graph,
         pad_idx = 0;
     }
 
+    av_assert0(!(ofp->flags & OFILTER_FLAG_DISABLE_CONVERT) ||
+               ofp->format != AV_PIX_FMT_NONE || !ofp->formats);
     av_bprint_init(&bprint, 0, AV_BPRINT_SIZE_UNLIMITED);
-    ret = choose_pix_fmts(ofilter, &bprint, &pix_fmts);
-    if (ret < 0)
-        return ret;
+    choose_pix_fmts(ofp, &bprint);
+    choose_color_spaces(ofp, &bprint);
+    choose_color_ranges(ofp, &bprint);
+    if (!av_bprint_is_complete(&bprint))
+        return AVERROR(ENOMEM);
 
-    if (pix_fmts) {
+    if (bprint.len) {
         AVFilterContext *filter;
 
         ret = avfilter_graph_create_filter(&filter,
                                            avfilter_get_by_name("format"),
-                                           "format", pix_fmts, NULL, graph);
+                                           "format", bprint.str, NULL, graph);
         av_bprint_finalize(&bprint, NULL);
         if (ret < 0)
             return ret;
@@ -1939,6 +1931,8 @@ static int configure_filtergraph(FilterGraph *fg, FilterGraphThread *fgt)
 
         ofp->width  = av_buffersink_get_w(sink);
         ofp->height = av_buffersink_get_h(sink);
+        ofp->color_space = av_buffersink_get_colorspace(sink);
+        ofp->color_range = av_buffersink_get_color_range(sink);
 
         // If the timing parameters are not locked yet, get the tentative values
         // here but don't lock them. They will only be used if no output frames

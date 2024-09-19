@@ -22,6 +22,7 @@
 #include "mem.h"
 
 #include "vulkan.h"
+#include "libavutil/vulkan_loader.h"
 
 const VkComponentMapping ff_comp_identity_map = {
     .r = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -432,53 +433,31 @@ fail:
 }
 
 VkResult ff_vk_exec_get_query(FFVulkanContext *s, FFVkExecContext *e,
-                              void **data, int64_t *status)
+                              void **data, VkQueryResultFlagBits flags)
 {
-    VkResult ret;
     FFVulkanFunctions *vk = &s->vkfn;
     const FFVkExecPool *pool = e->parent;
+    VkQueryResultFlags qf = flags & ~(VK_QUERY_RESULT_64_BIT |
+                                      VK_QUERY_RESULT_WITH_STATUS_BIT_KHR);
 
-    int32_t *res32 = e->query_data;
-    int64_t *res64 = e->query_data;
-    int64_t res = 0;
-    VkQueryResultFlags qf = 0;
-
-    if (!e->had_submission)
-        return VK_NOT_READY;
+    if (!e->query_data) {
+        av_log(s, AV_LOG_ERROR, "Requested a query with a NULL query_data pointer!\n");
+        return VK_INCOMPLETE;
+    }
 
     qf |= pool->query_64bit ?
           VK_QUERY_RESULT_64_BIT : 0x0;
     qf |= pool->query_statuses ?
           VK_QUERY_RESULT_WITH_STATUS_BIT_KHR : 0x0;
 
-    ret = vk->GetQueryPoolResults(s->hwctx->act_dev, pool->query_pool,
-                                  e->query_idx,
-                                  pool->nb_queries,
-                                  pool->qd_size, e->query_data,
-                                  pool->qd_size, qf);
-    if (ret != VK_SUCCESS)
-        return ret;
-
-    if (pool->query_statuses && pool->query_64bit) {
-        for (int i = 0; i < pool->query_statuses; i++) {
-            res = (res64[i] < res) || (res >= 0 && res64[i] > res) ?
-                  res64[i] : res;
-            res64 += pool->query_status_stride;
-        }
-    } else if (pool->query_statuses) {
-        for (int i = 0; i < pool->query_statuses; i++) {
-            res = (res32[i] < res) || (res >= 0 && res32[i] > res) ?
-                  res32[i] : res;
-            res32 += pool->query_status_stride;
-        }
-    }
-
     if (data)
         *data = e->query_data;
-    if (status)
-        *status = res;
 
-    return VK_SUCCESS;
+    return vk->GetQueryPoolResults(s->hwctx->act_dev, pool->query_pool,
+                                   e->query_idx,
+                                   pool->nb_queries,
+                                   pool->qd_size, e->query_data,
+                                   pool->qd_size, qf);
 }
 
 FFVkExecContext *ff_vk_exec_get(FFVkExecPool *pool)
@@ -811,7 +790,7 @@ int ff_vk_alloc_mem(FFVulkanContext *s, VkMemoryRequirements *req,
     }
 
     if (index < 0) {
-        av_log(s->device, AV_LOG_ERROR, "No memory type found for flags 0x%x\n",
+        av_log(s, AV_LOG_ERROR, "No memory type found for flags 0x%x\n",
                req_flags);
         return AVERROR(EINVAL);
     }
@@ -1183,7 +1162,8 @@ int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt)
         pix_fmt == AV_PIX_FMT_BGR24  || pix_fmt == AV_PIX_FMT_RGB48  ||
         pix_fmt == AV_PIX_FMT_RGBA64 || pix_fmt == AV_PIX_FMT_RGB565 ||
         pix_fmt == AV_PIX_FMT_BGR565 || pix_fmt == AV_PIX_FMT_BGR0   ||
-        pix_fmt == AV_PIX_FMT_0BGR   || pix_fmt == AV_PIX_FMT_RGB0)
+        pix_fmt == AV_PIX_FMT_0BGR   || pix_fmt == AV_PIX_FMT_RGB0   ||
+        pix_fmt == AV_PIX_FMT_X2RGB10 || pix_fmt == AV_PIX_FMT_X2BGR10)
         return 1;
     return 0;
 }
@@ -1863,5 +1843,59 @@ void ff_vk_uninit(FFVulkanContext *s)
     av_freep(&s->video_props);
     av_freep(&s->coop_mat_props);
 
+    av_buffer_unref(&s->device_ref);
     av_buffer_unref(&s->frames_ref);
+}
+
+int ff_vk_init(FFVulkanContext *s, void *log_parent,
+               AVBufferRef *device_ref, AVBufferRef *frames_ref)
+{
+    int err;
+
+    static const AVClass vulkan_context_class = {
+        .class_name       = "vk",
+        .version          = LIBAVUTIL_VERSION_INT,
+        .parent_log_context_offset = offsetof(FFVulkanContext, log_parent),
+    };
+
+    memset(s, 0, sizeof(*s));
+    s->log_parent = log_parent;
+    s->class      = &vulkan_context_class;
+
+    if (frames_ref) {
+        s->frames_ref = av_buffer_ref(frames_ref);
+        if (!s->frames_ref)
+            return AVERROR(ENOMEM);
+
+        s->frames = (AVHWFramesContext *)s->frames_ref->data;
+        s->hwfc = s->frames->hwctx;
+
+        device_ref = s->frames->device_ref;
+    }
+
+    s->device_ref = av_buffer_ref(device_ref);
+    if (!s->device_ref) {
+        ff_vk_uninit(s);
+        return AVERROR(ENOMEM);
+    }
+
+    s->device = (AVHWDeviceContext *)s->device_ref->data;
+    s->hwctx = s->device->hwctx;
+
+    s->extensions = ff_vk_extensions_to_mask(s->hwctx->enabled_dev_extensions,
+                                             s->hwctx->nb_enabled_dev_extensions);
+
+    err = ff_vk_load_functions(s->device, &s->vkfn, s->extensions, 1, 1);
+    if (err < 0) {
+        ff_vk_uninit(s);
+        return err;
+    }
+
+    err = ff_vk_load_props(s);
+    if (err < 0) {
+        ff_vk_uninit(s);
+        return err;
+    }
+
+    return 0;
 }

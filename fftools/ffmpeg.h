@@ -283,8 +283,6 @@ typedef struct OutputFilterOptions {
 
     // Codec used for encoding, may be NULL
     const AVCodec      *enc;
-    // Overrides encoder pixel formats when set.
-    const enum AVPixelFormat *pix_fmts;
 
     int64_t             trim_start_us;
     int64_t             trim_duration_us;
@@ -306,11 +304,20 @@ typedef struct OutputFilterOptions {
     int                 format;
     int                 width;
     int                 height;
+    enum AVColorSpace   color_space;
+    enum AVColorRange   color_range;
 
     enum VideoSyncMethod vsync_method;
 
     int                 sample_rate;
     AVChannelLayout     ch_layout;
+
+    const int                *formats;
+    const int                *sample_rates;
+    const AVChannelLayout    *ch_layouts;
+    const AVRational         *frame_rates;
+    const enum AVColorSpace  *color_spaces;
+    const enum AVColorRange  *color_ranges;
 } OutputFilterOptions;
 
 typedef struct InputFilter {
