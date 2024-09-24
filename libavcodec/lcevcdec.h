@@ -16,24 +16,27 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-/*
- * based on vlc_atomic.h from VLC
- * Copyright (C) 2010 Rémi Denis-Courmont
- */
+#ifndef AVCODEC_LCEVCDEC_H
+#define AVCODEC_LCEVCDEC_H
 
-#include <pthread.h>
+#include "config_components.h"
+
 #include <stdint.h>
+#if CONFIG_LIBLCEVC_DEC
+#include <LCEVC/lcevc_dec.h>
+#else
+typedef uintptr_t LCEVC_DecoderHandle;
+#endif
+#include "refstruct.h"
 
-#include "stdatomic.h"
+typedef struct FFLCEVCContext {
+    LCEVC_DecoderHandle decoder;
+    int initialized;
+} FFLCEVCContext;
 
-static pthread_mutex_t atomic_lock = PTHREAD_MUTEX_INITIALIZER;
+struct AVFrame;
 
-void avpriv_atomic_lock(void)
-{
-    pthread_mutex_lock(&atomic_lock);
-}
-
-void avpriv_atomic_unlock(void)
-{
-    pthread_mutex_unlock(&atomic_lock);
-}
+int ff_lcevc_alloc(FFLCEVCContext **plcevc);
+int ff_lcevc_process(void *logctx, struct AVFrame *frame);
+void ff_lcevc_unref(void *opaque);
+#endif /* AVCODEC_LCEVCDEC_H */
