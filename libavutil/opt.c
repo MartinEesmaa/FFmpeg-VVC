@@ -2343,13 +2343,15 @@ int av_opt_set_array(void *obj, const char *name, int search_flags,
         int64_t intnum = 1;
 
         if (val_type == TYPE_BASE(o->type)) {
+            int err;
+
             ret = opt_copy_elem(obj, val_type, dst, src);
             if (ret < 0)
                 goto fail;
 
             // validate the range for numeric options
-            ret = read_number(o, dst, &num, &den, &intnum);
-            if (ret >= 0 && TYPE_BASE(o->type) != AV_OPT_TYPE_FLAGS &&
+            err = read_number(o, dst, &num, &den, &intnum);
+            if (err >= 0 && TYPE_BASE(o->type) != AV_OPT_TYPE_FLAGS &&
                 (!den || o->max * den < num * intnum || o->min * den > num * intnum)) {
                 num = den ? num * intnum / den : (num && intnum ? INFINITY : NAN);
                 av_log(obj, AV_LOG_ERROR, "Cannot set array element %u for "
@@ -2362,7 +2364,7 @@ int av_opt_set_array(void *obj, const char *name, int search_flags,
             ret = opt_set_elem(obj, target_obj, o, *(const char **)src, dst);
             if (ret < 0)
                 goto fail;
-        } if (val_type == AV_OPT_TYPE_INT      ||
+        } else if (val_type == AV_OPT_TYPE_INT ||
               val_type == AV_OPT_TYPE_INT64    ||
               val_type == AV_OPT_TYPE_FLOAT    ||
               val_type == AV_OPT_TYPE_DOUBLE   ||
