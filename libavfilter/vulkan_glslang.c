@@ -136,8 +136,8 @@ static const glslang_resource_t glslc_resource_limits = {
     }
 };
 
-static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
-                                FFVkSPIRVShader *shd, uint8_t **data,
+static int glslc_shader_compile(FFVulkanContext *s, FFVkSPIRVCompiler *ctx,
+                                FFVulkanShader *shd, uint8_t **data,
                                 size_t *size, const char *entrypoint,
                                 void **opaque)
 {
@@ -149,21 +149,28 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
         [VK_SHADER_STAGE_VERTEX_BIT]   = GLSLANG_STAGE_VERTEX,
         [VK_SHADER_STAGE_FRAGMENT_BIT] = GLSLANG_STAGE_FRAGMENT,
         [VK_SHADER_STAGE_COMPUTE_BIT]  = GLSLANG_STAGE_COMPUTE,
+#if ((GLSLANG_VERSION_MAJOR) > 12)
+        [VK_SHADER_STAGE_TASK_BIT_EXT] = GLSLANG_STAGE_TASK,
+        [VK_SHADER_STAGE_MESH_BIT_EXT] = GLSLANG_STAGE_MESH,
+        [VK_SHADER_STAGE_RAYGEN_BIT_KHR] = GLSLANG_STAGE_RAYGEN,
+        [VK_SHADER_STAGE_INTERSECTION_BIT_KHR] = GLSLANG_STAGE_INTERSECT,
+        [VK_SHADER_STAGE_ANY_HIT_BIT_KHR] = GLSLANG_STAGE_ANYHIT,
+        [VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR] = GLSLANG_STAGE_CLOSESTHIT,
+        [VK_SHADER_STAGE_MISS_BIT_KHR] = GLSLANG_STAGE_MISS,
+        [VK_SHADER_STAGE_CALLABLE_BIT_KHR] = GLSLANG_STAGE_CALLABLE,
+#endif
     };
 
     const glslang_input_t glslc_input = {
         .language                          = GLSLANG_SOURCE_GLSL,
-        .stage                             = glslc_stage[shd->shader.stage],
+        .stage                             = glslc_stage[shd->stage],
         .client                            = GLSLANG_CLIENT_VULKAN,
-        /* GLSLANG_TARGET_VULKAN_1_2 before 11.6 resulted in targeting 1.0 */
-#if (((GLSLANG_VERSION_MAJOR) > 11) || ((GLSLANG_VERSION_MAJOR) == 11 && \
-    (((GLSLANG_VERSION_MINOR) >  6) || ((GLSLANG_VERSION_MINOR) ==  6 && \
-     ((GLSLANG_VERSION_PATCH) > 0)))))
+#if ((GLSLANG_VERSION_MAJOR) >= 12)
+        .client_version                    = GLSLANG_TARGET_VULKAN_1_3,
+        .target_language_version           = GLSLANG_TARGET_SPV_1_6,
+#else
         .client_version                    = GLSLANG_TARGET_VULKAN_1_2,
         .target_language_version           = GLSLANG_TARGET_SPV_1_5,
-#else
-        .client_version                    = GLSLANG_TARGET_VULKAN_1_1,
-        .target_language_version           = GLSLANG_TARGET_SPV_1_3,
 #endif
         .target_language                   = GLSLANG_TARGET_SPV,
         .code                              = shd->src.str,
@@ -175,6 +182,20 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
         .resource                          = &glslc_resource_limits,
     };
 
+#if ((GLSLANG_VERSION_MAJOR) >= 12)
+    glslang_spv_options_t glslc_opts = {
+        .generate_debug_info = !!(s->extensions & (FF_VK_EXT_DEBUG_UTILS | FF_VK_EXT_RELAXED_EXTENDED_INSTR)),
+        .emit_nonsemantic_shader_debug_info = !!(s->extensions & FF_VK_EXT_RELAXED_EXTENDED_INSTR),
+        .emit_nonsemantic_shader_debug_source = !!(s->extensions & FF_VK_EXT_RELAXED_EXTENDED_INSTR),
+        .disable_optimizer = !!(s->extensions & FF_VK_EXT_DEBUG_UTILS),
+        .strip_debug_info = !(s->extensions & (FF_VK_EXT_DEBUG_UTILS | FF_VK_EXT_RELAXED_EXTENDED_INSTR)),
+        .optimize_size = 0,
+        .disassemble = 0,
+        .validate = 1,
+        .compile_only = 0,
+    };
+#endif
+
     av_assert0(glslc_refcount);
 
     *opaque = NULL;
@@ -183,8 +204,8 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
         return AVERROR(ENOMEM);
 
     if (!glslang_shader_preprocess(glslc_shader, &glslc_input)) {
-        ff_vk_shader_print(avctx, shd, AV_LOG_WARNING);
-        av_log(avctx, AV_LOG_ERROR, "Unable to preprocess shader: %s (%s)!\n",
+        ff_vk_shader_print(s, shd, AV_LOG_WARNING);
+        av_log(s, AV_LOG_ERROR, "Unable to preprocess shader: %s (%s)!\n",
                glslang_shader_get_info_log(glslc_shader),
                glslang_shader_get_info_debug_log(glslc_shader));
         glslang_shader_delete(glslc_shader);
@@ -192,8 +213,8 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
     }
 
     if (!glslang_shader_parse(glslc_shader, &glslc_input)) {
-        ff_vk_shader_print(avctx, shd, AV_LOG_WARNING);
-        av_log(avctx, AV_LOG_ERROR, "Unable to parse shader: %s (%s)!\n",
+        ff_vk_shader_print(s, shd, AV_LOG_WARNING);
+        av_log(s, AV_LOG_ERROR, "Unable to parse shader: %s (%s)!\n",
                glslang_shader_get_info_log(glslc_shader),
                glslang_shader_get_info_debug_log(glslc_shader));
         glslang_shader_delete(glslc_shader);
@@ -209,8 +230,8 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
 
     if (!glslang_program_link(glslc_program, GLSLANG_MSG_SPV_RULES_BIT |
                                              GLSLANG_MSG_VULKAN_RULES_BIT)) {
-        ff_vk_shader_print(avctx, shd, AV_LOG_WARNING);
-        av_log(avctx, AV_LOG_ERROR, "Unable to link shader: %s (%s)!\n",
+        ff_vk_shader_print(s, shd, AV_LOG_WARNING);
+        av_log(s, AV_LOG_ERROR, "Unable to link shader: %s (%s)!\n",
                glslang_program_get_info_log(glslc_program),
                glslang_program_get_info_debug_log(glslc_program));
         glslang_program_delete(glslc_program);
@@ -218,14 +239,18 @@ static int glslc_shader_compile(FFVkSPIRVCompiler *ctx, void *avctx,
         return AVERROR(EINVAL);
     }
 
+#if ((GLSLANG_VERSION_MAJOR) >= 12)
+    glslang_program_SPIRV_generate_with_options(glslc_program, glslc_input.stage, &glslc_opts);
+#else
     glslang_program_SPIRV_generate(glslc_program, glslc_input.stage);
+#endif
 
     messages = glslang_program_SPIRV_get_messages(glslc_program);
     if (messages) {
-        ff_vk_shader_print(avctx, shd, AV_LOG_WARNING);
-        av_log(avctx, AV_LOG_WARNING, "%s\n", messages);
+        ff_vk_shader_print(s, shd, AV_LOG_WARNING);
+        av_log(s, AV_LOG_WARNING, "%s\n", messages);
     } else {
-        ff_vk_shader_print(avctx, shd, AV_LOG_VERBOSE);
+        ff_vk_shader_print(s, shd, AV_LOG_VERBOSE);
     }
 
     glslang_shader_delete(glslc_shader);

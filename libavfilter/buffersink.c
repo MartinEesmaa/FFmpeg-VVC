@@ -154,6 +154,80 @@ int attribute_align_arg av_buffersink_get_samples(AVFilterContext *ctx,
 static av_cold int common_init(AVFilterContext *ctx)
 {
     BufferSinkContext *buf = ctx->priv;
+    int ret = 0;
+
+#if FF_API_BUFFERSINK_OPTS
+
+#define CHECK_LIST_SIZE(field) \
+        if (buf->field ## _size % sizeof(*buf->field)) { \
+            av_log(ctx, AV_LOG_ERROR, "Invalid size for " #field ": %d, " \
+                   "should be multiple of %d\n", \
+                   buf->field ## _size, (int)sizeof(*buf->field)); \
+            return AVERROR(EINVAL); \
+        }
+
+    if (ctx->input_pads[0].type == AVMEDIA_TYPE_VIDEO) {
+        if ((buf->pixel_fmts_size || buf->color_spaces_size || buf->color_ranges_size) &&
+            (buf->nb_pixel_formats || buf->nb_colorspaces || buf->nb_colorranges)) {
+            av_log(ctx, AV_LOG_ERROR, "Cannot combine old and new format lists\n");
+            return AVERROR(EINVAL);
+        }
+
+        CHECK_LIST_SIZE(pixel_fmts)
+        CHECK_LIST_SIZE(color_spaces)
+        CHECK_LIST_SIZE(color_ranges)
+    } else {
+        if ((buf->sample_fmts_size || buf->channel_layouts_str || buf->sample_rates_size) &&
+            (buf->nb_sample_formats || buf->nb_samplerates || buf->nb_channel_layouts)) {
+            av_log(ctx, AV_LOG_ERROR, "Cannot combine old and new format lists\n");
+            return AVERROR(EINVAL);
+        }
+
+        CHECK_LIST_SIZE(sample_fmts)
+        CHECK_LIST_SIZE(sample_rates)
+
+        if (buf->channel_layouts_str) {
+            const char *cur = buf->channel_layouts_str;
+
+            if (buf->all_channel_counts)
+                av_log(ctx, AV_LOG_WARNING,
+                       "Conflicting all_channel_counts and list in options\n");
+
+            while (cur) {
+                void *tmp;
+                char *next = strchr(cur, '|');
+                if (next)
+                    *next++ = 0;
+
+                // +2 for the new element and terminator
+                tmp = av_realloc_array(buf->channel_layouts, buf->nb_channel_layouts + 2,
+                                       sizeof(*buf->channel_layouts));
+                if (!tmp)
+                    return AVERROR(ENOMEM);
+
+                memset(&buf->channel_layouts[buf->nb_channel_layouts], 0,
+                       sizeof(*buf->channel_layouts));
+                buf->nb_channel_layouts++;
+
+                ret = av_channel_layout_from_string(&buf->channel_layouts[buf->nb_channel_layouts - 1], cur);
+                if (ret < 0) {
+                    av_log(ctx, AV_LOG_ERROR, "Error parsing channel layout: %s.\n", cur);
+                    return ret;
+                }
+                if (ret < 0)
+                    return ret;
+
+                cur = next;
+            }
+
+            if (buf->nb_channel_layouts)
+                buf->channel_layouts[buf->nb_channel_layouts] = (AVChannelLayout){ 0 };
+        }
+    }
+
+#undef CHECK_LIST_SIZE
+
+#endif
 
     buf->warning_limit = 100;
     return 0;
@@ -291,57 +365,42 @@ int av_buffersink_get_ch_layout(const AVFilterContext *ctx, AVChannelLayout *out
 
 #if FF_API_BUFFERSINK_OPTS
 #define NB_ITEMS(list) (list ## _size / sizeof(*list))
-
-#define CHECK_LIST_SIZE(field) \
-        if (buf->field ## _size % sizeof(*buf->field)) { \
-            av_log(ctx, AV_LOG_ERROR, "Invalid size for " #field ": %d, " \
-                   "should be multiple of %d\n", \
-                   buf->field ## _size, (int)sizeof(*buf->field)); \
-            return AVERROR(EINVAL); \
-        }
 #endif
 
-static int vsink_query_formats(AVFilterContext *ctx)
+static int vsink_query_formats(const AVFilterContext *ctx,
+                               AVFilterFormatsConfig **cfg_in,
+                               AVFilterFormatsConfig **cfg_out)
 {
-    BufferSinkContext *buf = ctx->priv;
+    const BufferSinkContext *buf = ctx->priv;
     int ret;
 
 #if FF_API_BUFFERSINK_OPTS
-    if ((buf->pixel_fmts_size || buf->color_spaces_size || buf->color_ranges_size) &&
-        (buf->nb_pixel_formats || buf->nb_colorspaces || buf->nb_colorranges)) {
-        av_log(ctx, AV_LOG_ERROR, "Cannot combine old and new format lists\n");
-        return AVERROR(EINVAL);
-    }
-
     if (buf->nb_pixel_formats || buf->nb_colorspaces || buf->nb_colorranges) {
 #endif
         if (buf->nb_pixel_formats) {
-            ret = ff_set_common_formats_from_list(ctx, buf->pixel_formats);
+            ret = ff_set_common_formats_from_list2(ctx, cfg_in, cfg_out, buf->pixel_formats);
             if (ret < 0)
                 return ret;
         }
         if (buf->nb_colorspaces) {
-            ret = ff_set_common_color_spaces_from_list(ctx, buf->colorspaces);
+            ret = ff_set_common_color_spaces_from_list2(ctx, cfg_in, cfg_out, buf->colorspaces);
             if (ret < 0)
                 return ret;
         }
         if (buf->nb_colorranges) {
-            ret = ff_set_common_color_ranges_from_list(ctx, buf->colorranges);
+            ret = ff_set_common_color_ranges_from_list2(ctx, cfg_in, cfg_out, buf->colorranges);
             if (ret < 0)
                 return ret;
         }
 #if FF_API_BUFFERSINK_OPTS
     } else {
     unsigned i;
-    CHECK_LIST_SIZE(pixel_fmts)
-    CHECK_LIST_SIZE(color_spaces)
-    CHECK_LIST_SIZE(color_ranges)
     if (buf->pixel_fmts_size) {
         AVFilterFormats *formats = NULL;
         for (i = 0; i < NB_ITEMS(buf->pixel_fmts); i++)
             if ((ret = ff_add_format(&formats, buf->pixel_fmts[i])) < 0)
                 return ret;
-        if ((ret = ff_set_common_formats(ctx, formats)) < 0)
+        if ((ret = ff_set_common_formats2(ctx, cfg_in, cfg_out, formats)) < 0)
             return ret;
     }
 
@@ -350,7 +409,7 @@ static int vsink_query_formats(AVFilterContext *ctx)
         for (i = 0; i < NB_ITEMS(buf->color_spaces); i++)
             if ((ret = ff_add_format(&formats, buf->color_spaces[i])) < 0)
                 return ret;
-        if ((ret = ff_set_common_color_spaces(ctx, formats)) < 0)
+        if ((ret = ff_set_common_color_spaces2(ctx, cfg_in, cfg_out, formats)) < 0)
             return ret;
     }
 
@@ -359,7 +418,7 @@ static int vsink_query_formats(AVFilterContext *ctx)
         for (i = 0; i < NB_ITEMS(buf->color_ranges); i++)
             if ((ret = ff_add_format(&formats, buf->color_ranges[i])) < 0)
                 return ret;
-        if ((ret = ff_set_common_color_ranges(ctx, formats)) < 0)
+        if ((ret = ff_set_common_color_ranges2(ctx, cfg_in, cfg_out, formats)) < 0)
             return ret;
     }
     }
@@ -368,83 +427,47 @@ static int vsink_query_formats(AVFilterContext *ctx)
     return 0;
 }
 
-static int asink_query_formats(AVFilterContext *ctx)
+static int asink_query_formats(const AVFilterContext *ctx,
+                               AVFilterFormatsConfig **cfg_in,
+                               AVFilterFormatsConfig **cfg_out)
 {
-    BufferSinkContext *buf = ctx->priv;
+    const BufferSinkContext *buf = ctx->priv;
     int ret;
 
 #if FF_API_BUFFERSINK_OPTS
-    if ((buf->sample_fmts_size || buf->channel_layouts_str || buf->sample_rates_size) &&
-        (buf->nb_sample_formats || buf->nb_samplerates || buf->nb_channel_layouts)) {
-        av_log(ctx, AV_LOG_ERROR, "Cannot combine old and new format lists\n");
-        return AVERROR(EINVAL);
-    }
-
     if (buf->nb_sample_formats || buf->nb_samplerates || buf->nb_channel_layouts) {
 #endif
         if (buf->nb_sample_formats) {
-            ret = ff_set_common_formats_from_list(ctx, buf->sample_formats);
+            ret = ff_set_common_formats_from_list2(ctx, cfg_in, cfg_out, buf->sample_formats);
             if (ret < 0)
                 return ret;
         }
         if (buf->nb_samplerates) {
-            ret = ff_set_common_samplerates_from_list(ctx, buf->samplerates);
+            ret = ff_set_common_samplerates_from_list2(ctx, cfg_in, cfg_out, buf->samplerates);
             if (ret < 0)
                 return ret;
         }
         if (buf->nb_channel_layouts) {
-            ret = ff_set_common_channel_layouts_from_list(ctx, buf->channel_layouts);
+            ret = ff_set_common_channel_layouts_from_list2(ctx, cfg_in, cfg_out, buf->channel_layouts);
             if (ret < 0)
                 return ret;
         }
 #if FF_API_BUFFERSINK_OPTS
     } else {
     AVFilterFormats *formats = NULL;
-    AVChannelLayout layout = { 0 };
-    AVFilterChannelLayouts *layouts = NULL;
     unsigned i;
-    CHECK_LIST_SIZE(sample_fmts)
-    CHECK_LIST_SIZE(sample_rates)
 
     if (buf->sample_fmts_size) {
         for (i = 0; i < NB_ITEMS(buf->sample_fmts); i++)
             if ((ret = ff_add_format(&formats, buf->sample_fmts[i])) < 0)
                 return ret;
-        if ((ret = ff_set_common_formats(ctx, formats)) < 0)
+        if ((ret = ff_set_common_formats2(ctx, cfg_in, cfg_out, formats)) < 0)
             return ret;
     }
 
-    if (buf->channel_layouts_str || buf->all_channel_counts) {
-        if (buf->channel_layouts_str) {
-            const char *cur = buf->channel_layouts_str;
-
-            while (cur) {
-                char *next = strchr(cur, '|');
-                if (next)
-                    *next++ = 0;
-
-                ret = av_channel_layout_from_string(&layout, cur);
-                if (ret < 0) {
-                    av_log(ctx, AV_LOG_ERROR, "Error parsing channel layout: %s.\n", cur);
-                    return ret;
-                }
-                ret = ff_add_channel_layout(&layouts, &layout);
-                av_channel_layout_uninit(&layout);
-                if (ret < 0)
-                    return ret;
-
-                cur = next;
-            }
-        }
-
-        if (buf->all_channel_counts) {
-            if (layouts)
-                av_log(ctx, AV_LOG_WARNING,
-                       "Conflicting all_channel_counts and list in options\n");
-            else if (!(layouts = ff_all_channel_counts()))
-                return AVERROR(ENOMEM);
-        }
-        if ((ret = ff_set_common_channel_layouts(ctx, layouts)) < 0)
+    if (buf->nb_channel_layouts) {
+        ret = ff_set_common_channel_layouts_from_list2(ctx, cfg_in, cfg_out, buf->channel_layouts);
+        if (ret < 0)
             return ret;
     }
 
@@ -453,7 +476,7 @@ static int asink_query_formats(AVFilterContext *ctx)
         for (i = 0; i < NB_ITEMS(buf->sample_rates); i++)
             if ((ret = ff_add_format(&formats, buf->sample_rates[i])) < 0)
                 return ret;
-        if ((ret = ff_set_common_samplerates(ctx, formats)) < 0)
+        if ((ret = ff_set_common_samplerates2(ctx, cfg_in, cfg_out, formats)) < 0)
             return ret;
     }
     }
@@ -514,7 +537,7 @@ const AVFilter ff_vsink_buffer = {
     .activate      = activate,
     FILTER_INPUTS(ff_video_default_filterpad),
     .outputs       = NULL,
-    FILTER_QUERY_FUNC(vsink_query_formats),
+    FILTER_QUERY_FUNC2(vsink_query_formats),
 };
 
 static const AVFilterPad inputs_audio[] = {
@@ -535,5 +558,5 @@ const AVFilter ff_asink_abuffer = {
     .activate      = activate,
     FILTER_INPUTS(inputs_audio),
     .outputs       = NULL,
-    FILTER_QUERY_FUNC(asink_query_formats),
+    FILTER_QUERY_FUNC2(asink_query_formats),
 };

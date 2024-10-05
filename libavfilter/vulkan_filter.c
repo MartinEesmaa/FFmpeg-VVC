@@ -151,6 +151,8 @@ skip:
 
     s->extensions = ff_vk_extensions_to_mask(vk_dev->enabled_dev_extensions,
                                              vk_dev->nb_enabled_dev_extensions);
+    s->extensions |= ff_vk_extensions_to_mask(vk_dev->enabled_inst_extensions,
+                                              vk_dev->nb_enabled_inst_extensions);
 
     err = ff_vk_load_functions(device_ctx, &s->vkfn, s->extensions, 1, 1);
     if (err < 0) {
@@ -238,7 +240,7 @@ int ff_vk_filter_init(AVFilterContext *avctx)
 }
 
 int ff_vk_filter_process_simple(FFVulkanContext *vkctx, FFVkExecPool *e,
-                                FFVulkanPipeline *pl, AVFrame *out_f, AVFrame *in_f,
+                                FFVulkanShader *shd, AVFrame *out_f, AVFrame *in_f,
                                 VkSampler sampler, void *push_src, size_t push_size)
 {
     int err = 0;
@@ -249,31 +251,31 @@ int ff_vk_filter_process_simple(FFVulkanContext *vkctx, FFVkExecPool *e,
     int nb_img_bar = 0;
 
     /* Update descriptors and init the exec context */
-    FFVkExecContext *exec = ff_vk_exec_get(e);
+    FFVkExecContext *exec = ff_vk_exec_get(vkctx, e);
     ff_vk_exec_start(vkctx, exec);
 
     RET(ff_vk_exec_add_dep_frame(vkctx, exec, out_f,
                                  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                  VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT));
     RET(ff_vk_create_imageviews(vkctx, exec, out_views, out_f));
-    ff_vk_update_descriptor_img_array(vkctx, pl, exec, out_f, out_views, 0, !!in_f,
-                                      VK_IMAGE_LAYOUT_GENERAL,
-                                      VK_NULL_HANDLE);
+    ff_vk_shader_update_img_array(vkctx, exec, shd, out_f, out_views, 0, !!in_f,
+                                  VK_IMAGE_LAYOUT_GENERAL,
+                                  VK_NULL_HANDLE);
     if (in_f) {
         RET(ff_vk_exec_add_dep_frame(vkctx, exec, in_f,
                                      VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT));
         RET(ff_vk_create_imageviews(vkctx, exec, in_views,  in_f));
-        ff_vk_update_descriptor_img_array(vkctx, pl, exec,  in_f,  in_views, 0, 0,
+        ff_vk_shader_update_img_array(vkctx, exec, shd,  in_f,  in_views, 0, 0,
                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                                           sampler);
     }
 
     /* Bind pipeline, update push data */
-    ff_vk_exec_bind_pipeline(vkctx, exec, pl);
+    ff_vk_exec_bind_shader(vkctx, exec, shd);
     if (push_src)
-        ff_vk_update_push_exec(vkctx, exec, pl, VK_SHADER_STAGE_COMPUTE_BIT,
-                               0, push_size, push_src);
+        ff_vk_shader_update_push_const(vkctx, exec, shd, VK_SHADER_STAGE_COMPUTE_BIT,
+                                       0, push_size, push_src);
 
     /* Add data sync barriers */
     ff_vk_frame_barrier(vkctx, exec, out_f, img_bar, &nb_img_bar,
@@ -297,9 +299,9 @@ int ff_vk_filter_process_simple(FFVulkanContext *vkctx, FFVkExecPool *e,
         });
 
     vk->CmdDispatch(exec->buf,
-                    FFALIGN(vkctx->output_width,  pl->wg_size[0])/pl->wg_size[0],
-                    FFALIGN(vkctx->output_height, pl->wg_size[1])/pl->wg_size[1],
-                    pl->wg_size[2]);
+                    FFALIGN(vkctx->output_width,  shd->lg_size[0])/shd->lg_size[0],
+                    FFALIGN(vkctx->output_height, shd->lg_size[1])/shd->lg_size[1],
+                    shd->lg_size[2]);
 
     return ff_vk_exec_submit(vkctx, exec);
 fail:
@@ -308,7 +310,7 @@ fail:
 }
 
 int ff_vk_filter_process_2pass(FFVulkanContext *vkctx, FFVkExecPool *e,
-                               FFVulkanPipeline *pls[2],
+                               FFVulkanShader *shd_list[2],
                                AVFrame *out, AVFrame *tmp, AVFrame *in,
                                VkSampler sampler, void *push_src, size_t push_size)
 {
@@ -321,7 +323,7 @@ int ff_vk_filter_process_2pass(FFVulkanContext *vkctx, FFVkExecPool *e,
     int nb_img_bar = 0;
 
     /* Update descriptors and init the exec context */
-    FFVkExecContext *exec = ff_vk_exec_get(e);
+    FFVkExecContext *exec = ff_vk_exec_get(vkctx, e);
     ff_vk_exec_start(vkctx, exec);
 
     RET(ff_vk_exec_add_dep_frame(vkctx, exec, in,
@@ -364,30 +366,30 @@ int ff_vk_filter_process_2pass(FFVulkanContext *vkctx, FFVkExecPool *e,
         });
 
     for (int i = 0; i < 2; i++) {
-        FFVulkanPipeline *pl = pls[i];
+        FFVulkanShader *shd = shd_list[i];
         AVFrame *src_f = !i ? in : tmp;
         AVFrame *dst_f = !i ? tmp : out;
         VkImageView *src_views = !i ? in_views : tmp_views;
         VkImageView *dst_views = !i ? tmp_views : out_views;
 
-        ff_vk_update_descriptor_img_array(vkctx, pl, exec, src_f, src_views, 0, 0,
-                                          !i ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL :
-                                               VK_IMAGE_LAYOUT_GENERAL,
-                                          sampler);
-        ff_vk_update_descriptor_img_array(vkctx, pl, exec, dst_f, dst_views, 0, 1,
-                                          VK_IMAGE_LAYOUT_GENERAL,
-                                          VK_NULL_HANDLE);
+        ff_vk_shader_update_img_array(vkctx, exec, shd, src_f, src_views, 0, 0,
+                                      !i ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL :
+                                           VK_IMAGE_LAYOUT_GENERAL,
+                                      sampler);
+        ff_vk_shader_update_img_array(vkctx, exec, shd, dst_f, dst_views, 0, 1,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      VK_NULL_HANDLE);
 
         /* Bind pipeline, update push data */
-        ff_vk_exec_bind_pipeline(vkctx, exec, pl);
+        ff_vk_exec_bind_shader(vkctx, exec, shd);
         if (push_src)
-            ff_vk_update_push_exec(vkctx, exec, pl, VK_SHADER_STAGE_COMPUTE_BIT,
-                                   0, push_size, push_src);
+            ff_vk_shader_update_push_const(vkctx, exec, shd, VK_SHADER_STAGE_COMPUTE_BIT,
+                                           0, push_size, push_src);
 
         vk->CmdDispatch(exec->buf,
-                        FFALIGN(vkctx->output_width,  pl->wg_size[0])/pl->wg_size[0],
-                        FFALIGN(vkctx->output_height, pl->wg_size[1])/pl->wg_size[1],
-                        pl->wg_size[2]);
+                        FFALIGN(vkctx->output_width,  shd->lg_size[0])/shd->lg_size[0],
+                        FFALIGN(vkctx->output_height, shd->lg_size[1])/shd->lg_size[1],
+                        shd->lg_size[2]);
     }
 
     return ff_vk_exec_submit(vkctx, exec);
@@ -397,7 +399,7 @@ fail:
 }
 
 int ff_vk_filter_process_Nin(FFVulkanContext *vkctx, FFVkExecPool *e,
-                             FFVulkanPipeline *pl,
+                             FFVulkanShader *shd,
                              AVFrame *out, AVFrame *in[], int nb_in,
                              VkSampler sampler, void *push_src, size_t push_size)
 {
@@ -409,7 +411,7 @@ int ff_vk_filter_process_Nin(FFVulkanContext *vkctx, FFVkExecPool *e,
     int nb_img_bar = 0;
 
     /* Update descriptors and init the exec context */
-    FFVkExecContext *exec = ff_vk_exec_get(e);
+    FFVkExecContext *exec = ff_vk_exec_get(vkctx, e);
     ff_vk_exec_start(vkctx, exec);
 
     /* Add deps and create temporary imageviews */
@@ -425,19 +427,19 @@ int ff_vk_filter_process_Nin(FFVulkanContext *vkctx, FFVkExecPool *e,
     }
 
     /* Update descriptor sets */
-    ff_vk_update_descriptor_img_array(vkctx, pl, exec, out, out_views, 0, nb_in,
-                                      VK_IMAGE_LAYOUT_GENERAL,
-                                      VK_NULL_HANDLE);
+    ff_vk_shader_update_img_array(vkctx, exec, shd, out, out_views, 0, nb_in,
+                                  VK_IMAGE_LAYOUT_GENERAL,
+                                  VK_NULL_HANDLE);
     for (int i = 0; i < nb_in; i++)
-        ff_vk_update_descriptor_img_array(vkctx, pl, exec, in[i], in_views[i], 0, i,
-                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                                          sampler);
+        ff_vk_shader_update_img_array(vkctx, exec, shd, in[i], in_views[i], 0, i,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                      sampler);
 
     /* Bind pipeline, update push data */
-    ff_vk_exec_bind_pipeline(vkctx, exec, pl);
+    ff_vk_exec_bind_shader(vkctx, exec, shd);
     if (push_src)
-        ff_vk_update_push_exec(vkctx, exec, pl, VK_SHADER_STAGE_COMPUTE_BIT,
-                               0, push_size, push_src);
+        ff_vk_shader_update_push_const(vkctx, exec, shd, VK_SHADER_STAGE_COMPUTE_BIT,
+                                       0, push_size, push_src);
 
     /* Add data sync barriers */
     ff_vk_frame_barrier(vkctx, exec, out, img_bar, &nb_img_bar,
@@ -461,9 +463,9 @@ int ff_vk_filter_process_Nin(FFVulkanContext *vkctx, FFVkExecPool *e,
         });
 
     vk->CmdDispatch(exec->buf,
-                    FFALIGN(vkctx->output_width,  pl->wg_size[0])/pl->wg_size[0],
-                    FFALIGN(vkctx->output_height, pl->wg_size[1])/pl->wg_size[1],
-                    pl->wg_size[2]);
+                    FFALIGN(vkctx->output_width,  shd->lg_size[0])/shd->lg_size[0],
+                    FFALIGN(vkctx->output_height, shd->lg_size[1])/shd->lg_size[1],
+                    shd->lg_size[2]);
 
     return ff_vk_exec_submit(vkctx, exec);
 fail:

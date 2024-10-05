@@ -1409,8 +1409,10 @@ int fg_finalise_bindings(void)
         for (int j = 0; j < fg->nb_outputs; j++) {
             OutputFilter *output = fg->outputs[j];
             if (!output->bound) {
-                av_log(filtergraphs[j], AV_LOG_FATAL,
-                       "Filter %s has an unconnected output\n", output->name);
+                av_log(fg, AV_LOG_FATAL,
+                       "Filter '%s' has output %d (%s) unconnected\n",
+                       output->name, j,
+                       output->linklabel ? (const char *)output->linklabel : "unlabeled");
                 return AVERROR(EINVAL);
             }
         }

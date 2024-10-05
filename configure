@@ -2477,6 +2477,7 @@ TYPES_LIST="
     kCMVideoCodecType_HEVC
     kCMVideoCodecType_HEVCWithAlpha
     kCMVideoCodecType_VP9
+    kCMVideoCodecType_AV1
     kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
     kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange
     kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange
@@ -3184,6 +3185,8 @@ av1_vaapi_hwaccel_deps="vaapi VADecPictureParameterBufferAV1_bit_depth_idx"
 av1_vaapi_hwaccel_select="av1_decoder"
 av1_vdpau_hwaccel_deps="vdpau VdpPictureInfoAV1"
 av1_vdpau_hwaccel_select="av1_decoder"
+av1_videotoolbox_hwaccel_deps="videotoolbox"
+av1_videotoolbox_hwaccel_select="av1_decoder"
 av1_vulkan_hwaccel_deps="vulkan"
 av1_vulkan_hwaccel_select="av1_decoder"
 h263_vaapi_hwaccel_deps="vaapi"
@@ -3925,6 +3928,7 @@ mpdecimate_filter_deps="gpl"
 mpdecimate_filter_select="pixelutils"
 minterpolate_filter_select="scene_sad"
 mptestsrc_filter_deps="gpl"
+msad_filter_select="scene_sad"
 negate_filter_deps="lut_filter"
 nlmeans_opencl_filter_deps="opencl"
 nlmeans_vulkan_filter_deps="vulkan spirv_compiler"
@@ -6726,6 +6730,7 @@ enabled videotoolbox && {
     check_func_headers CoreMedia/CMFormatDescription.h kCMVideoCodecType_HEVC "-framework CoreMedia"
     check_func_headers CoreMedia/CMFormatDescription.h kCMVideoCodecType_HEVCWithAlpha "-framework CoreMedia"
     check_func_headers CoreMedia/CMFormatDescription.h kCMVideoCodecType_VP9 "-framework CoreMedia"
+    check_func_headers CoreMedia/CMFormatDescription.h kCMVideoCodecType_AV1 "-framework CoreMedia"
     check_func_headers CoreVideo/CVPixelBuffer.h kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange "-framework CoreVideo"
     check_func_headers CoreVideo/CVPixelBuffer.h kCVPixelFormatType_422YpCbCr8BiPlanarVideoRange "-framework CoreVideo"
     check_func_headers CoreVideo/CVPixelBuffer.h kCVPixelFormatType_422YpCbCr10BiPlanarVideoRange "-framework CoreVideo"
@@ -7480,6 +7485,7 @@ check_disable_warning -Wno-pointer-sign
 check_disable_warning -Wno-unused-const-variable
 check_disable_warning -Wno-bool-operation
 check_disable_warning -Wno-char-subscripts
+check_disable_warning -Wno-implicit-const-int-float-conversion
 
 check_disable_warning_headers(){
     warning_flag=-W${1#-Wno-}
