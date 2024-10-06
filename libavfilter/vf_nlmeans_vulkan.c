@@ -20,9 +20,9 @@
 
 #include "libavutil/mem.h"
 #include "libavutil/random_seed.h"
+#include "libavutil/vulkan_spirv.h"
 #include "libavutil/opt.h"
 #include "vulkan_filter.h"
-#include "vulkan_spirv.h"
 
 #include "filters.h"
 #include "video.h"
@@ -63,8 +63,6 @@ typedef struct NLMeansVulkanContext {
         int t;
     } opts;
 } NLMeansVulkanContext;
-
-extern const char *ff_source_prefix_sum_comp;
 
 static void insert_first(FFVulkanShader *shd, int r, const char *off, int horiz, int plane, int comp)
 {

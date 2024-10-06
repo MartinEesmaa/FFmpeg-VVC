@@ -16,9 +16,4 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_VULKAN_H
-#define AVCODEC_VULKAN_H
-
-#include "libavutil/vulkan.h"
-
-#endif /* AVCODEC_VULKAN_H */
+#include "libavutil/vulkan_shaderc.c"

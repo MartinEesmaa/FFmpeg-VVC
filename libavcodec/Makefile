@@ -1264,6 +1264,10 @@ OBJS-$(HAVE_THREADS)                   += pthread.o pthread_slice.o pthread_fram
 
 OBJS-$(CONFIG_FRAME_THREAD_ENCODER)    += frame_thread_encoder.o
 
+# vulkan libs
+OBJS-$(CONFIG_LIBGLSLANG)              += vulkan_glslang.o
+OBJS-$(CONFIG_LIBSHADERC)              += vulkan_shaderc.o
+
 # Windows resource file
 SHLIBOBJS-$(HAVE_GNU_WINDRES)           += avcodecres.o
 
@@ -1297,7 +1301,7 @@ SKIPHEADERS-$(CONFIG_QSVENC)           += qsvenc.h
 SKIPHEADERS-$(CONFIG_VAAPI)            += vaapi_decode.h vaapi_hevc.h vaapi_encode.h
 SKIPHEADERS-$(CONFIG_VDPAU)            += vdpau.h vdpau_internal.h
 SKIPHEADERS-$(CONFIG_VIDEOTOOLBOX)     += videotoolbox.h vt_internal.h
-SKIPHEADERS-$(CONFIG_VULKAN)           += vulkan.h vulkan_video.h vulkan_encode.h vulkan_decode.h
+SKIPHEADERS-$(CONFIG_VULKAN)           += vulkan_video.h vulkan_encode.h vulkan_decode.h
 SKIPHEADERS-$(CONFIG_V4L2_M2M)         += v4l2_buffers.h v4l2_context.h v4l2_m2m.h
 SKIPHEADERS-$(CONFIG_ZLIB)             += zlib_wrapper.h
 
@@ -1377,3 +1381,12 @@ $(SUBDIR)pcm.o: $(SUBDIR)pcm_tables.h
 $(SUBDIR)qdm2.o: $(SUBDIR)qdm2_tables.h
 $(SUBDIR)sinewin.o: $(SUBDIR)sinewin_tables.h
 endif
+
+clean::
+	$(RM) $(CLEANSUFFIXES:%=libavcodec/vulkan/%)
+
+VULKAN = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavcodec/vulkan/*.comp))
+.SECONDARY: $(VULKAN:.comp=.c)
+libavcodec/vulkan/%.c: TAG = VULKAN
+libavcodec/vulkan/%.c: $(SRC_PATH)/libavcodec/vulkan/%.comp
+	$(M)$(SRC_PATH)/tools/source2c $< $@

@@ -218,7 +218,8 @@ OBJS-$(CONFIG_BOXBLUR_OPENCL_FILTER)         += vf_avgblur_opencl.o opencl.o \
 OBJS-$(CONFIG_BWDIF_FILTER)                  += vf_bwdif.o bwdifdsp.o yadif_common.o
 OBJS-$(CONFIG_BWDIF_CUDA_FILTER)             += vf_bwdif_cuda.o vf_bwdif_cuda.ptx.o \
                                                 yadif_common.o
-OBJS-$(CONFIG_BWDIF_VULKAN_FILTER)           += vf_bwdif_vulkan.o yadif_common.o vulkan.o vulkan_filter.o
+OBJS-$(CONFIG_BWDIF_VULKAN_FILTER)           += vf_bwdif_vulkan.o yadif_common.o vulkan.o vulkan_filter.o \
+                                                vulkan/bwdif.o
 OBJS-$(CONFIG_CAS_FILTER)                    += vf_cas.o
 OBJS-$(CONFIG_CCREPACK_FILTER)               += vf_ccrepack.o
 OBJS-$(CONFIG_CHROMABER_VULKAN_FILTER)       += vf_chromaber_vulkan.o vulkan.o vulkan_filter.o
@@ -662,9 +663,7 @@ SKIPHEADERS-$(CONFIG_LIBVIDSTAB)             += vidstabutils.h
 SKIPHEADERS-$(CONFIG_QSVVPP)                 += qsvvpp.h stack_internal.h
 SKIPHEADERS-$(CONFIG_OPENCL)                 += opencl.h
 SKIPHEADERS-$(CONFIG_VAAPI)                  += vaapi_vpp.h stack_internal.h
-SKIPHEADERS-$(CONFIG_VULKAN)                 += vulkan.h vulkan_filter.h
-SKIPHEADERS-$(CONFIG_LIBSHADERC)             += vulkan_spirv.h
-SKIPHEADERS-$(CONFIG_LIBGLSLANG)             += vulkan_spirv.h
+SKIPHEADERS-$(CONFIG_VULKAN)                 += vulkan_filter.h
 
 TOOLS     = graph2dot
 TESTPROGS = drawutils filtfmts formats integral
@@ -684,6 +683,6 @@ libavfilter/opencl/%.c: $(SRC_PATH)/libavfilter/opencl/%.cl
 
 VULKAN = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavfilter/vulkan/*.comp))
 .SECONDARY: $(VULKAN:.comp=.c)
-libavfilter/vulkan/%.c: TAG = OPENCL
+libavfilter/vulkan/%.c: TAG = VULKAN
 libavfilter/vulkan/%.c: $(SRC_PATH)/libavfilter/vulkan/%.comp
 	$(M)$(SRC_PATH)/tools/source2c $< $@
