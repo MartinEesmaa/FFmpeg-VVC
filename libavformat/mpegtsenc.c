@@ -389,6 +389,9 @@ static int get_dvb_stream_type(AVFormatContext *s, AVStream *st)
     case AV_CODEC_ID_VC1:
         stream_type = STREAM_TYPE_VIDEO_VC1;
         break;
+    case AV_CODEC_ID_JPEGXL:
+        stream_type = STREAM_TYPE_VIDEO_JPEGXL;
+        break;
     case AV_CODEC_ID_MP2:
     case AV_CODEC_ID_MP3:
         if (   st->codecpar->sample_rate > 0
@@ -808,6 +811,8 @@ static int mpegts_write_pmt(AVFormatContext *s, MpegTSService *service)
                 put_registration_descriptor(&q, MKTAG('d', 'r', 'a', 'c'));
             } else if (stream_type == STREAM_TYPE_VIDEO_VC1) {
                 put_registration_descriptor(&q, MKTAG('V', 'C', '-', '1'));
+            } else if (stream_type == STREAM_TYPE_VIDEO_JPEGXL) {
+                put_registration_descriptor(&q, MKTAG('M', 'J', 'X', 'L'));
             } else if (stream_type == STREAM_TYPE_VIDEO_HEVC && s->strict_std_compliance <= FF_COMPLIANCE_NORMAL) {
                 put_registration_descriptor(&q, MKTAG('H', 'E', 'V', 'C'));
             } else if (stream_type == STREAM_TYPE_VIDEO_CAVS || stream_type == STREAM_TYPE_VIDEO_AVS2 ||

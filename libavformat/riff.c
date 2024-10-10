@@ -508,6 +508,7 @@ const AVCodecTag ff_codec_bmp_tags[] = {
     { AV_CODEC_ID_LEAD,         MKTAG('L', 'E', 'A', 'D') },
     { AV_CODEC_ID_EVC,          MKTAG('e', 'v', 'c', '1') },
     { AV_CODEC_ID_VVC,          MKTAG('v', 'v', 'c', '1') },
+    { AV_CODEC_ID_JPEGXL,       MKTAG('m', 'j', 'x', 'l') },
     { AV_CODEC_ID_NONE,         0 }
 };
 
