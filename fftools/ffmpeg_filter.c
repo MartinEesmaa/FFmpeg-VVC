@@ -1058,8 +1058,10 @@ int fg_create(FilterGraph **pfg, char *graph_desc, Scheduler *sch)
     int ret = 0;
 
     fgp = av_mallocz(sizeof(*fgp));
-    if (!fgp)
+    if (!fgp) {
+        av_freep(&graph_desc);
         return AVERROR(ENOMEM);
+    }
     fg = &fgp->fg;
 
     if (pfg) {
@@ -1068,6 +1070,7 @@ int fg_create(FilterGraph **pfg, char *graph_desc, Scheduler *sch)
     } else {
         ret = av_dynarray_add_nofree(&filtergraphs, &nb_filtergraphs, fgp);
         if (ret < 0) {
+            av_freep(&graph_desc);
             av_freep(&fgp);
             return ret;
         }
@@ -1094,7 +1097,8 @@ int fg_create(FilterGraph **pfg, char *graph_desc, Scheduler *sch)
         return AVERROR(ENOMEM);;
     graph->nb_threads = 1;
 
-    ret = graph_parse(graph, fgp->graph_desc, &inputs, &outputs, NULL);
+    ret = graph_parse(graph, fgp->graph_desc, &inputs, &outputs,
+                      hw_device_for_filter());
     if (ret < 0)
         goto fail;
 
@@ -1588,15 +1592,9 @@ static int configure_output_audio_filter(FilterGraph *fg, AVFilterGraph *graph,
     int ret;
 
     snprintf(name, sizeof(name), "out_%s", ofp->name);
-    ofp->filter = avfilter_graph_alloc_filter(graph,
-                                              avfilter_get_by_name("abuffersink"),
-                                              name);
-    if (!ofp->filter)
-        return AVERROR(ENOMEM);
-    if ((ret = av_opt_set_int(ofp->filter, "all_channel_counts", 1, AV_OPT_SEARCH_CHILDREN)) < 0)
-        return ret;
-
-    ret = avfilter_init_dict(ofp->filter, NULL);
+    ret = avfilter_graph_create_filter(&ofp->filter,
+                                       avfilter_get_by_name("abuffersink"),
+                                       name, NULL, NULL, graph);
     if (ret < 0)
         return ret;
 

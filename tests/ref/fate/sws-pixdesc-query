@@ -75,6 +75,8 @@ isNBPS:
   p410le
   p412be
   p412le
+  v30xbe
+  v30xle
   x2bgr10be
   x2bgr10le
   x2rgb10be
@@ -180,6 +182,7 @@ isBE:
   rgbaf16be
   rgbaf32be
   rgbf32be
+  v30xbe
   x2bgr10be
   x2rgb10be
   xv30be
@@ -218,6 +221,7 @@ isBE:
   yuva444p9be
 
 isYUV:
+  ayuv
   ayuv64be
   ayuv64le
   nv12
@@ -245,10 +249,14 @@ isYUV:
   p412le
   p416be
   p416le
+  uyva
   uyvy422
   uyyvyy411
+  v30xbe
+  v30xle
   vuya
   vuyx
+  vyu444
   xv30be
   xv30le
   xv36be
@@ -702,6 +710,7 @@ AnyRGB:
   x2rgb10le
 
 ALPHA:
+  ayuv
   ayuv64be
   ayuv64le
   bgr32
@@ -728,6 +737,7 @@ ALPHA:
   rgbaf16le
   rgbaf32be
   rgbaf32le
+  uyva
   vuya
   ya16be
   ya16le
@@ -761,6 +771,7 @@ ALPHA:
 Packed:
   0bgr
   0rgb
+  ayuv
   ayuv64be
   ayuv64le
   bayer_bggr16be
@@ -818,10 +829,14 @@ Packed:
   rgbaf32le
   rgbf32be
   rgbf32le
+  uyva
   uyvy422
   uyyvyy411
+  v30xbe
+  v30xle
   vuya
   vuyx
+  vyu444
   x2bgr10be
   x2bgr10le
   x2rgb10be
@@ -1084,5 +1099,6 @@ SwappedChroma:
   nv42
   vuya
   vuyx
+  vyu444
   yvyu422
 

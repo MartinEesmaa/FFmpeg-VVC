@@ -86,6 +86,15 @@ int ignore_unknown_streams = 0;
 int copy_unknown_streams = 0;
 int recast_media = 0;
 
+// this struct is passed as the optctx argument
+// to func_arg() for global options
+typedef struct GlobalOptionsContext {
+    Scheduler      *sch;
+
+    char          **filtergraphs;
+    int          nb_filtergraphs;
+} GlobalOptionsContext;
+
 static void uninit_options(OptionsContext *o)
 {
     /* all OPT_SPEC and OPT_TYPE_STRING can be freed in generic way */
@@ -611,8 +620,8 @@ static int opt_attach(void *optctx, const char *opt, const char *arg)
 
 static int opt_sdp_file(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    return sch_sdp_filename(sch, arg);
+    GlobalOptionsContext *go = optctx;
+    return sch_sdp_filename(go->sch, arg);
 }
 
 #if CONFIG_VAAPI
@@ -1150,26 +1159,46 @@ static int opt_audio_qscale(void *optctx, const char *opt, const char *arg)
 
 static int opt_filter_complex(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    char *graph_desc = av_strdup(arg);
+    GlobalOptionsContext *go = optctx;
+    char *graph_desc;
+    int ret;
+
+    graph_desc = av_strdup(arg);
     if (!graph_desc)
         return AVERROR(ENOMEM);
 
-    return fg_create(NULL, graph_desc, sch);
+    ret = GROW_ARRAY(go->filtergraphs, go->nb_filtergraphs);
+    if (ret < 0) {
+        av_freep(&graph_desc);
+        return ret;
+    }
+    go->filtergraphs[go->nb_filtergraphs - 1] = graph_desc;
+
+    return 0;
 }
 
 #if FFMPEG_OPT_FILTER_SCRIPT
 static int opt_filter_complex_script(void *optctx, const char *opt, const char *arg)
 {
-    Scheduler *sch = optctx;
-    char *graph_desc = file_read(arg);
+    GlobalOptionsContext *go = optctx;
+    char *graph_desc;
+    int ret;
+
+    graph_desc = file_read(arg);
     if (!graph_desc)
         return AVERROR(EINVAL);
 
     av_log(NULL, AV_LOG_WARNING, "-%s is deprecated, use -/filter_complex %s instead\n",
            opt, arg);
 
-    return fg_create(NULL, graph_desc, sch);
+    ret = GROW_ARRAY(go->filtergraphs, go->nb_filtergraphs);
+    if (ret < 0) {
+        av_freep(&graph_desc);
+        return ret;
+    }
+    go->filtergraphs[go->nb_filtergraphs - 1] = graph_desc;
+
+    return 0;
 }
 #endif
 
@@ -1346,6 +1375,7 @@ static int open_files(OptionGroupList *l, const char *inout, Scheduler *sch,
 
 int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
 {
+    GlobalOptionsContext go = { .sch = sch };
     OptionParseContext octx;
     const char *errmsg = NULL;
     int ret;
@@ -1361,7 +1391,7 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
     }
 
     /* apply global options */
-    ret = parse_optgroup(sch, &octx.global_opts, options);
+    ret = parse_optgroup(&go, &octx.global_opts, options);
     if (ret < 0) {
         errmsg = "parsing global options";
         goto fail;
@@ -1369,6 +1399,14 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
 
     /* configure terminal and setup signal handlers */
     term_init();
+
+    /* create complex filtergraphs */
+    for (int i = 0; i < go.nb_filtergraphs; i++) {
+        ret = fg_create(NULL, go.filtergraphs[i], sch);
+        go.filtergraphs[i] = NULL;
+        if (ret < 0)
+            goto fail;
+    }
 
     /* open input files */
     ret = open_files(&octx.groups[GROUP_INFILE], "input", sch, ifile_open);
@@ -1405,6 +1443,10 @@ int ffmpeg_parse_options(int argc, char **argv, Scheduler *sch)
         goto fail;
 
 fail:
+    for (int i = 0; i < go.nb_filtergraphs; i++)
+        av_freep(&go.filtergraphs[i]);
+    av_freep(&go.filtergraphs);
+
     uninit_parse_context(&octx);
     if (ret < 0 && ret != AVERROR_EXIT) {
         av_log(NULL, AV_LOG_FATAL, "Error %s: %s\n",

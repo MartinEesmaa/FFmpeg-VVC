@@ -259,7 +259,6 @@ static void device_features_copy_needed(VulkanDeviceFeatures *dst, VulkanDeviceF
     COPY_VAL(vulkan_1_2.shaderSharedInt64Atomics);
     COPY_VAL(vulkan_1_2.vulkanMemoryModel);
     COPY_VAL(vulkan_1_2.vulkanMemoryModelDeviceScope);
-    COPY_VAL(vulkan_1_2.hostQueryReset);
 
     COPY_VAL(vulkan_1_3.dynamicRendering);
     COPY_VAL(vulkan_1_3.maintenance4);
@@ -1638,6 +1637,9 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
         if (opt_d)
             p->disable_multiplane = strtol(opt_d->value, NULL, 10);
     }
+
+    /* Set the public device feature struct and its pNext chain */
+    hwctx->device_features = p->feats.device;
 
     /* Set the list of all active extensions */
     hwctx->enabled_dev_extensions = dev_info.ppEnabledExtensionNames;

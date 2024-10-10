@@ -3357,6 +3357,7 @@ av1_cuvid_decoder_deps="cuvid CUVIDAV1PICPARAMS"
 av1_mediacodec_decoder_deps="mediacodec"
 av1_mediacodec_encoder_deps="mediacodec"
 av1_mediacodec_encoder_select="extract_extradata_bsf"
+av1_mf_encoder_deps="mediafoundation"
 av1_nvenc_encoder_deps="nvenc NV_ENC_PIC_PARAMS_AV1"
 av1_nvenc_encoder_select="atsc_a53"
 av1_qsv_decoder_select="qsvdec"
@@ -4061,7 +4062,7 @@ avcodec_suggest="libm stdatomic spirv_compiler"
 avdevice_deps="avformat avcodec avutil"
 avdevice_suggest="libm stdatomic"
 avfilter_deps="avutil"
-avfilter_suggest="libm stdatomic"
+avfilter_suggest="libm stdatomic spirv_compiler"
 avformat_deps="avcodec avutil"
 avformat_suggest="libm network zlib stdatomic"
 avutil_suggest="clock_gettime ffnvcodec gcrypt libm libdrm libmfx opencl openssl user32 vaapi vulkan videotoolbox corefoundation corevideo coremedia bcrypt stdatomic"
@@ -6570,6 +6571,15 @@ esac
 if test -n "$custom_allocator"; then
     add_extralibs "$custom_allocator_extralibs"
 fi
+
+# Unlike other feature flags or libraries, spirv_compiler is not defined
+# within any of our predefined categories of components.
+# It gets defined if either libshaderc or libglslang check succeeds.
+# As such, its in a state of neither being explicitly enabled, nor
+# explicitly disabled, but even in this state, being mentioned in
+# _deps results in it always passing.
+# Disable it explicitly to fix this.
+disable spirv_compiler
 
 check_func_headers malloc.h _aligned_malloc     && enable aligned_malloc
 check_func  ${malloc_prefix}memalign            && enable memalign

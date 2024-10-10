@@ -646,7 +646,7 @@ int ff_vk_exec_add_dep_bool_sem(FFVulkanContext *s, FFVkExecContext *e,
         return 0;
     }
 
-    buf_size = sizeof(int) + sizeof(VkSemaphore)*nb;
+    buf_size = sizeof(*ts) + sizeof(VkSemaphore)*nb;
     ts = av_mallocz(buf_size);
     if (!ts) {
         err = AVERROR(ENOMEM);
@@ -1324,8 +1324,9 @@ int ff_vk_create_imageviews(FFVulkanContext *s, FFVkExecContext *e,
     const int nb_images = ff_vk_count_images(vkf);
     const int nb_planes = av_pix_fmt_count_planes(hwfc->sw_format);
 
-    const size_t buf_size = sizeof(int) + nb_planes*sizeof(VkImageView);
-    ImageViewCtx *iv = av_mallocz(buf_size);
+    ImageViewCtx *iv;
+    const size_t buf_size = sizeof(*iv) + nb_planes*sizeof(VkImageView);
+    iv = av_mallocz(buf_size);
     if (!iv)
         return AVERROR(ENOMEM);
 
@@ -1482,8 +1483,10 @@ int ff_vk_shader_init(FFVulkanContext *s, FFVulkanShader *shd, const char *name,
     GLSLC(0, #extension GL_EXT_shader_explicit_arithmetic_types : require     );
     GLSLC(0, #extension GL_EXT_control_flow_attributes : require              );
     if ((s->extensions & FF_VK_EXT_DEBUG_UTILS) &&
-        (s->extensions & FF_VK_EXT_RELAXED_EXTENDED_INSTR))
+        (s->extensions & FF_VK_EXT_RELAXED_EXTENDED_INSTR)) {
         GLSLC(0, #extension GL_EXT_debug_printf : require                     );
+        GLSLC(0, #define DEBUG                                                );
+    }
 
     if (stage == VK_SHADER_STAGE_TASK_BIT_EXT ||
         stage == VK_SHADER_STAGE_MESH_BIT_EXT)
