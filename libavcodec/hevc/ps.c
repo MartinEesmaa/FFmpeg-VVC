@@ -1158,6 +1158,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
     HEVCWindow *ow;
     int ret = 0;
     int bit_depth_chroma, num_comps, multi_layer_ext;
+    int vps_max_sub_layers;
     int i;
 
     // Coded parameters
@@ -1182,7 +1183,10 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
 
         sps->max_sub_layers = sps->vps->vps_max_sub_layers;
     }
-    if (sps->max_sub_layers > HEVC_MAX_SUB_LAYERS) {
+    vps_max_sub_layers = sps->vps ? sps->vps->vps_max_sub_layers
+                                  : FFMIN(sps->max_sub_layers, HEVC_MAX_SUB_LAYERS);
+
+    if (sps->max_sub_layers > vps_max_sub_layers) {
         av_log(avctx, AV_LOG_ERROR, "sps_max_sub_layers out of range: %d\n",
                sps->max_sub_layers);
         return AVERROR_INVALIDDATA;
@@ -1210,7 +1214,7 @@ int ff_hevc_parse_sps(HEVCSPS *sps, GetBitContext *gb, unsigned int *sps_id,
         if (sps->vps->nb_layers == 1) {
             av_log(avctx, AV_LOG_WARNING, "SPS %d references an unsupported VPS extension. Ignoring\n",
                    *sps_id);
-            return AVERROR_INVALIDDATA;
+            return AVERROR(ENOSYS);
         }
 
         if (get_bits1(gb) &&    // update_rep_format_flag

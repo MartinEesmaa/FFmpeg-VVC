@@ -2,6 +2,7 @@
 0rgb                cf1bedd0784a3efd3ab00c4e44005c37
 abgr                6d6f896f853a6c6f93ee70dba9af3d17
 argb                87bbd23debb94d486ac3a6b6c0b005f9
+ayuv                ba6a6588737f8ddffd2018d9c667e559
 ayuv64le            e4c07e0d5b333b3bc9eb4f3ce6af3a2c
 bgr0                df3a6eedd4939ce09a357b655ac2962a
 bgr24               f9a08135e5d58c0b2a5509c369a88414
@@ -86,8 +87,11 @@ rgb8                c90feb30c3c9391ef5f470209d7b7a15
 rgba                4d76a9542143752a4ac30f82f88f68f1
 rgba64be            a60041217f4c0cd796d19d3940a12a41
 rgba64le            ad47197774858858ae7b0c177dffa459
+uyva                cb773ee5a9f8964b9c826d55f9f425a3
+v30xle              84548ae5825baa041a96db6bb9c362b0
 vuya                9ece18a345beb17cd19e09e443eca4bf
 vuyx                46b5b821d7ee6ddedb3ddafd1e5b007c
+vyu444              e70a294738165223928fddc9970b8381
 x2bgr10le           4aa774b6d8f6d446a64f1f288e5c97eb
 x2rgb10le           09cb1d98fe17ad8a6d9d3bec97ddc845
 xv30le              b1ac5a12f46d32c70acb63f89838ab76
