@@ -559,8 +559,10 @@ static av_cold int encode_init(AVCodecContext *avctx)
     }
 
     // CRC requires version 3+
-    if (s->ec)
+    if (s->ec == 1)
         s->version = FFMAX(s->version, 3);
+    if (s->ec == 2)
+        s->version = FFMAX(s->version, 4);
 
     if ((s->version == 2 || s->version>3) && avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
         av_log(avctx, AV_LOG_ERROR, "Version 2 or 4 needed for requested features but version 2 or 4 is experimental and not enabled\n");
@@ -986,6 +988,9 @@ static void choose_rct_params(const FFV1Context *f, FFV1SliceContext *sc,
     int x, y, i, p, best;
     int16_t *sample[3];
     int lbd = f->bits_per_raw_sample <= 8;
+    int packed = !src[1];
+    int transparency = f->transparency;
+    int packed_size = (3 + transparency)*2;
 
     for (y = 0; y < h; y++) {
         int lastr=0, lastg=0, lastb=0;
@@ -1000,6 +1005,11 @@ static void choose_rct_params(const FFV1Context *f, FFV1SliceContext *sc,
                 b =  v        & 0xFF;
                 g = (v >>  8) & 0xFF;
                 r = (v >> 16) & 0xFF;
+            } else if (packed) {
+                const uint16_t *p = ((const uint16_t*)(src[0] + x*packed_size + stride[0]*y));
+                r = p[0];
+                g = p[1];
+                b = p[2];
             } else {
                 b = *((const uint16_t*)(src[0] + x*2 + stride[0]*y));
                 g = *((const uint16_t*)(src[1] + x*2 + stride[1]*y));
@@ -1101,6 +1111,13 @@ retry:
         ret = encode_rgb_frame32(f, sc, planes, width, height, p->linesize);
     } else {
         ret = encode_rgb_frame(f, sc, planes, width, height, p->linesize);
+    }
+
+    if (f->ac != AC_GOLOMB_RICE) {
+        sc->ac_byte_count = ff_rac_terminate(&sc->c, 1);
+    } else {
+        flush_put_bits(&sc->pb); // FIXME: nicer padding
+        sc->ac_byte_count += put_bytes_output(&sc->pb);
     }
 
     if (ret < 0) {
@@ -1227,14 +1244,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     buf_p = pkt->data;
     for (i = 0; i < f->slice_count; i++) {
         FFV1SliceContext *sc = &f->slices[i];
-        int bytes;
-
-        if (f->ac != AC_GOLOMB_RICE) {
-            bytes = ff_rac_terminate(&sc->c, 1);
-        } else {
-            flush_put_bits(&sc->pb); // FIXME: nicer padding
-            bytes = sc->ac_byte_count + put_bytes_output(&sc->pb);
-        }
+        int bytes = sc->ac_byte_count;
         if (i > 0 || f->version > 2) {
             av_assert0(bytes < pkt->size / f->slice_count);
             memmove(buf_p, sc->c.bytestream_start, bytes);
@@ -1266,7 +1276,7 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 #define OFFSET(x) offsetof(FFV1Context, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
-    { "slicecrc", "Protect slices with CRCs", OFFSET(ec), AV_OPT_TYPE_BOOL, { .i64 = -1 }, -1, 1, VE },
+    { "slicecrc", "Protect slices with CRCs", OFFSET(ec), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 2, VE },
     { "coder", "Coder type", OFFSET(ac), AV_OPT_TYPE_INT,
             { .i64 = 0 }, -2, 2, VE, .unit = "coder" },
         { "rice", "Golomb rice", 0, AV_OPT_TYPE_CONST,
