@@ -1,6 +1,6 @@
-AVPROGS-$(CONFIG_FFMPEG)   += ffmpeg_vvceasy
-AVPROGS-$(CONFIG_FFPLAY)   += ffplay_vvceasy
-AVPROGS-$(CONFIG_FFPROBE)  += ffprobe_vvceasy
+AVPROGS-$(CONFIG_FFMPEG)   += ffmpeg
+AVPROGS-$(CONFIG_FFPLAY)   += ffplay
+AVPROGS-$(CONFIG_FFPROBE)  += ffprobe
 
 AVPROGS     := $(AVPROGS-yes:%=%$(PROGSSUF)$(EXESUF))
 PROGS       += $(AVPROGS)
