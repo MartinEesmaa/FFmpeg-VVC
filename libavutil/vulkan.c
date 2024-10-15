@@ -1064,7 +1064,7 @@ int ff_vk_map_buffers(FFVulkanContext *s, FFVkBuffer **buf, uint8_t *mem[],
                    ff_vk_ret2str(ret));
             return AVERROR_EXTERNAL;
         }
-        mem[i] = dst;
+        mem[i] = buf[i]->mapped_mem = dst;
     }
 
     if (!invalidate)
@@ -1126,8 +1126,10 @@ int ff_vk_unmap_buffers(FFVulkanContext *s, FFVkBuffer **buf, int nb_buffers,
         }
     }
 
-    for (int i = 0; i < nb_buffers; i++)
+    for (int i = 0; i < nb_buffers; i++) {
         vk->UnmapMemory(s->hwctx->act_dev, buf[i]->mem);
+        buf[i]->mapped_mem = NULL;
+    }
 
     return err;
 }
@@ -1282,7 +1284,8 @@ int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt)
         pix_fmt == AV_PIX_FMT_BGR565 || pix_fmt == AV_PIX_FMT_BGR0   ||
         pix_fmt == AV_PIX_FMT_0BGR   || pix_fmt == AV_PIX_FMT_RGB0   ||
         pix_fmt == AV_PIX_FMT_X2RGB10 || pix_fmt == AV_PIX_FMT_X2BGR10 ||
-        pix_fmt == AV_PIX_FMT_RGBAF32 || pix_fmt == AV_PIX_FMT_RGBF32)
+        pix_fmt == AV_PIX_FMT_RGBAF32 || pix_fmt == AV_PIX_FMT_RGBF32 ||
+        pix_fmt == AV_PIX_FMT_RGBA128 || pix_fmt == AV_PIX_FMT_RGB96)
         return 1;
     return 0;
 }
@@ -1338,6 +1341,16 @@ const char *ff_vk_shader_rep_fmt(enum AVPixelFormat pix_fmt,
         const char *rep_tab[] = {
             [FF_VK_REP_NATIVE] = "rgba32f",
             [FF_VK_REP_FLOAT] = "rgba32f",
+            [FF_VK_REP_INT] = "rgba32i",
+            [FF_VK_REP_UINT] = "rgba32ui",
+        };
+        return rep_tab[rep_fmt];
+    }
+    case AV_PIX_FMT_RGB96:
+    case AV_PIX_FMT_RGBA128: {
+        const char *rep_tab[] = {
+            [FF_VK_REP_NATIVE] = "rgba32ui",
+            [FF_VK_REP_FLOAT] = NULL,
             [FF_VK_REP_INT] = "rgba32i",
             [FF_VK_REP_UINT] = "rgba32ui",
         };
