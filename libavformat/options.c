@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "avformat.h"
+#include "avformat_internal.h"
 #include "avio_internal.h"
 #include "demux.h"
 #include "internal.h"
@@ -160,12 +161,15 @@ static int io_close2_default(AVFormatContext *s, AVIOContext *pb)
 
 AVFormatContext *avformat_alloc_context(void)
 {
-    FFFormatContext *const si = av_mallocz(sizeof(*si));
+    FormatContextInternal *fci;
+    FFFormatContext *si;
     AVFormatContext *s;
 
-    if (!si)
+    fci = av_mallocz(sizeof(*fci));
+    if (!fci)
         return NULL;
 
+    si = &fci->fc;
     s = &si->pub;
     s->av_class = &av_format_context_class;
     s->io_open  = io_open_default;
@@ -181,7 +185,7 @@ AVFormatContext *avformat_alloc_context(void)
     }
 
 #if FF_API_LAVF_SHORTEST
-    si->shortest_end = AV_NOPTS_VALUE;
+    fci->shortest_end = AV_NOPTS_VALUE;
 #endif
 
     return s;

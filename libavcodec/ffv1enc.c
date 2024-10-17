@@ -317,7 +317,7 @@ static void write_quant_table(RangeCoder *c, int16_t *quant_table)
     uint8_t state[CONTEXT_SIZE];
     memset(state, 128, sizeof(state));
 
-    for (i = 1; i < 128; i++)
+    for (i = 1; i < MAX_QUANT_TABLE_SIZE/2; i++)
         if (quant_table[i] != quant_table[i - 1]) {
             put_symbol(c, state, i - last - 1, 0);
             last = i;
@@ -326,7 +326,7 @@ static void write_quant_table(RangeCoder *c, int16_t *quant_table)
 }
 
 static void write_quant_tables(RangeCoder *c,
-                               int16_t quant_table[MAX_CONTEXT_INPUTS][256])
+                               int16_t quant_table[MAX_CONTEXT_INPUTS][MAX_QUANT_TABLE_SIZE])
 {
     int i;
     for (i = 0; i < 5; i++)
@@ -726,9 +726,9 @@ static av_cold int encode_init(AVCodecContext *avctx)
             s->state_transition[i] = c.one_state[i];
     }
 
-    for (i = 0; i < 256; i++) {
+    for (i = 0; i < MAX_QUANT_TABLE_SIZE; i++) {
         s->quant_table_count = 2;
-        if (s->bits_per_raw_sample <= 8) {
+        if ((s->qtable == -1 && s->bits_per_raw_sample <= 8) || s->qtable == 1) {
             s->quant_tables[0][0][i]=           quant11[i];
             s->quant_tables[0][1][i]=        11*quant11[i];
             s->quant_tables[0][2][i]=     11*11*quant11[i];
@@ -954,7 +954,7 @@ static void encode_slice_header(FFV1Context *f, FFV1SliceContext *sc)
         if (sc->slice_coding_mode == 1)
             ff_ffv1_clear_slice_state(f, sc);
         put_symbol(c, state, sc->slice_coding_mode, 0);
-        if (sc->slice_coding_mode != 1) {
+        if (sc->slice_coding_mode != 1 && f->colorspace == 1) {
             put_symbol(c, state, sc->slice_rct_by_coef, 0);
             put_symbol(c, state, sc->slice_rct_ry_coef, 0);
         }
@@ -1070,7 +1070,7 @@ static int encode_slice(AVCodecContext *c, void *arg)
                                 p->data[3] ? p->data[3] + ps*x + y*p->linesize[3] : NULL};
 
     sc->slice_coding_mode = 0;
-    if (f->version > 3) {
+    if (f->version > 3 && f->colorspace == 1) {
         choose_rct_params(f, sc, planes, p->linesize, width, height);
     } else {
         sc->slice_rct_by_coef = 1;
@@ -1289,6 +1289,8 @@ static const AVOption options[] = {
             { .i64 = 1 }, INT_MIN, INT_MAX, VE, .unit = "coder" },
     { "context", "Context model", OFFSET(context_model), AV_OPT_TYPE_INT,
             { .i64 = 0 }, 0, 1, VE },
+    { "qtable", "Quantization table", OFFSET(qtable), AV_OPT_TYPE_INT,
+            { .i64 = -1 }, -1, 2, VE },
 
     { NULL }
 };
