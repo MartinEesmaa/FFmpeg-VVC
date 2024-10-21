@@ -3601,6 +3601,7 @@ libsvt_vp9_encoder_deps="libsvtvp9"
 libvvdec_decoder_deps="libvvdec"
 libvvdec_decoder_select="vvc_mp4toannexb_bsf"
 ia_mpegh_encoder_deps="ia_mpegh"
+ia_mpegh_encoder_extralibs="-lia_mpeghe -L."
 libvvenc_encoder_deps="libvvenc"
 libwebp_encoder_deps="libwebp"
 libwebp_anim_encoder_deps="libwebp"
@@ -7068,7 +7069,7 @@ enabled libvpx            && {
 enabled libvvdec          && require_pkg_config libvvdec "libvvdec >= 1.6.0" "vvdec/vvdec.h" vvdec_get_version
 enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
 
-enabled ia_mpegh          && check_pkg_config ia_mpeghe -lia_mpeghe
+enabled ia_mpegh
 
 enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
 enabled libsvtvp9         && require_pkg_config libsvtvp9 SvtVp9Enc EbSvtVp9Enc.h       eb_vp9_svt_init_handle
