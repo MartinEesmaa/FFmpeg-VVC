@@ -66,6 +66,7 @@
 #include <stdlib.h>
 
 #include "libavutil/opt.h"
+#include "libavutil/mem.h"
 #include "codec_internal.h"
 #include "encode.h"
 #include "internal.h"
@@ -1274,4 +1275,4 @@ AV_SAMPLE_FMT_NONE
 },
 .p.capabilities = AV_CODEC_CAP_SMALL_LAST_FRAME | AV_CODEC_CAP_DELAY,
 .p.priv_class = &ia_mpegh_enc_class,
-};
+};
