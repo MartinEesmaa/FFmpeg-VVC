@@ -7067,7 +7067,6 @@ enabled libvpx            && {
     fi
 }
 enabled libvvdec          && require_pkg_config libvvdec "libvvdec >= 1.6.0" "vvdec/vvdec.h" vvdec_get_version
-enabled libvvenc          && require_pkg_config libvvenc "libvvenc >= 1.6.1" "vvenc/vvenc.h" vvenc_get_version
 
 enabled ia_mpegh
 
