@@ -797,6 +797,7 @@ extern const FFCodec ff_libsvtav1_encoder;
 extern const FFCodec ff_libtheora_encoder;
 extern const FFCodec ff_libtwolame_encoder;
 extern const FFCodec ff_libuavs3d_decoder;
+extern const FFCodec ff_libuavs3e_encoder;
 extern const FFCodec ff_libvo_amrwbenc_encoder;
 extern const FFCodec ff_libvorbis_encoder;
 extern const FFCodec ff_libvorbis_decoder;
