@@ -7042,7 +7042,7 @@ enabled libtwolame        && require libtwolame twolame.h twolame_init -ltwolame
                              { check_lib libtwolame twolame.h twolame_encode_buffer_float32_interleaved -ltwolame ||
                                die "ERROR: libtwolame must be installed and version must be >= 0.3.10"; }
 enabled libuavs3d         && require_pkg_config libuavs3d "uavs3d >= 1.1.41" uavs3d.h uavs3d_decode
-enabled libuavs3e         && require libuavs3e "uavs3e >= 1.3.0" uavs3e.h uavs3e_enc -luavs3e
+enabled libuavs3e         && require_pkg_config libuavs3e "uavs3e >= 1.3.0" uavs3e/uavs3e.h uavs3e_enc
 enabled libv4l2           && require_pkg_config libv4l2 libv4l2 libv4l2.h v4l2_ioctl
 enabled libvidstab        && require_pkg_config libvidstab "vidstab >= 0.98" vid.stab/libvidstab.h vsMotionDetectInit
 enabled libvmaf           && require_pkg_config libvmaf "libvmaf >= 2.0.0" libvmaf.h vmaf_init
