@@ -921,6 +921,41 @@ static void gbr16ptopacked16(const uint16_t *src[], const int srcStride[],
     }
 }
 
+static void gbr16ptopacked30(const uint16_t *src[], const int srcStride[],
+                             uint8_t *dst, int dstStride, int srcSliceH,
+                             int swap, int bpp, int width)
+{
+    int x, h, i;
+    int shift = bpp - 10;
+    av_assert0(bpp >= 0);
+    for (h = 0; h < srcSliceH; h++) {
+        uint8_t *dest = dst + dstStride * h;
+
+        switch(swap) {
+        case 3:
+        case 1:
+            for (x = 0; x < width; x++) {
+                unsigned C0 = av_bswap16(src[0][x]) >> shift;
+                unsigned C1 = av_bswap16(src[1][x]) >> shift;
+                unsigned C2 = av_bswap16(src[2][x]) >> shift;
+                AV_WL32(dest + 4 * x, (3U << 30) + (C0 << 20) + (C1 << 10) + C2);
+            }
+            break;
+        default:
+            for (x = 0; x < width; x++) {
+                unsigned C0 = src[0][x] >> shift;
+                unsigned C1 = src[1][x] >> shift;
+                unsigned C2 = src[2][x] >> shift;
+                AV_WL32(dest + 4 * x, (3U << 30) + (C0 << 20) + (C1 << 10) + C2);
+            }
+            break;
+        }
+        for (i = 0; i < 3; i++)
+            src[i] += srcStride[i] >> 1;
+    }
+}
+
+
 static int planarRgb16ToRgb16Wrapper(SwsInternal *c, const uint8_t *const src[],
                                      const int srcStride[], int srcSliceY, int srcSliceH,
                                      uint8_t *const dst[], const int dstStride[])
@@ -971,6 +1006,16 @@ static int planarRgb16ToRgb16Wrapper(SwsInternal *c, const uint8_t *const src[],
         gbr16ptopacked16(src102, stride102,
                          dst[0] + srcSliceY * dstStride[0], dstStride[0],
                          srcSliceH, 1, swap, bits_per_sample, c->srcW);
+        break;
+    case AV_PIX_FMT_X2RGB10LE:
+        gbr16ptopacked30(src201, stride201,
+                         dst[0] + srcSliceY * dstStride[0], dstStride[0],
+                         srcSliceH, swap, bits_per_sample, c->srcW);
+        break;
+    case AV_PIX_FMT_X2BGR10LE:
+        gbr16ptopacked30(src102, stride102,
+                         dst[0] + srcSliceY * dstStride[0], dstStride[0],
+                         srcSliceH, swap, bits_per_sample, c->srcW);
         break;
     default:
         av_log(c, AV_LOG_ERROR,
@@ -1260,6 +1305,116 @@ static int rgbToPlanarRgbWrapper(SwsInternal *c, const uint8_t *const src[],
     return srcSliceH;
 }
 
+static void packed24togbrap(const uint8_t *src, int srcStride,
+                            uint8_t *const dst[], const int dstStride[],
+                            int srcSliceH, int width)
+{
+    uint8_t *dest[4];
+    int x, h;
+
+    dest[0] = dst[0];
+    dest[1] = dst[1];
+    dest[2] = dst[2];
+    dest[3] = dst[3];
+
+    for (h = 0; h < srcSliceH; h++) {
+        for (x = 0; x < width; x++) {
+            dest[0][x] = src[x * 3 + 0];
+            dest[1][x] = src[x * 3 + 1];
+            dest[2][x] = src[x * 3 + 2];
+            dest[3][x] = 0xff;
+        }
+        src     += srcStride;
+        dest[0] += dstStride[0];
+        dest[1] += dstStride[1];
+        dest[2] += dstStride[2];
+        dest[3] += dstStride[3];
+    }
+}
+
+static void packed32togbrap(const uint8_t *src, int srcStride,
+                            uint8_t *const dst[], const int dstStride[],
+                            int srcSliceH, int alpha_first, int width)
+{
+    uint8_t *dest[4];
+    int x, h;
+
+    dest[0] = dst[0];
+    dest[1] = dst[1];
+    dest[2] = dst[2];
+    dest[3] = dst[3];
+
+    for (h = 0; h < srcSliceH; h++) {
+        if (alpha_first) {
+            for (x = 0; x < width; x++) {
+                dest[0][x] = src[x * 4 + 1];
+                dest[1][x] = src[x * 4 + 2];
+                dest[2][x] = src[x * 4 + 3];
+                dest[3][x] = src[x * 4 + 0];
+            }
+        } else {
+            for (x = 0; x < width; x++) {
+                dest[0][x] = src[x * 4 + 0];
+                dest[1][x] = src[x * 4 + 1];
+                dest[2][x] = src[x * 4 + 2];
+                dest[3][x] = src[x * 4 + 3];
+            }
+        }
+        src     += srcStride;
+        dest[0] += dstStride[0];
+        dest[1] += dstStride[1];
+        dest[2] += dstStride[2];
+        dest[3] += dstStride[3];
+    }
+}
+
+static int rgbToPlanarRgbaWrapper(SwsInternal *c, const uint8_t *const src[],
+                                  const int srcStride[], int srcSliceY, int srcSliceH,
+                                  uint8_t *const dst[], const int dstStride[])
+{
+    int alpha_first = 0;
+    int stride102[] = { dstStride[1], dstStride[0], dstStride[2], dstStride[3] };
+    int stride201[] = { dstStride[2], dstStride[0], dstStride[1], dstStride[3] };
+    uint8_t *dst102[] = { dst[1] + srcSliceY * dstStride[1],
+                          dst[0] + srcSliceY * dstStride[0],
+                          dst[2] + srcSliceY * dstStride[2],
+                          dst[3] + srcSliceY * dstStride[3] };
+    uint8_t *dst201[] = { dst[2] + srcSliceY * dstStride[2],
+                          dst[0] + srcSliceY * dstStride[0],
+                          dst[1] + srcSliceY * dstStride[1],
+                          dst[3] + srcSliceY * dstStride[3] };
+
+    switch (c->srcFormat) {
+    case AV_PIX_FMT_RGB24:
+        packed24togbrap((const uint8_t *) src[0], srcStride[0], dst201,
+                        stride201, srcSliceH, c->srcW);
+        break;
+    case AV_PIX_FMT_BGR24:
+        packed24togbrap((const uint8_t *) src[0], srcStride[0], dst102,
+                        stride102, srcSliceH, c->srcW);
+        break;
+    case AV_PIX_FMT_ARGB:
+        alpha_first = 1;
+    case AV_PIX_FMT_RGBA:
+        packed32togbrap((const uint8_t *) src[0], srcStride[0], dst201,
+                        stride201, srcSliceH, alpha_first, c->srcW);
+        break;
+    case AV_PIX_FMT_ABGR:
+        alpha_first = 1;
+    case AV_PIX_FMT_BGRA:
+        packed32togbrap((const uint8_t *) src[0], srcStride[0], dst102,
+                        stride102, srcSliceH, alpha_first, c->srcW);
+        break;
+    default:
+        av_log(c, AV_LOG_ERROR,
+               "unsupported planar RGB conversion %s -> %s\n",
+               av_get_pix_fmt_name(c->srcFormat),
+               av_get_pix_fmt_name(c->dstFormat));
+    }
+
+    return srcSliceH;
+}
+
 #define BAYER_GBRG
 #define BAYER_8
 #define BAYER_RENAME(x) bayer_gbrg8_to_##x
@@ -1497,6 +1652,13 @@ static int bayer_to_yv12_wrapper(SwsInternal *c, const uint8_t *const src[],
         || (x) == AV_PIX_FMT_BGR48BE   \
         )
 
+#define isAYUV(x) (                 \
+           (x) == AV_PIX_FMT_AYUV   \
+        || (x) == AV_PIX_FMT_VUYA   \
+        || (x) == AV_PIX_FMT_VUYX   \
+        || (x) == AV_PIX_FMT_UYVA   \
+        )
+
 /* {RGB,BGR}{15,16,24,32,32_1} -> {RGB,BGR}{15,16,24,32} */
 typedef void (* rgbConvFn) (const uint8_t *, uint8_t *, int);
 static rgbConvFn findRgbConvFn(SwsInternal *c)
@@ -1569,6 +1731,16 @@ static rgbConvFn findRgbConvFn(SwsInternal *c)
               || CONV_IS(BGRA64LE, BGR48BE)
               || CONV_IS(RGBA64BE, RGB48LE)
               || CONV_IS(BGRA64BE, BGR48LE)) conv = rgb64to48_bswap;
+    } else if (isAYUV(srcFormat) && isAYUV(dstFormat)) {
+        /* VUYX only for dst, to avoid copying undefined bytes */
+        if (     CONV_IS(AYUV, VUYA)
+              || CONV_IS(AYUV, VUYX)
+              || CONV_IS(VUYA, AYUV)) conv = shuffle_bytes_3210;
+        else if (CONV_IS(AYUV, UYVA)) conv = shuffle_bytes_2130;
+        else if (CONV_IS(VUYA, UYVA)) conv = shuffle_bytes_1203;
+        else if (CONV_IS(UYVA, AYUV)) conv = shuffle_bytes_3102;
+        else if (CONV_IS(UYVA, VUYA)
+              || CONV_IS(UYVA, VUYX)) conv = shuffle_bytes_2013;
     } else
     /* BGR -> BGR */
     if ((isBGRinInt(srcFormat) && isBGRinInt(dstFormat)) ||
@@ -2086,6 +2258,10 @@ void ff_get_unscaled_swscale(SwsInternal *c)
         !(flags & SWS_ACCURATE_RND) && !(dstW&1))
         c->convert_unscaled = bgr24ToYv12Wrapper;
 
+    /* AYUV/VUYA/UYVA -> AYUV/VUYA/UYVA */
+    if (isAYUV(srcFormat) && isAYUV(dstFormat) && findRgbConvFn(c))
+        c->convert_unscaled = rgbToRgbWrapper;
+
     /* RGB/BGR -> RGB/BGR (no dither needed forms) */
     if (isAnyRGB(srcFormat) && isAnyRGB(dstFormat) && findRgbConvFn(c)
         && (!needsDither || (c->flags&(SWS_FAST_BILINEAR|SWS_POINT))))
@@ -2140,9 +2316,18 @@ void ff_get_unscaled_swscale(SwsInternal *c)
          dstFormat == AV_PIX_FMT_BGRA64LE || dstFormat == AV_PIX_FMT_BGRA64BE))
         c->convert_unscaled = planarRgb16ToRgb16Wrapper;
 
+    if (av_pix_fmt_desc_get(srcFormat)->comp[0].depth >= 10 &&
+        isPlanarRGB(srcFormat) && !isFloat(srcFormat) &&
+        (dstFormat == AV_PIX_FMT_X2RGB10LE || dstFormat == AV_PIX_FMT_X2BGR10LE))
+        c->convert_unscaled = planarRgb16ToRgb16Wrapper;
+
     if (av_pix_fmt_desc_get(srcFormat)->comp[0].depth == 8 &&
         isPackedRGB(srcFormat) && dstFormat == AV_PIX_FMT_GBRP)
         c->convert_unscaled = rgbToPlanarRgbWrapper;
+
+    if (av_pix_fmt_desc_get(srcFormat)->comp[0].depth == 8 &&
+        isPackedRGB(srcFormat) && dstFormat == AV_PIX_FMT_GBRAP)
+        c->convert_unscaled = rgbToPlanarRgbaWrapper;
 
     if (isBayer(srcFormat)) {
         c->dst_slice_align = 2;

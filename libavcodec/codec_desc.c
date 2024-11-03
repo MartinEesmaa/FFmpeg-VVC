@@ -1971,6 +1971,13 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSLESS,
     },
     {
+        .id        = AV_CODEC_ID_RV60,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "rv60",
+        .long_name = NULL_IF_CONFIG_SMALL("RealVideo 6.0"),
+        .props     = AV_CODEC_PROP_LOSSY | AV_CODEC_PROP_REORDER,
+    },
+    {
         .id        = AV_CODEC_ID_JPEGXS,
         .type      = AVMEDIA_TYPE_VIDEO,
         .name      = "jpegxs",
