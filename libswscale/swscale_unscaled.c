@@ -742,6 +742,77 @@ static void packed16togbra16(const uint8_t *src, int srcStride,
     }
 }
 
+static void packed30togbra10(const uint8_t *src, int srcStride,
+                             uint16_t *dst[], const int dstStride[], int srcSliceH,
+                             int swap, int bpc, int width)
+{
+    int x, h, i;
+    int dst_alpha = dst[3] != NULL;
+    int scale_high = bpc - 10, scale_low = 10 - scale_high;
+    for (h = 0; h < srcSliceH; h++) {
+        uint32_t *src_line = (uint32_t *)(src + srcStride * h);
+        unsigned component;
+
+        switch (swap) {
+        case 3:
+        case 2:
+            if (dst_alpha) {
+                for (x = 0; x < width; x++) {
+                    unsigned p = AV_RL32(src_line);
+                    component = (p >> 20) & 0x3FF;
+                    dst[0][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    component = (p >> 10) & 0x3FF;
+                    dst[1][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    component =  p        & 0x3FF;
+                    dst[2][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    dst[3][x] = 0xFFFF;
+                    src_line++;
+                }
+            } else {
+                for (x = 0; x < width; x++) {
+                    unsigned p = AV_RL32(src_line);
+                    component = (p >> 20) & 0x3FF;
+                    dst[0][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    component = (p >> 10) & 0x3FF;
+                    dst[1][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    component =  p        & 0x3FF;
+                    dst[2][x] = av_bswap16(component << scale_high | component >> scale_low);
+                    src_line++;
+                }
+            }
+            break;
+        default:
+            if (dst_alpha) {
+                for (x = 0; x < width; x++) {
+                    unsigned p = AV_RL32(src_line);
+                    component = (p >> 20) & 0x3FF;
+                    dst[0][x] = component << scale_high | component >> scale_low;
+                    component = (p >> 10) & 0x3FF;
+                    dst[1][x] = component << scale_high | component >> scale_low;
+                    component =  p        & 0x3FF;
+                    dst[2][x] = component << scale_high | component >> scale_low;
+                    dst[3][x] = 0xFFFF;
+                    src_line++;
+                }
+            } else {
+                for (x = 0; x < width; x++) {
+                    unsigned p = AV_RL32(src_line);
+                    component = (p >> 20) & 0x3FF;
+                    dst[0][x] = component << scale_high | component >> scale_low;
+                    component = (p >> 10) & 0x3FF;
+                    dst[1][x] = component << scale_high | component >> scale_low;
+                    component =  p        & 0x3FF;
+                    dst[2][x] = component << scale_high | component >> scale_low;
+                    src_line++;
+                }
+            }
+            break;
+        }
+        for (i = 0; i < 4; i++)
+            dst[i] += dstStride[i] >> 1;
+    }
+}
+
 static int Rgb16ToPlanarRgb16Wrapper(SwsInternal *c, const uint8_t *const src[],
                                      const int srcStride[], int srcSliceY, int srcSliceH,
                                      uint8_t *const dst[], const int dstStride[])
@@ -785,6 +856,12 @@ static int Rgb16ToPlanarRgb16Wrapper(SwsInternal *c, const uint8_t *const src[],
                          dst2013, stride2013, srcSliceH, alpha, swap,
                          16 - bpc, c->srcW);
         break;
+    case AV_PIX_FMT_X2RGB10LE:
+        av_assert0(bpc >= 10);
+        packed30togbra10(src[0], srcStride[0],
+                         dst2013, stride2013, srcSliceH, swap,
+                         bpc, c->srcW);
+        break;
     case AV_PIX_FMT_BGR48LE:
     case AV_PIX_FMT_BGR48BE:
     case AV_PIX_FMT_BGRA64LE:
@@ -792,6 +869,12 @@ static int Rgb16ToPlanarRgb16Wrapper(SwsInternal *c, const uint8_t *const src[],
         packed16togbra16(src[0], srcStride[0],
                          dst1023, stride1023, srcSliceH, alpha, swap,
                          16 - bpc, c->srcW);
+        break;
+    case AV_PIX_FMT_X2BGR10LE:
+        av_assert0(bpc >= 10);
+        packed30togbra10(src[0], srcStride[0],
+                         dst1023, stride1023, srcSliceH, swap,
+                         bpc, c->srcW);
         break;
     default:
         av_log(c, AV_LOG_ERROR,
@@ -1659,6 +1742,11 @@ static int bayer_to_yv12_wrapper(SwsInternal *c, const uint8_t *const src[],
         || (x) == AV_PIX_FMT_UYVA   \
         )
 
+#define isX2RGB(x) (                   \
+           (x) == AV_PIX_FMT_X2RGB10LE \
+        || (x) == AV_PIX_FMT_X2BGR10LE \
+        )
+
 /* {RGB,BGR}{15,16,24,32,32_1} -> {RGB,BGR}{15,16,24,32} */
 typedef void (* rgbConvFn) (const uint8_t *, uint8_t *, int);
 static rgbConvFn findRgbConvFn(SwsInternal *c)
@@ -1731,6 +1819,31 @@ static rgbConvFn findRgbConvFn(SwsInternal *c)
               || CONV_IS(BGRA64LE, BGR48BE)
               || CONV_IS(RGBA64BE, RGB48LE)
               || CONV_IS(BGRA64BE, BGR48LE)) conv = rgb64to48_bswap;
+    } else if (isX2RGB(srcFormat) && isRGB48(dstFormat)) {
+        if      (CONV_IS(X2RGB10LE, RGB48LE)
+              || CONV_IS(X2BGR10LE, BGR48LE)) conv = HAVE_BIGENDIAN ? x2rgb10to48_bswap
+                                                                    : x2rgb10to48_nobswap;
+        else if (CONV_IS(X2RGB10LE, RGB48BE)
+              || CONV_IS(X2BGR10LE, BGR48BE)) conv = HAVE_BIGENDIAN ? x2rgb10to48_nobswap
+                                                                    : x2rgb10to48_bswap;
+        else if (CONV_IS(X2RGB10LE, BGR48LE)
+              || CONV_IS(X2BGR10LE, RGB48LE)) conv = HAVE_BIGENDIAN ? x2rgb10tobgr48_bswap
+                                                                    : x2rgb10tobgr48_nobswap;
+        else if (CONV_IS(X2RGB10LE, BGR48BE)
+              || CONV_IS(X2BGR10LE, RGB48BE)) conv = HAVE_BIGENDIAN ? x2rgb10tobgr48_nobswap
+                                                                    : x2rgb10tobgr48_bswap;
+        else if (CONV_IS(X2RGB10LE, RGBA64LE)
+              || CONV_IS(X2BGR10LE, BGRA64LE)) conv = HAVE_BIGENDIAN ? x2rgb10to64_bswap
+                                                                     : x2rgb10to64_nobswap;
+        else if (CONV_IS(X2RGB10LE, RGBA64BE)
+              || CONV_IS(X2BGR10LE, BGRA64BE)) conv = HAVE_BIGENDIAN ? x2rgb10to64_nobswap
+                                                                     : x2rgb10to64_bswap;
+        else if (CONV_IS(X2RGB10LE, BGRA64LE)
+              || CONV_IS(X2BGR10LE, RGBA64LE)) conv = HAVE_BIGENDIAN ? x2rgb10tobgr64_bswap
+                                                                     : x2rgb10tobgr64_nobswap;
+        else if (CONV_IS(X2RGB10LE, BGRA64BE)
+              || CONV_IS(X2BGR10LE, RGBA64BE)) conv = HAVE_BIGENDIAN ? x2rgb10tobgr64_nobswap
+                                                                     : x2rgb10tobgr64_bswap;
     } else if (isAYUV(srcFormat) && isAYUV(dstFormat)) {
         /* VUYX only for dst, to avoid copying undefined bytes */
         if (     CONV_IS(AYUV, VUYA)
@@ -2269,7 +2382,15 @@ void ff_get_unscaled_swscale(SwsInternal *c)
 
     /* RGB to planar RGB */
     if ((srcFormat == AV_PIX_FMT_GBRP && dstFormat == AV_PIX_FMT_GBRAP) ||
-        (srcFormat == AV_PIX_FMT_GBRAP && dstFormat == AV_PIX_FMT_GBRP))
+        (srcFormat == AV_PIX_FMT_GBRP10 && dstFormat == AV_PIX_FMT_GBRAP10) ||
+        (srcFormat == AV_PIX_FMT_GBRP12 && dstFormat == AV_PIX_FMT_GBRAP12) ||
+        (srcFormat == AV_PIX_FMT_GBRP14 && dstFormat == AV_PIX_FMT_GBRAP14) ||
+        (srcFormat == AV_PIX_FMT_GBRP16 && dstFormat == AV_PIX_FMT_GBRAP16) ||
+        (srcFormat == AV_PIX_FMT_GBRAP && dstFormat == AV_PIX_FMT_GBRP) ||
+        (srcFormat == AV_PIX_FMT_GBRAP10 && dstFormat == AV_PIX_FMT_GBRP10) ||
+        (srcFormat == AV_PIX_FMT_GBRAP12 && dstFormat == AV_PIX_FMT_GBRP12) ||
+        (srcFormat == AV_PIX_FMT_GBRAP14 && dstFormat == AV_PIX_FMT_GBRP14) ||
+        (srcFormat == AV_PIX_FMT_GBRAP16 && dstFormat == AV_PIX_FMT_GBRP16))
         c->convert_unscaled = planarRgbToplanarRgbWrapper;
 
 #define isByteRGB(f) (             \
@@ -2299,6 +2420,11 @@ void ff_get_unscaled_swscale(SwsInternal *c)
          dstFormat == AV_PIX_FMT_GBRAP12LE || dstFormat == AV_PIX_FMT_GBRAP12BE ||
          dstFormat == AV_PIX_FMT_GBRAP14LE || dstFormat == AV_PIX_FMT_GBRAP14BE ||
          dstFormat == AV_PIX_FMT_GBRAP16LE || dstFormat == AV_PIX_FMT_GBRAP16BE ))
+        c->convert_unscaled = Rgb16ToPlanarRgb16Wrapper;
+
+    if (av_pix_fmt_desc_get(dstFormat)->comp[0].depth >= 10 &&
+        isPlanarRGB(dstFormat) && !isFloat(dstFormat) &&
+        (srcFormat == AV_PIX_FMT_X2RGB10LE || srcFormat == AV_PIX_FMT_X2BGR10LE))
         c->convert_unscaled = Rgb16ToPlanarRgb16Wrapper;
 
     if ((srcFormat == AV_PIX_FMT_GBRP9LE  || srcFormat == AV_PIX_FMT_GBRP9BE  ||
@@ -2374,6 +2500,8 @@ void ff_get_unscaled_swscale(SwsInternal *c)
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_RGB555) ||
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_RGB565) ||
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_RGBA64) ||
+        IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_XV36)   ||
+        IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_XV48)   ||
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_XYZ12)  ||
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_YUV420P9)  ||
         IS_DIFFERENT_ENDIANESS(srcFormat, dstFormat, AV_PIX_FMT_YUV420P10) ||

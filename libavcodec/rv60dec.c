@@ -485,7 +485,7 @@ static void ipred_init(IntraPredContext * i)
     i->has_t = i->has_tr = i->has_l = i->has_ld = 0;
 }
 
-static void populate_ipred(const RV60Context * s, CUContext * cu, uint8_t * src, int stride, int xoff, int yoff, int size, int is_luma)
+static void populate_ipred(const RV60Context * s, CUContext * cu, const uint8_t * src, int stride, int xoff, int yoff, int size, int is_luma)
 {
     if (is_luma)
         src += (cu->ypos + yoff) * stride + cu->xpos + xoff;
@@ -2237,7 +2237,7 @@ static int calc_sel_qp(int osvquant, int qp)
 {
     switch (osvquant) {
     case 0: return qp;
-    case 1: return qp < 25 ? qp + 5 : qp;
+    case 1: return qp <= 25 ? qp + 5 : qp;
     default:
         if (qp <= 18)
             return qp + 10;
@@ -2263,20 +2263,25 @@ static int decode_slice(AVCodecContext *avctx, void *tdata, int cu_y, int thread
     thread.avg_linesize[1] = 32;
     thread.avg_linesize[2] = 32;
 
-    init_get_bits8(&gb, s->slice[cu_y].data, s->slice[cu_y].size);
+    if ((ret = init_get_bits8(&gb, s->slice[cu_y].data, s->slice[cu_y].size)) < 0)
+        return ret;
 
     for (int cu_x = 0; cu_x < s->cu_width; cu_x++) {
         if ((s->avctx->active_thread_type & FF_THREAD_SLICE) && cu_y)
             ff_thread_progress_await(&s->progress[cu_y - 1], cu_x + 2);
 
         qp = s->qp + read_qp_offset(&gb, s->qp_off_type);
+        if (qp < 0) {
+            ret = AVERROR_INVALIDDATA;
+            break;
+        }
         sel_qp = calc_sel_qp(s->osvquant, qp);
 
         memset(thread.coded_blk, 0, sizeof(thread.coded_blk));
         thread.cu_split_pos = 0;
 
         if ((ret = decode_cu_r(s, frame, &thread, &gb, cu_x << 6, cu_y << 6, 6, qp, sel_qp)) < 0)
-            return ret;
+            break;
 
         if (s->deblock) {
             thread.cu_split_pos = 0;
@@ -2290,7 +2295,7 @@ static int decode_slice(AVCodecContext *avctx, void *tdata, int cu_y, int thread
     if (s->avctx->active_thread_type & FF_THREAD_SLICE)
         ff_thread_progress_report(&s->progress[cu_y], INT_MAX);
 
-    return 0;
+    return ret;
 }
 
 static int rv60_decode_frame(AVCodecContext *avctx, AVFrame * frame,
@@ -2315,7 +2320,8 @@ static int rv60_decode_frame(AVCodecContext *avctx, AVFrame * frame,
     if (avpkt->size < header_size)
         return AVERROR_INVALIDDATA;
 
-    init_get_bits8(&gb, avpkt->data + header_size, avpkt->size - header_size);
+    if ((ret = init_get_bits8(&gb, avpkt->data + header_size, avpkt->size - header_size)) < 0)
+        return ret;
 
     if ((ret = read_frame_header(s, &gb, &width, &height)) < 0)
         return ret;
@@ -2351,6 +2357,8 @@ static int rv60_decode_frame(AVCodecContext *avctx, AVFrame * frame,
     ofs = get_bits_count(&gb) / 8;
 
     for (int i = 0; i < s->cu_height; i++) {
+        if (header_size + ofs >= avpkt->size)
+            return AVERROR_INVALIDDATA;
         s->slice[i].data = avpkt->data + header_size + ofs;
         s->slice[i].data_size = FFMIN(s->slice[i].size, avpkt->size - header_size - ofs);
         ofs += s->slice[i].size;
