@@ -309,8 +309,8 @@ static int update_dimensions_clear_info(RV60Context *s, int width, int height)
         return ret;
 
     for (int j = 0; j < s->cu_height << 4; j++)
-       for (int i = 0; i < s->cu_width << 4; i++)
-           s->blk_info[j*s->blk_stride + i].mv.mvref = MVREF_NONE;
+        for (int i = 0; i < s->cu_width << 4; i++)
+            s->blk_info[j*s->blk_stride + i].mv.mvref = MVREF_NONE;
 
     if (s->deblock) {
         int size;
@@ -335,7 +335,7 @@ static int update_dimensions_clear_info(RV60Context *s, int width, int height)
 static int read_code012(GetBitContext * gb)
 {
     if (!get_bits1(gb))
-       return 0;
+        return 0;
     return get_bits1(gb) + 1;
 }
 
@@ -862,50 +862,30 @@ static int get_skip_mv_index(enum MVRefEnum mvref)
     }
 }
 
-static int mvinfo_valid(const MVInfo * mvi)
+static void add_if_valid(unique_list_mvinfo * skip_cand, const MVInfo * mvi)
 {
-    return mvi->mvref != MVREF_NONE;
+    if (mvi->mvref != MVREF_NONE)
+        unique_list_mvinfo_add(skip_cand, *mvi);
 }
 
 static void fill_mv_skip_cand(RV60Context * s, const CUContext * cu, unique_list_mvinfo * skip_cand, int size)
 {
     int mv_size = size >> 2;
 
-    if (cu->xpos > 0) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos - 1].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (cu->ypos > 0) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos - s->blk_stride].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (has_top_right_block(s, cu->xpos, cu->ypos, 0, 0, size)) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos - s->blk_stride + mv_size].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (has_left_down_block(s, cu->xpos, cu->ypos, 0, 0, size)) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos + s->blk_stride * mv_size - 1].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (has_left_block(s, cu->xpos, cu->ypos, 0, 0, size)) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos + s->blk_stride * (mv_size - 1) - 1].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (has_top_block(s, cu->xpos, cu->ypos, 0, 0, size)) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos - s->blk_stride + mv_size - 1].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
-    if (cu->xpos > 0 && cu->ypos > 0) {
-        const MVInfo * mv = &s->blk_info[cu->blk_pos - s->blk_stride - 1].mv;
-        if (mvinfo_valid(mv))
-            unique_list_mvinfo_add(skip_cand, *mv);
-    }
+    if (cu->xpos)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos - 1].mv);
+    if (cu->ypos)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos - s->blk_stride].mv);
+    if (cu->ypos && cu->xpos + size < s->awidth)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos - s->blk_stride + mv_size].mv);
+    if (cu->xpos && cu->ypos + size < s->aheight)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos + s->blk_stride * mv_size - 1].mv);
+    if (cu->xpos)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos + s->blk_stride * (mv_size - 1) - 1].mv);
+    if (cu->ypos)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos - s->blk_stride + mv_size - 1].mv);
+    if (cu->xpos && cu->ypos)
+        add_if_valid(skip_cand, &s->blk_info[cu->blk_pos - s->blk_stride - 1].mv);
 
     for (int i = skip_cand->size; i < 4; i++)
         skip_cand->list[i] = (MVInfo){.mvref=MVREF_REF0,.f_mv={0,0},.b_mv={0,0}};
@@ -1420,10 +1400,10 @@ static void avg_plane(uint8_t * dst, int dst_stride, const uint8_t * src, int sr
 static void avg(AVFrame * frame, uint8_t * prev_frame_data[3], int prev_frame_linesize[3], int x, int y, int w, int h)
 {
     for (int plane = 0; plane < 3; plane++) {
-       int shift = !plane ? 0 : 1;
-       avg_plane(frame->data[plane] + (y >> shift) * frame->linesize[plane] + (x >> shift), frame->linesize[plane],
-                 prev_frame_data[plane], prev_frame_linesize[plane],
-                 w >> shift, h >> shift);
+        int shift = !plane ? 0 : 1;
+        avg_plane(frame->data[plane] + (y >> shift) * frame->linesize[plane] + (x >> shift), frame->linesize[plane],
+                  prev_frame_data[plane], prev_frame_linesize[plane],
+                  w >> shift, h >> shift);
     }
 }
 
@@ -2171,7 +2151,7 @@ static void deblock_cu_r(RV60Context * s, AVFrame * frame, ThreadContext * threa
     enum CUType cu_type;
 
     if (xpos >= s->awidth || ypos >= s->aheight)
-       return;
+        return;
 
     if (thread->cu_split[thread->cu_split_pos++]) {
         int hsize = 1 << (log_size - 1);

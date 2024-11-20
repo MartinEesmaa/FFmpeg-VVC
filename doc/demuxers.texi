@@ -380,11 +380,11 @@ Default is false.
 
 @item menu_lu @var{int}
 The menu language to demux. In DVD, menus are grouped by language.
-Default is 0, the first language unit.
+Default is 1, the first language unit.
 
 @item menu_vts @var{int}
 The VTS where the menu lives, or 0 if it is a VMG menu (root-level).
-Default is 0, VMG menu.
+Default is 1, menu of the first VTS.
 
 @item pgc @var{int}
 The entry PGC to start playback, in conjunction with @option{pg}.
@@ -397,8 +397,7 @@ Default is 0, automatically resolve from value of @option{title}.
 The entry PG to start playback, in conjunction with @option{pgc}.
 Alternative to setting @option{title}.
 Chapter markers are not supported at this time.
-Default is 0, automatically resolve from value of @option{title}, or
-start from the beginning (PG 1) of the menu.
+Default is 1, the first PG of the PGC.
 
 @item preindex @var{bool}
 Enable this to have accurate chapter (PTT) markers and duration measurement,
@@ -406,7 +405,6 @@ which requires a slow second pass read in order to index the chapter marker
 timestamps from NAV packets. This is non-ideal extra work for real optical drives.
 It is recommended and faster to use this option with a backup of the DVD structure
 stored on a hard drive. Not compatible with @option{pgc} and @option{pg}.
-Not applicable to menus.
 Default is 0, false.
 
 @item trim @var{bool}

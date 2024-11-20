@@ -130,9 +130,13 @@ int ff_vk_load_props(FFVulkanContext *s)
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
         .pNext = &s->desc_buf_props,
     };
+    s->props_11 = (VkPhysicalDeviceVulkan11Properties) {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_PROPERTIES,
+        .pNext = &s->driver_props,
+    };
     s->props = (VkPhysicalDeviceProperties2) {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &s->driver_props,
+        .pNext = &s->props_11,
     };
 
     s->atomic_float_feats = (VkPhysicalDeviceShaderAtomicFloatFeaturesEXT) {
@@ -251,6 +255,7 @@ void ff_vk_exec_pool_free(FFVulkanContext *s, FFVkExecPool *pool)
         ff_vk_exec_discard_deps(s, e);
 
         av_free(e->frame_deps);
+        av_free(e->sw_frame_deps);
         av_free(e->buf_deps);
         av_free(e->queue_family_dst);
         av_free(e->layout_dst);
@@ -547,6 +552,10 @@ void ff_vk_exec_discard_deps(FFVulkanContext *s, FFVkExecContext *e)
         av_buffer_unref(&e->buf_deps[j]);
     e->nb_buf_deps = 0;
 
+    for (int j = 0; j < e->nb_sw_frame_deps; j++)
+        av_frame_free(&e->sw_frame_deps[j]);
+    e->nb_sw_frame_deps = 0;
+
     for (int j = 0; j < e->nb_frame_deps; j++) {
         AVFrame *f = e->frame_deps[j];
         if (e->frame_locked[j]) {
@@ -587,6 +596,29 @@ int ff_vk_exec_add_dep_buf(FFVulkanContext *s, FFVkExecContext *e,
         }
         e->nb_buf_deps++;
     }
+
+    return 0;
+}
+
+int ff_vk_exec_add_dep_sw_frame(FFVulkanContext *s, FFVkExecContext *e,
+                                AVFrame *f)
+{
+    AVFrame **dst = av_fast_realloc(e->sw_frame_deps, &e->sw_frame_deps_alloc_size,
+                                    (e->nb_sw_frame_deps + 1) * sizeof(*dst));
+    if (!dst) {
+        ff_vk_exec_discard_deps(s, e);
+        return AVERROR(ENOMEM);
+    }
+
+    e->sw_frame_deps = dst;
+
+    e->sw_frame_deps[e->nb_sw_frame_deps] = av_frame_clone(f);
+    if (!e->sw_frame_deps[e->nb_sw_frame_deps]) {
+        ff_vk_exec_discard_deps(s, e);
+        return AVERROR(ENOMEM);
+    }
+
+    e->nb_sw_frame_deps++;
 
     return 0;
 }
@@ -1273,6 +1305,23 @@ int ff_vk_init_sampler(FFVulkanContext *s, VkSampler *sampler,
     return 0;
 }
 
+VkImageAspectFlags ff_vk_aspect_flag(AVFrame *f, int p)
+{
+    AVVkFrame *vkf = (AVVkFrame *)f->data[0];
+    AVHWFramesContext *hwfc = (AVHWFramesContext *)f->hw_frames_ctx->data;
+    int nb_images = ff_vk_count_images(vkf);
+    int nb_planes = av_pix_fmt_count_planes(hwfc->sw_format);
+
+    static const VkImageAspectFlags plane_aspect[] = { VK_IMAGE_ASPECT_PLANE_0_BIT,
+                                                       VK_IMAGE_ASPECT_PLANE_1_BIT,
+                                                       VK_IMAGE_ASPECT_PLANE_2_BIT, };
+
+    if (ff_vk_mt_is_np_rgb(hwfc->sw_format) || (nb_planes == nb_images))
+        return VK_IMAGE_ASPECT_COLOR_BIT;
+
+    return plane_aspect[p];
+}
+
 int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt)
 {
     if (pix_fmt == AV_PIX_FMT_ABGR   || pix_fmt == AV_PIX_FMT_BGRA   ||
@@ -1281,6 +1330,9 @@ int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt)
         pix_fmt == AV_PIX_FMT_RGBA64 || pix_fmt == AV_PIX_FMT_RGB565 ||
         pix_fmt == AV_PIX_FMT_BGR565 || pix_fmt == AV_PIX_FMT_BGR0   ||
         pix_fmt == AV_PIX_FMT_0BGR   || pix_fmt == AV_PIX_FMT_RGB0   ||
+        pix_fmt == AV_PIX_FMT_GBRP10  ||
+        pix_fmt == AV_PIX_FMT_GBRAP   || pix_fmt == AV_PIX_FMT_GBRAP16 ||
+        pix_fmt == AV_PIX_FMT_GBRPF32 || pix_fmt == AV_PIX_FMT_GBRAPF32 ||
         pix_fmt == AV_PIX_FMT_X2RGB10 || pix_fmt == AV_PIX_FMT_X2BGR10 ||
         pix_fmt == AV_PIX_FMT_RGBAF32 || pix_fmt == AV_PIX_FMT_RGBF32 ||
         pix_fmt == AV_PIX_FMT_RGBA128 || pix_fmt == AV_PIX_FMT_RGB96)
@@ -1372,6 +1424,7 @@ const char *ff_vk_shader_rep_fmt(enum AVPixelFormat pix_fmt,
     };
     case AV_PIX_FMT_GRAY16:
     case AV_PIX_FMT_GBRAP16:
+    case AV_PIX_FMT_GBRP10:
     case AV_PIX_FMT_YUV420P10:
     case AV_PIX_FMT_YUV420P12:
     case AV_PIX_FMT_YUV420P16:
@@ -1567,11 +1620,6 @@ int ff_vk_create_imageviews(FFVulkanContext *s, FFVkExecContext *e,
         return AVERROR(ENOMEM);
 
     for (int i = 0; i < nb_planes; i++) {
-        VkImageAspectFlags plane_aspect[] = { VK_IMAGE_ASPECT_COLOR_BIT,
-                                              VK_IMAGE_ASPECT_PLANE_0_BIT,
-                                              VK_IMAGE_ASPECT_PLANE_1_BIT,
-                                              VK_IMAGE_ASPECT_PLANE_2_BIT, };
-
         VkImageViewUsageCreateInfo view_usage_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
             .usage = vkfc->usage &
@@ -1586,8 +1634,7 @@ int ff_vk_create_imageviews(FFVulkanContext *s, FFVkExecContext *e,
             .format     = map_fmt_to_rep(rep_fmts[i], rep_fmt),
             .components = ff_comp_identity_map,
             .subresourceRange = {
-                .aspectMask = plane_aspect[(nb_planes != nb_images) +
-                                           i*(nb_planes != nb_images)],
+                .aspectMask = ff_vk_aspect_flag(f, i),
                 .levelCount = 1,
                 .layerCount = 1,
             },
@@ -2120,7 +2167,7 @@ print:
     /* Write shader info */
     for (int i = 0; i < nb; i++) {
         const struct descriptor_props *prop = &descriptor_props[desc[i].type];
-        GLSLA("layout (set = %i, binding = %i", shd->nb_descriptor_sets - 1, i);
+        GLSLA("layout (set = %i, binding = %i", FFMAX(shd->nb_descriptor_sets - 1, 0), i);
 
         if (desc[i].mem_layout)
             GLSLA(", %s", desc[i].mem_layout);

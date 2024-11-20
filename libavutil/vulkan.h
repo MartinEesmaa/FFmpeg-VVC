@@ -134,6 +134,11 @@ typedef struct FFVkExecContext {
     unsigned int frame_deps_alloc_size;
     int nb_frame_deps;
 
+    /* Software frame dependencies */
+    AVFrame **sw_frame_deps;
+    unsigned int sw_frame_deps_alloc_size;
+    int nb_sw_frame_deps;
+
     VkSemaphoreSubmitInfo *sem_wait;
     unsigned int sem_wait_alloc;
     int sem_wait_cnt;
@@ -267,6 +272,7 @@ typedef struct FFVulkanContext {
     FFVulkanFunctions     vkfn;
     FFVulkanExtensions    extensions;
     VkPhysicalDeviceProperties2 props;
+    VkPhysicalDeviceVulkan11Properties props_11;
     VkPhysicalDeviceDriverProperties driver_props;
     VkPhysicalDeviceMemoryProperties mprops;
     VkPhysicalDeviceExternalMemoryHostPropertiesEXT hprops;
@@ -358,6 +364,11 @@ const char *ff_vk_ret2str(VkResult res);
 int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt);
 
 /**
+ * Get the aspect flag for a plane from an image.
+ */
+VkImageAspectFlags ff_vk_aspect_flag(AVFrame *f, int p);
+
+/**
  * Returns the format to use for images in shaders.
  */
 enum FFVkShaderRepFormat {
@@ -435,6 +446,8 @@ int ff_vk_exec_add_dep_bool_sem(FFVulkanContext *s, FFVkExecContext *e,
 int ff_vk_exec_add_dep_frame(FFVulkanContext *s, FFVkExecContext *e, AVFrame *f,
                              VkPipelineStageFlagBits2 wait_stage,
                              VkPipelineStageFlagBits2 signal_stage);
+int ff_vk_exec_add_dep_sw_frame(FFVulkanContext *s, FFVkExecContext *e,
+                                AVFrame *f);
 void ff_vk_exec_update_frame(FFVulkanContext *s, FFVkExecContext *e, AVFrame *f,
                              VkImageMemoryBarrier2 *bar, uint32_t *nb_img_bar);
 int ff_vk_exec_mirror_sem_value(FFVulkanContext *s, FFVkExecContext *e,
