@@ -66,6 +66,10 @@ typedef struct { CONTEXT c; int status; } checkasm_context;
 #define checkasm_save_context() 0
 #define checkasm_load_context() do {} while (0)
 #endif
+#elif defined(_WASI_EMULATED_SIGNAL)
+#define checkasm_context void*
+#define checkasm_save_context() 0
+#define checkasm_load_context() do {} while (0)
 #else
 #include <setjmp.h>
 typedef sigjmp_buf checkasm_context;

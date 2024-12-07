@@ -247,7 +247,8 @@ void ff_vk_exec_pool_free(FFVulkanContext *s, FFVkExecPool *pool)
         FFVkExecContext *e = &pool->contexts[i];
 
         if (e->fence) {
-            vk->WaitForFences(s->hwctx->act_dev, 1, &e->fence, VK_TRUE, UINT64_MAX);
+            if (e->had_submission)
+                vk->WaitForFences(s->hwctx->act_dev, 1, &e->fence, VK_TRUE, UINT64_MAX);
             vk->DestroyFence(s->hwctx->act_dev, e->fence, s->hwctx->alloc);
         }
         pthread_mutex_destroy(&e->lock);
@@ -315,6 +316,8 @@ int ff_vk_exec_pool_init(FFVulkanContext *s, FFVkQueueFamilyCtx *qf,
     VkCommandBufferAllocateInfo cbuf_create;
 
     const VkQueryPoolVideoEncodeFeedbackCreateInfoKHR *ef = NULL;
+
+    atomic_init(&pool->idx, 0);
 
     if (query_type == VK_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK_KHR) {
         ef = ff_vk_find_struct(query_create_pnext,
@@ -489,16 +492,7 @@ VkResult ff_vk_exec_get_query(FFVulkanContext *s, FFVkExecContext *e,
 
 FFVkExecContext *ff_vk_exec_get(FFVulkanContext *s, FFVkExecPool *pool)
 {
-    FFVulkanFunctions *vk = &s->vkfn;
-    FFVkExecContext *e = &pool->contexts[pool->idx];
-
-    /* Check if last submission has already finished.
-     * If so, don't waste resources and reuse the same buffer. */
-    if (vk->GetFenceStatus(s->hwctx->act_dev, e->fence) == VK_SUCCESS)
-        return e;
-
-    pool->idx = (pool->idx + 1) % pool->pool_size;
-    return &pool->contexts[pool->idx];
+    return &pool->contexts[atomic_fetch_add(&pool->idx, 1) % pool->pool_size];
 }
 
 void ff_vk_exec_wait(FFVulkanContext *s, FFVkExecContext *e)
@@ -1212,6 +1206,8 @@ int ff_vk_get_pooled_buffer(FFVulkanContext *ctx, AVBufferPool **buf_pool,
     AVBufferRef *ref;
     FFVkBuffer *data;
 
+    *buf = NULL;
+
     if (!(*buf_pool)) {
         *buf_pool = av_buffer_pool_init2(sizeof(FFVkBuffer), ctx,
                                          alloc_data_buf, NULL);
@@ -1238,6 +1234,7 @@ int ff_vk_get_pooled_buffer(FFVulkanContext *ctx, AVBufferPool **buf_pool,
                            mem_props);
     if (err < 0) {
         av_buffer_unref(&ref);
+        *buf = NULL;
         return err;
     }
 
@@ -1245,6 +1242,7 @@ int ff_vk_get_pooled_buffer(FFVulkanContext *ctx, AVBufferPool **buf_pool,
         err = ff_vk_map_buffer(ctx, data, &data->mapped_mem, 0);
         if (err < 0) {
             av_buffer_unref(&ref);
+            *buf = NULL;
             return err;
         }
     }
@@ -1330,8 +1328,11 @@ int ff_vk_mt_is_np_rgb(enum AVPixelFormat pix_fmt)
         pix_fmt == AV_PIX_FMT_RGBA64 || pix_fmt == AV_PIX_FMT_RGB565 ||
         pix_fmt == AV_PIX_FMT_BGR565 || pix_fmt == AV_PIX_FMT_BGR0   ||
         pix_fmt == AV_PIX_FMT_0BGR   || pix_fmt == AV_PIX_FMT_RGB0   ||
-        pix_fmt == AV_PIX_FMT_GBRP10  ||
-        pix_fmt == AV_PIX_FMT_GBRAP   || pix_fmt == AV_PIX_FMT_GBRAP16 ||
+        pix_fmt == AV_PIX_FMT_GBRP10  || pix_fmt == AV_PIX_FMT_GBRP12 ||
+        pix_fmt == AV_PIX_FMT_GBRP14  || pix_fmt == AV_PIX_FMT_GBRP16 ||
+        pix_fmt == AV_PIX_FMT_GBRAP   || pix_fmt == AV_PIX_FMT_GBRAP10 ||
+        pix_fmt == AV_PIX_FMT_GBRAP12 || pix_fmt == AV_PIX_FMT_GBRAP14 ||
+        pix_fmt == AV_PIX_FMT_GBRAP16 ||
         pix_fmt == AV_PIX_FMT_GBRPF32 || pix_fmt == AV_PIX_FMT_GBRAPF32 ||
         pix_fmt == AV_PIX_FMT_X2RGB10 || pix_fmt == AV_PIX_FMT_X2BGR10 ||
         pix_fmt == AV_PIX_FMT_RGBAF32 || pix_fmt == AV_PIX_FMT_RGBF32 ||
@@ -1422,9 +1423,18 @@ const char *ff_vk_shader_rep_fmt(enum AVPixelFormat pix_fmt,
         };
         return rep_tab[rep_fmt];
     };
+    case AV_PIX_FMT_GRAY10:
+    case AV_PIX_FMT_GRAY12:
+    case AV_PIX_FMT_GRAY14:
     case AV_PIX_FMT_GRAY16:
+    case AV_PIX_FMT_GBRAP10:
+    case AV_PIX_FMT_GBRAP12:
+    case AV_PIX_FMT_GBRAP14:
     case AV_PIX_FMT_GBRAP16:
     case AV_PIX_FMT_GBRP10:
+    case AV_PIX_FMT_GBRP12:
+    case AV_PIX_FMT_GBRP14:
+    case AV_PIX_FMT_GBRP16:
     case AV_PIX_FMT_YUV420P10:
     case AV_PIX_FMT_YUV420P12:
     case AV_PIX_FMT_YUV420P16:

@@ -363,6 +363,8 @@ static const struct {
 #elif ARCH_LOONGARCH
     { "LSX",      "lsx",      AV_CPU_FLAG_LSX },
     { "LASX",     "lasx",     AV_CPU_FLAG_LASX },
+#elif ARCH_WASM
+    { "SIMD128",    "simd128",  AV_CPU_FLAG_SIMD128 },
 #endif
     { NULL }
 };
@@ -769,7 +771,7 @@ static LONG NTAPI signal_handler(EXCEPTION_POINTERS *e) {
     return EXCEPTION_CONTINUE_EXECUTION; /* never reached, but shuts up gcc */
 }
 #endif
-#else
+#elif !defined(_WASI_EMULATED_SIGNAL)
 static void signal_handler(int s);
 
 static const struct sigaction signal_handler_act = {
@@ -932,7 +934,7 @@ int main(int argc, char *argv[])
 #if WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP)
     AddVectoredExceptionHandler(0, signal_handler);
 #endif
-#else
+#elif !defined(_WASI_EMULATED_SIGNAL)
     sigaction(SIGBUS,  &signal_handler_act, NULL);
     sigaction(SIGFPE,  &signal_handler_act, NULL);
     sigaction(SIGILL,  &signal_handler_act, NULL);

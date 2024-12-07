@@ -121,6 +121,9 @@ typedef struct FFVkExecContext {
     /* Fence for the command buffer */
     VkFence fence;
 
+    /* Opaque data, untouched, free to use by users */
+    void *opaque;
+
     void *query_data;
     int query_idx;
 
@@ -245,7 +248,7 @@ typedef struct FFVulkanShaderData {
 
 typedef struct FFVkExecPool {
     FFVkExecContext *contexts;
-    atomic_int_least64_t idx;
+    atomic_uint_least64_t idx;
 
     VkCommandPool cmd_buf_pool;
     VkCommandBuffer *cmd_bufs;
