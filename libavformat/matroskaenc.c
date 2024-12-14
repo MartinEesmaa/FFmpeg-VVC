@@ -1141,7 +1141,7 @@ static int mkv_assemble_native_codecprivate(AVFormatContext *s, AVIOContext *dyn
                                   extradata_size);
     case AV_CODEC_ID_HEVC:
         return ff_isom_write_hvcc(dyn_cp, extradata,
-                                  extradata_size, 0);
+                                  extradata_size, 0, s);
     case AV_CODEC_ID_VVC:
         return ff_isom_write_vvcc(dyn_cp, extradata,
                                   extradata_size, 0);

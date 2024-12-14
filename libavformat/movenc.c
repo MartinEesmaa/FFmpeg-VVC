@@ -1563,20 +1563,20 @@ static int mov_write_vpcc_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *tra
     return update_size(pb, pos);
 }
 
-static int mov_write_hvcc_tag(AVIOContext *pb, MOVTrack *track)
+static int mov_write_hvcc_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *track)
 {
     int64_t pos = avio_tell(pb);
 
     avio_wb32(pb, 0);
     ffio_wfourcc(pb, "hvcC");
     if (track->tag == MKTAG('h','v','c','1'))
-        ff_isom_write_hvcc(pb, track->vos_data, track->vos_len, 1);
+        ff_isom_write_hvcc(pb, track->vos_data, track->vos_len, 1, s);
     else
-        ff_isom_write_hvcc(pb, track->vos_data, track->vos_len, 0);
+        ff_isom_write_hvcc(pb, track->vos_data, track->vos_len, 0, s);
     return update_size(pb, pos);
 }
 
-static int mov_write_lhvc_tag(AVIOContext *pb, MOVTrack *track)
+static int mov_write_lhvc_tag(AVFormatContext *s, AVIOContext *pb, MOVTrack *track)
 {
     int64_t pos = avio_tell(pb);
     int ret;
@@ -1584,9 +1584,9 @@ static int mov_write_lhvc_tag(AVIOContext *pb, MOVTrack *track)
     avio_wb32(pb, 0);
     ffio_wfourcc(pb, "lhvC");
     if (track->tag == MKTAG('h','v','c','1'))
-        ret = ff_isom_write_lhvc(pb, track->vos_data, track->vos_len, 1);
+        ret = ff_isom_write_lhvc(pb, track->vos_data, track->vos_len, 1, s);
     else
-        ret = ff_isom_write_lhvc(pb, track->vos_data, track->vos_len, 0);
+        ret = ff_isom_write_lhvc(pb, track->vos_data, track->vos_len, 0, s);
 
     if (ret < 0) {
         avio_seek(pb, pos, SEEK_SET);
@@ -2723,9 +2723,9 @@ static int mov_write_video_tag(AVFormatContext *s, AVIOContext *pb, MOVMuxContex
         mov_write_avid_tag(pb, track);
         avid = 1;
     } else if (track->par->codec_id == AV_CODEC_ID_HEVC) {
-        mov_write_hvcc_tag(pb, track);
+        mov_write_hvcc_tag(mov->fc, pb, track);
         if (track->st->disposition & AV_DISPOSITION_MULTILAYER) {
-            ret = mov_write_lhvc_tag(pb, track);
+            ret = mov_write_lhvc_tag(mov->fc, pb, track);
             if (ret < 0)
                 av_log(mov->fc, AV_LOG_WARNING, "Not writing 'lhvC' atom for multilayer stream.\n");
         }
@@ -6556,15 +6556,15 @@ static int check_pkt(AVFormatContext *s, MOVTrack *trk, AVPacket *pkt)
 
     duration = pkt->dts - ref;
     if (pkt->dts < ref || duration >= INT_MAX) {
-        av_log(s, AV_LOG_WARNING, "Packet duration: %"PRId64" / dts: %"PRId64" is out of range\n",
-               duration, pkt->dts);
+        av_log(s, AV_LOG_WARNING, "Packet duration: %"PRId64" / dts: %"PRId64" in stream %d is out of range\n",
+               duration, pkt->dts, pkt->stream_index);
 
         pkt->dts = ref + 1;
         pkt->pts = AV_NOPTS_VALUE;
     }
 
     if (pkt->duration < 0 || pkt->duration > INT_MAX) {
-        av_log(s, AV_LOG_ERROR, "Application provided duration: %"PRId64" is invalid\n", pkt->duration);
+        av_log(s, AV_LOG_ERROR, "Application provided duration: %"PRId64" in stream %d is invalid\n", pkt->duration, pkt->stream_index);
         return AVERROR(EINVAL);
     }
     return 0;
