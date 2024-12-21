@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2024 Institue of Software Chinese Academy of Sciences (ISCAS).
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,26 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_LCEVCDEC_H
-#define AVCODEC_LCEVCDEC_H
+#include "libavcodec/riscv/h26x/asm.S"
 
-#include "config_components.h"
-
-#include <stdint.h>
-#if CONFIG_LIBLCEVC_DEC
-#include <LCEVC/lcevc_dec.h>
-#else
-typedef uintptr_t LCEVC_DecoderHandle;
-#endif
-
-typedef struct FFLCEVCContext {
-    LCEVC_DecoderHandle decoder;
-    int initialized;
-} FFLCEVCContext;
-
-struct AVFrame;
-
-int ff_lcevc_alloc(FFLCEVCContext **plcevc);
-int ff_lcevc_process(void *logctx, struct AVFrame *frame);
-void ff_lcevc_unref(void *opaque);
-#endif /* AVCODEC_LCEVCDEC_H */
+func_put_pixels 256, 64, h2656
+func_put_pixels 128, 64, h2656

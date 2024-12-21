@@ -24,6 +24,8 @@
 #include "libavutil/cpu.h"
 #include "libavutil/riscv/cpu.h"
 #include "libavcodec/vvc/dsp.h"
+#include "libavcodec/vvc/dec.h"
+#include "libavcodec/riscv/h26x/h2656dsp.h"
 
 #define bf(fn, bd,  opt) fn##_##bd##_##opt
 
@@ -36,6 +38,46 @@ void bf(ff_vvc_w_avg, bd, opt)(uint8_t *dst, ptrdiff_t dst_stride,              
 
 AVG_PROTOTYPES(8, rvv_128)
 AVG_PROTOTYPES(8, rvv_256)
+
+#define DMVR_PROTOTYPES(bd, opt)                                                                    \
+void ff_vvc_dmvr_##bd##_##opt(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride,               \
+     int height, intptr_t mx, intptr_t my, int width);                                              \
+void ff_vvc_dmvr_h_##bd##_##opt(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride,             \
+     int height, intptr_t mx, intptr_t my, int width);                                              \
+void ff_vvc_dmvr_v_##bd##_##opt(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride,             \
+     int height, intptr_t mx, intptr_t my, int width);                                              \
+void ff_vvc_dmvr_hv_##bd##_##opt(int16_t *dst, const uint8_t *src, ptrdiff_t src_stride,            \
+     int height, intptr_t mx, intptr_t my, int width);                                              \
+
+DMVR_PROTOTYPES(8, rvv_128)
+DMVR_PROTOTYPES(8, rvv_256)
+
+#define DMVR_INIT(bd, opt) do {                                    \
+    c->inter.dmvr[0][0]   = ff_vvc_dmvr_##bd##_##opt;              \
+    c->inter.dmvr[0][1]   = ff_vvc_dmvr_h_##bd##_##opt;            \
+    c->inter.dmvr[1][0]   = ff_vvc_dmvr_v_##bd##_##opt;            \
+    c->inter.dmvr[1][1]   = ff_vvc_dmvr_hv_##bd##_##opt;           \
+} while (0)
+
+int ff_vvc_sad_rvv_128(const int16_t *src0, const int16_t *src1, int dx, int dy, int block_w, int block_h);
+int ff_vvc_sad_rvv_256(const int16_t *src0, const int16_t *src1, int dx, int dy, int block_w, int block_h);
+
+#define PUT_PIXELS_PROTOTYPES2(bd, opt)                                          \
+void bf(ff_vvc_put_pixels, bd, opt)(int16_t *dst,                                \
+    const uint8_t *_src, const ptrdiff_t _src_stride,                            \
+    const int height, const int8_t *hf, const int8_t *vf, const int width);
+
+PUT_PIXELS_PROTOTYPES2(8, rvv_128)
+PUT_PIXELS_PROTOTYPES2(8, rvv_256)
+
+#define PEL_FUNC(dst, C, idx1, idx2, a)                                           \
+    do {                                                                          \
+        for (int w = 1; w < 7; w++)                                               \
+            c->inter.dst[C][w][idx1][idx2] = a;                                   \
+    } while (0)                                                                   \
+
+#define FUNCS(C, opt)                                                             \
+        PEL_FUNC(put, C, 0, 0, ff_vvc_put_pixels_8_##opt);                        \
 
 void ff_vvc_dsp_init_riscv(VVCDSPContext *const c, const int bd)
 {
@@ -54,7 +96,12 @@ void ff_vvc_dsp_init_riscv(VVCDSPContext *const c, const int bd)
 # if (__riscv_xlen == 64)
                 c->inter.w_avg    = ff_vvc_w_avg_8_rvv_256;
 # endif
+                DMVR_INIT(8, rvv_256);
+                FUNCS(LUMA, rvv_256);
+                FUNCS(CHROMA, rvv_256);
                 break;
+            case 10:
+                c->inter.sad      = ff_vvc_sad_rvv_256;
             default:
                 break;
         }
@@ -65,7 +112,12 @@ void ff_vvc_dsp_init_riscv(VVCDSPContext *const c, const int bd)
 # if (__riscv_xlen == 64)
                 c->inter.w_avg    = ff_vvc_w_avg_8_rvv_128;
 # endif
+                DMVR_INIT(8, rvv_128);
+                FUNCS(LUMA, rvv_128);
+                FUNCS(CHROMA, rvv_128);
                 break;
+            case 10:
+                c->inter.sad      = ff_vvc_sad_rvv_128;
             default:
                 break;
         }

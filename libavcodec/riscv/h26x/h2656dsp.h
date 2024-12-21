@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2024 Institue of Software Chinese Academy of Sciences (ISCAS).
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,22 +18,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef FFTOOLS_OBJPOOL_H
-#define FFTOOLS_OBJPOOL_H
+#ifndef AVCODEC_RISCV_H26X_H2656DSP_H
+#define AVCODEC_RISCV_H26X_H2656DSP_H
 
-typedef struct ObjPool ObjPool;
+void ff_h2656_put_pixels_8_rvv_256(int16_t *dst, const uint8_t *src, ptrdiff_t srcstride, int height, intptr_t mx, intptr_t my, int width);
+void ff_h2656_put_pixels_8_rvv_128(int16_t *dst, const uint8_t *src, ptrdiff_t srcstride, int height, intptr_t mx, intptr_t my, int width);
 
-typedef void* (*ObjPoolCBAlloc)(void);
-typedef void  (*ObjPoolCBReset)(void *);
-typedef void  (*ObjPoolCBFree)(void **);
-
-void     objpool_free(ObjPool **op);
-ObjPool *objpool_alloc(ObjPoolCBAlloc cb_alloc, ObjPoolCBReset cb_reset,
-                       ObjPoolCBFree cb_free);
-ObjPool *objpool_alloc_packets(void);
-ObjPool *objpool_alloc_frames(void);
-
-int  objpool_get(ObjPool *op, void **obj);
-void objpool_release(ObjPool *op, void **obj);
-
-#endif // FFTOOLS_OBJPOOL_H
+#endif

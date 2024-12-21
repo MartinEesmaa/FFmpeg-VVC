@@ -2892,6 +2892,7 @@ h264parse_select="golomb"
 h264_sei_select="atsc_a53 golomb"
 hevcparse_select="golomb"
 hevc_sei_select="atsc_a53 golomb"
+iso_writer_select="golomb"
 frame_thread_encoder_deps="encoders threads"
 iamfdec_deps="iamf"
 iamfdec_select="iso_media mpeg4audio"
@@ -7455,7 +7456,7 @@ fi
 
 enabled amf &&
     check_cpp_condition amf "AMF/core/Version.h" \
-        "(AMF_VERSION_MAJOR << 48 | AMF_VERSION_MINOR << 32 | AMF_VERSION_RELEASE << 16 | AMF_VERSION_BUILD_NUM) >= 0x0001000400210000"
+        "(AMF_VERSION_MAJOR << 48 | AMF_VERSION_MINOR << 32 | AMF_VERSION_RELEASE << 16 | AMF_VERSION_BUILD_NUM) >= 0x0001000400230000"
 
 # Funny iconv installations are not unusual, so check it after all flags have been set
 if enabled libc_iconv; then
