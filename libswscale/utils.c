@@ -41,10 +41,13 @@
 #include "libavutil/attributes.h"
 #include "libavutil/avassert.h"
 #include "libavutil/cpu.h"
+#include "libavutil/csp.h"
 #include "libavutil/emms.h"
+#include "libavutil/hdr_dynamic_metadata.h"
 #include "libavutil/imgutils.h"
 #include "libavutil/intreadwrite.h"
 #include "libavutil/libm.h"
+#include "libavutil/mastering_display_metadata.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
@@ -2653,16 +2656,21 @@ int ff_range_add(RangeList *rl, unsigned int start, unsigned int len)
 SwsFormat ff_fmt_from_frame(const AVFrame *frame, int field)
 {
     const AVPixFmtDescriptor *desc = av_pix_fmt_desc_get(frame->format);
+    const AVColorPrimariesDesc *primaries;
+    AVFrameSideData *sd;
+
     SwsFormat fmt = {
         .width  = frame->width,
         .height = frame->height,
         .format = frame->format,
         .range  = frame->color_range,
-        .prim   = frame->color_primaries,
-        .trc    = frame->color_trc,
         .csp    = frame->colorspace,
         .loc    = frame->chroma_location,
         .desc   = desc,
+        .color = {
+            .prim = frame->color_primaries,
+            .trc  = frame->color_trc,
+        },
     };
 
     av_assert1(fmt.width > 0);
@@ -2675,12 +2683,14 @@ SwsFormat ff_fmt_from_frame(const AVFrame *frame, int field)
         fmt.range = AVCOL_RANGE_JPEG;
     } else if (desc->flags & AV_PIX_FMT_FLAG_XYZ) {
         fmt.csp   = AVCOL_SPC_UNSPECIFIED;
-        fmt.prim  = AVCOL_PRI_SMPTE428;
-        fmt.trc   = AVCOL_TRC_SMPTE428;
+        fmt.color = (SwsColor) {
+            .prim = AVCOL_PRI_BT709, /* swscale currently hard-codes this XYZ matrix */
+            .trc  = AVCOL_TRC_SMPTE428,
+        };
     } else if (desc->nb_components < 3) {
         /* Grayscale formats */
-        fmt.prim  = AVCOL_PRI_UNSPECIFIED;
-        fmt.csp   = AVCOL_SPC_UNSPECIFIED;
+        fmt.color.prim = AVCOL_PRI_UNSPECIFIED;
+        fmt.csp        = AVCOL_SPC_UNSPECIFIED;
         if (desc->flags & AV_PIX_FMT_FLAG_FLOAT)
             fmt.range = AVCOL_RANGE_UNSPECIFIED;
         else
@@ -2705,7 +2715,160 @@ SwsFormat ff_fmt_from_frame(const AVFrame *frame, int field)
         fmt.interlaced = 1;
     }
 
+    /* Set luminance and gamut information */
+    fmt.color.min_luma = av_make_q(0, 1);
+    switch (fmt.color.trc) {
+    case AVCOL_TRC_SMPTE2084:
+        fmt.color.max_luma = av_make_q(10000, 1); break;
+    case AVCOL_TRC_ARIB_STD_B67:
+        fmt.color.max_luma = av_make_q( 1000, 1); break; /* HLG reference display */
+    default:
+        fmt.color.max_luma = av_make_q(  203, 1); break; /* SDR reference brightness */
+    }
+
+    primaries = av_csp_primaries_desc_from_id(fmt.color.prim);
+    if (primaries)
+        fmt.color.gamut = primaries->prim;
+
+    if ((sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA))) {
+        const AVMasteringDisplayMetadata *mdm = (const AVMasteringDisplayMetadata *) sd->data;
+        if (mdm->has_luminance) {
+            fmt.color.min_luma = mdm->min_luminance;
+            fmt.color.max_luma = mdm->max_luminance;
+        }
+
+        if (mdm->has_primaries) {
+            /* Ignore mastering display white point as it has no bearance on
+             * the underlying content */
+            fmt.color.gamut.r.x = mdm->display_primaries[0][0];
+            fmt.color.gamut.r.y = mdm->display_primaries[0][1];
+            fmt.color.gamut.g.x = mdm->display_primaries[1][0];
+            fmt.color.gamut.g.y = mdm->display_primaries[1][1];
+            fmt.color.gamut.b.x = mdm->display_primaries[2][0];
+            fmt.color.gamut.b.y = mdm->display_primaries[2][1];
+        }
+    }
+
+    if ((sd = av_frame_get_side_data(frame, AV_FRAME_DATA_DYNAMIC_HDR_PLUS))) {
+        const AVDynamicHDRPlus *dhp = (const AVDynamicHDRPlus *) sd->data;
+        const AVHDRPlusColorTransformParams *pars = &dhp->params[0];
+        const AVRational nits = av_make_q(10000, 1);
+        AVRational maxrgb = pars->maxscl[0];
+
+        if (!dhp->num_windows || dhp->application_version > 1)
+            goto skip_hdr10;
+
+        /* Maximum of MaxSCL components */
+        if (av_cmp_q(pars->maxscl[1], maxrgb) > 0)
+            maxrgb = pars->maxscl[1];
+        if (av_cmp_q(pars->maxscl[2], maxrgb) > 0)
+            maxrgb = pars->maxscl[2];
+
+        if (maxrgb.num > 0) {
+            /* Estimate true luminance from MaxSCL */
+            const AVLumaCoefficients *luma = av_csp_luma_coeffs_from_avcsp(fmt.csp);
+            if (!luma)
+                goto skip_hdr10;
+            fmt.color.frame_peak = av_add_q(av_mul_q(luma->cr, pars->maxscl[0]),
+                                   av_add_q(av_mul_q(luma->cg, pars->maxscl[1]),
+                                            av_mul_q(luma->cb, pars->maxscl[2])));
+            /* Scale the scene average brightness by the ratio between the
+             * maximum luminance and the MaxRGB values */
+            fmt.color.frame_avg = av_mul_q(pars->average_maxrgb,
+                                           av_div_q(fmt.color.frame_peak, maxrgb));
+        } else {
+            /**
+             * Calculate largest value from histogram to use as fallback for
+             * clips with missing MaxSCL information. Note that this may end
+             * up picking the "reserved" value at the 5% percentile, which in
+             * practice appears to track the brightest pixel in the scene.
+             */
+            for (int i = 0; i < pars->num_distribution_maxrgb_percentiles; i++) {
+                const AVRational pct = pars->distribution_maxrgb[i].percentile;
+                if (av_cmp_q(pct, maxrgb) > 0)
+                    maxrgb = pct;
+                fmt.color.frame_peak = maxrgb;
+                fmt.color.frame_avg  = pars->average_maxrgb;
+            }
+        }
+
+        /* Rescale to nits */
+        fmt.color.frame_peak = av_mul_q(nits, fmt.color.frame_peak);
+        fmt.color.frame_avg  = av_mul_q(nits, fmt.color.frame_avg);
+    }
+skip_hdr10:
+
+    /* PQ is always scaled down to absolute zero, so ignore mastering metadata */
+    if (fmt.color.trc == AVCOL_TRC_SMPTE2084)
+        fmt.color.min_luma = av_make_q(0, 1);
+
     return fmt;
+}
+
+static int infer_prim_ref(SwsColor *csp, const SwsColor *ref)
+{
+    if (csp->prim != AVCOL_PRI_UNSPECIFIED)
+        return 0;
+
+    /* Re-use the reference gamut only for "safe", similar primaries */
+    switch (ref->prim) {
+    case AVCOL_PRI_BT709:
+    case AVCOL_PRI_BT470M:
+    case AVCOL_PRI_BT470BG:
+    case AVCOL_PRI_SMPTE170M:
+    case AVCOL_PRI_SMPTE240M:
+        csp->prim  = ref->prim;
+        csp->gamut = ref->gamut;
+        break;
+    default:
+        csp->prim  = AVCOL_PRI_BT709;
+        csp->gamut = av_csp_primaries_desc_from_id(csp->prim)->prim;
+        break;
+    }
+
+    return 1;
+}
+
+static int infer_trc_ref(SwsColor *csp, const SwsColor *ref)
+{
+    if (csp->trc != AVCOL_TRC_UNSPECIFIED)
+        return 0;
+
+    /* Pick a suitable SDR transfer function, to try and minimize conversions */
+    switch (ref->trc) {
+    case AVCOL_TRC_UNSPECIFIED:
+    /* HDR curves, never default to these */
+    case AVCOL_TRC_SMPTE2084:
+    case AVCOL_TRC_ARIB_STD_B67:
+        csp->trc = AVCOL_TRC_BT709;
+        csp->min_luma = av_make_q(0, 1);
+        csp->max_luma = av_make_q(203, 1);
+        break;
+    default:
+        csp->trc = ref->trc;
+        csp->min_luma = ref->min_luma;
+        csp->max_luma = ref->max_luma;
+        break;
+    }
+
+    return 1;
+}
+
+int ff_infer_colors(SwsColor *src, SwsColor *dst)
+{
+    int incomplete = 0;
+
+    incomplete |= infer_prim_ref(dst, src);
+    incomplete |= infer_prim_ref(src, dst);
+    av_assert0(src->prim != AVCOL_PRI_UNSPECIFIED);
+    av_assert0(dst->prim != AVCOL_PRI_UNSPECIFIED);
+
+    incomplete |= infer_trc_ref(dst, src);
+    incomplete |= infer_trc_ref(src, dst);
+    av_assert0(src->trc != AVCOL_TRC_UNSPECIFIED);
+    av_assert0(dst->trc != AVCOL_TRC_UNSPECIFIED);
+
+    return incomplete;
 }
 
 int sws_test_format(enum AVPixelFormat format, int output)
@@ -2738,8 +2901,9 @@ int sws_test_primaries(enum AVColorPrimaries prim, int output)
 
 int sws_test_transfer(enum AVColorTransferCharacteristic trc, int output)
 {
-    return trc > AVCOL_TRC_RESERVED0 && trc < AVCOL_TRC_NB &&
-           trc != AVCOL_TRC_RESERVED;
+    av_csp_eotf_function eotf = output ? av_csp_itu_eotf_inv(trc)
+                                       : av_csp_itu_eotf(trc);
+    return trc == AVCOL_TRC_UNSPECIFIED || eotf != NULL;
 }
 
 static int test_range(enum AVColorRange range)
@@ -2754,12 +2918,12 @@ static int test_loc(enum AVChromaLocation loc)
 
 int ff_test_fmt(const SwsFormat *fmt, int output)
 {
-    return fmt->width > 0 && fmt->height > 0        &&
-           sws_test_format    (fmt->format, output) &&
-           sws_test_colorspace(fmt->csp,    output) &&
-           sws_test_primaries (fmt->prim,   output) &&
-           sws_test_transfer  (fmt->trc,    output) &&
-           test_range         (fmt->range)          &&
+    return fmt->width > 0 && fmt->height > 0            &&
+           sws_test_format    (fmt->format,     output) &&
+           sws_test_colorspace(fmt->csp,        output) &&
+           sws_test_primaries (fmt->color.prim, output) &&
+           sws_test_transfer  (fmt->color.trc,  output) &&
+           test_range         (fmt->range)              &&
            test_loc           (fmt->loc);
 }
 

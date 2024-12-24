@@ -104,8 +104,8 @@ typedef struct VulkanDevicePriv {
     void *libvulkan;
 
     FFVulkanContext    vkctx;
-    FFVkQueueFamilyCtx compute_qf;
-    FFVkQueueFamilyCtx transfer_qf;
+    AVVulkanDeviceQueueFamily *compute_qf;
+    AVVulkanDeviceQueueFamily *transfer_qf;
 
     /* Properties */
     VkPhysicalDeviceProperties2 props;
@@ -533,11 +533,19 @@ static int vkfmt_from_pixfmt2(AVHWDeviceContext *dev_ctx, enum AVPixelFormat p,
     return AVERROR(EINVAL);
 }
 
+#if CONFIG_VULKAN_STATIC
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance,
+                                                               const char *pName);
+#endif
+
 static int load_libvulkan(AVHWDeviceContext *ctx)
 {
     VulkanDevicePriv *p = ctx->hwctx;
     AVVulkanDeviceContext *hwctx = &p->p;
 
+#if CONFIG_VULKAN_STATIC
+    hwctx->get_proc_addr = vkGetInstanceProcAddr;
+#else
     static const char *lib_names[] = {
 #if defined(_WIN32)
         "vulkan-1.dll",
@@ -563,6 +571,7 @@ static int load_libvulkan(AVHWDeviceContext *ctx)
     }
 
     hwctx->get_proc_addr = (PFN_vkGetInstanceProcAddr)dlsym(p->libvulkan, "vkGetInstanceProcAddr");
+#endif /* CONFIG_VULKAN_STATIC */
 
     return 0;
 }
@@ -573,7 +582,9 @@ typedef struct VulkanOptExtension {
 } VulkanOptExtension;
 
 static const VulkanOptExtension optional_instance_exts[] = {
+#ifdef __APPLE__
     { VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,          FF_VK_EXT_NO_FLAG                },
+#endif
 };
 
 static const VulkanOptExtension optional_device_exts[] = {
@@ -624,6 +635,7 @@ static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEX
     case 0xfd92477a: /* BestPractices-vkAllocateMemory-small-allocation */
     case 0x618ab1e7: /* VUID-VkImageViewCreateInfo-usage-02275 */
     case 0x30f4ac70: /* VUID-VkImageCreateInfo-pNext-06811 */
+    case 0xa05b236e: /* UNASSIGNED-Threading-MultipleThreads-Write */
         return VK_FALSE;
     default:
         break;
@@ -1901,8 +1913,8 @@ FF_ENABLE_DEPRECATION_WARNINGS
     p->vkctx.hwctx = hwctx;
 
     ff_vk_load_props(&p->vkctx);
-    ff_vk_qf_init(&p->vkctx, &p->compute_qf, VK_QUEUE_COMPUTE_BIT);
-    ff_vk_qf_init(&p->vkctx, &p->transfer_qf, VK_QUEUE_TRANSFER_BIT);
+    p->compute_qf = ff_vk_qf_find(&p->vkctx, VK_QUEUE_COMPUTE_BIT, 0);
+    p->transfer_qf = ff_vk_qf_find(&p->vkctx, VK_QUEUE_TRANSFER_BIT, 0);
 
 end:
     av_free(qf_vid);
@@ -2786,18 +2798,18 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     if (!hwctx->unlock_frame)
         hwctx->unlock_frame = unlock_frame;
 
-    err = ff_vk_exec_pool_init(&p->vkctx, &p->compute_qf, &fp->compute_exec,
-                               p->compute_qf.nb_queues, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(&p->vkctx, p->compute_qf, &fp->compute_exec,
+                               p->compute_qf->num, 0, 0, 0, NULL);
     if (err)
         return err;
 
-    err = ff_vk_exec_pool_init(&p->vkctx, &p->transfer_qf, &fp->upload_exec,
-                               p->transfer_qf.nb_queues*2, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(&p->vkctx, p->transfer_qf, &fp->upload_exec,
+                               p->transfer_qf->num*2, 0, 0, 0, NULL);
     if (err)
         return err;
 
-    err = ff_vk_exec_pool_init(&p->vkctx, &p->transfer_qf, &fp->download_exec,
-                               p->transfer_qf.nb_queues, 0, 0, 0, NULL);
+    err = ff_vk_exec_pool_init(&p->vkctx, p->transfer_qf, &fp->download_exec,
+                               p->transfer_qf->num, 0, 0, 0, NULL);
     if (err)
         return err;
 

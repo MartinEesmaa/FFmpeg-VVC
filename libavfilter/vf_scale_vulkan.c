@@ -39,7 +39,7 @@ typedef struct ScaleVulkanContext {
 
     int initialized;
     FFVkExecPool e;
-    FFVkQueueFamilyCtx qf;
+    AVVulkanDeviceQueueFamily *qf;
     FFVulkanShader shd;
     VkSampler sampler;
 
@@ -142,8 +142,14 @@ static av_cold int init_filter(AVFilterContext *ctx, AVFrame *in)
         return AVERROR_EXTERNAL;
     }
 
-    ff_vk_qf_init(vkctx, &s->qf, VK_QUEUE_COMPUTE_BIT);
-    RET(ff_vk_exec_pool_init(vkctx, &s->qf, &s->e, s->qf.nb_queues*4, 0, 0, 0, NULL));
+    s->qf = ff_vk_qf_find(vkctx, VK_QUEUE_COMPUTE_BIT, 0);
+    if (!s->qf) {
+        av_log(ctx, AV_LOG_ERROR, "Device has no compute queues\n");
+        err = AVERROR(ENOTSUP);
+        goto fail;
+    }
+
+    RET(ff_vk_exec_pool_init(vkctx, s->qf, &s->e, s->qf->num*4, 0, 0, 0, NULL));
     RET(ff_vk_init_sampler(vkctx, &s->sampler, 0, sampler_mode));
     RET(ff_vk_shader_init(vkctx, &s->shd, "scale",
                           VK_SHADER_STAGE_COMPUTE_BIT,
@@ -286,6 +292,11 @@ static int scale_vulkan_filter_frame(AVFilterLink *link, AVFrame *in)
     err = av_frame_copy_props(out, in);
     if (err < 0)
         goto fail;
+
+    if (out->width != in->width || out->height != in->height) {
+        av_frame_side_data_remove_by_props(&out->side_data, &out->nb_side_data,
+                                           AV_SIDE_DATA_PROP_SIZE_DEPENDENT);
+    }
 
     if (s->out_range != AVCOL_RANGE_UNSPECIFIED)
         out->color_range = s->out_range;
