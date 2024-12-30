@@ -936,7 +936,7 @@ static void fill_rgb2yuv_table(SwsInternal *c, const int table[4], int dstRange)
         AV_WL16(p + 16*4 + 2*i, map[i] >= 0 ? c->input_rgb2yuv_table[map[i]] : 0);
 }
 
-static void fill_xyztables(SwsInternal *c)
+static int fill_xyztables(SwsInternal *c)
 {
     int i;
     double xyzgamma = XYZ_GAMMA;
@@ -951,25 +951,44 @@ static void fill_xyztables(SwsInternal *c)
         {1689, 1464,  739},
         { 871, 2929,  296},
         {  79,  488, 3891} };
-    static int16_t xyzgamma_tab[4096], rgbgamma_tab[4096], xyzgammainv_tab[4096], rgbgammainv_tab[4096];
+#if !CONFIG_SMALL
+    static uint16_t xyzgamma_tab[4096],  rgbgammainv_tab[4096];
+    static uint16_t rgbgamma_tab[65536], xyzgammainv_tab[65536];
+#endif
+    if (c->xyzgamma)
+        return 0;
 
     memcpy(c->xyz2rgb_matrix, xyz2rgb_matrix, sizeof(c->xyz2rgb_matrix));
     memcpy(c->rgb2xyz_matrix, rgb2xyz_matrix, sizeof(c->rgb2xyz_matrix));
+
+#if CONFIG_SMALL
+    c->xyzgamma = av_malloc(sizeof(uint16_t) * 2 * (4096 + 65536));
+    if (!c->xyzgamma)
+        return AVERROR(ENOMEM);
+    c->rgbgammainv = c->xyzgamma + 4096;
+    c->rgbgamma = c->rgbgammainv + 4096;
+    c->xyzgammainv = c->rgbgamma + 65536;
+#else
     c->xyzgamma = xyzgamma_tab;
     c->rgbgamma = rgbgamma_tab;
     c->xyzgammainv = xyzgammainv_tab;
     c->rgbgammainv = rgbgammainv_tab;
+    if (xyzgamma_tab[4095])
+        return 0;
+#endif
 
-    if (rgbgamma_tab[4095])
-        return;
-
-    /* set gamma vectors */
+    /* set input gamma vectors */
     for (i = 0; i < 4096; i++) {
-        xyzgamma_tab[i] = lrint(pow(i / 4095.0, xyzgamma) * 4095.0);
-        rgbgamma_tab[i] = lrint(pow(i / 4095.0, rgbgamma) * 4095.0);
-        xyzgammainv_tab[i] = lrint(pow(i / 4095.0, xyzgammainv) * 4095.0);
-        rgbgammainv_tab[i] = lrint(pow(i / 4095.0, rgbgammainv) * 4095.0);
+        c->xyzgamma[i]    = lrint(pow(i / 4095.0, xyzgamma) * 65535.0);
+        c->rgbgammainv[i] = lrint(pow(i / 4095.0, rgbgammainv) * 65535.0);
     }
+
+    /* set output gamma vectors */
+    for (i = 0; i < 65536; i++) {
+        c->rgbgamma[i]    = lrint(pow(i / 65535.0, rgbgamma) * 4095.0);
+        c->xyzgammainv[i] = lrint(pow(i / 65535.0, xyzgammainv) * 4095.0);
+    }
+    return 0;
 }
 
 static int handle_jpeg(enum AVPixelFormat *format)
@@ -1030,7 +1049,7 @@ static int handle_xyz(enum AVPixelFormat *format)
     }
 }
 
-static void handle_formats(SwsContext *sws)
+static int handle_formats(SwsContext *sws)
 {
     SwsInternal *c = sws_internal(sws);
     c->src0Alpha |= handle_0alpha(&sws->src_format);
@@ -1038,7 +1057,9 @@ static void handle_formats(SwsContext *sws)
     c->srcXYZ    |= handle_xyz(&sws->src_format);
     c->dstXYZ    |= handle_xyz(&sws->dst_format);
     if (c->srcXYZ || c->dstXYZ)
-        fill_xyztables(c);
+        return fill_xyztables(c);
+    else
+        return 0;
 }
 
 static int range_override_needed(enum AVPixelFormat format)
@@ -1053,7 +1074,7 @@ int sws_setColorspaceDetails(SwsContext *sws, const int inv_table[4],
     SwsInternal *c = sws_internal(sws);
     const AVPixFmtDescriptor *desc_dst;
     const AVPixFmtDescriptor *desc_src;
-    int need_reinit = 0;
+    int ret, need_reinit = 0;
 
     if (c->nb_slice_ctx) {
         int parent_ret = 0;
@@ -1068,7 +1089,9 @@ int sws_setColorspaceDetails(SwsContext *sws, const int inv_table[4],
         return parent_ret;
     }
 
-    handle_formats(sws);
+    ret = handle_formats(sws);
+    if (ret < 0)
+        return ret;
     desc_dst = av_pix_fmt_desc_get(sws->dst_format);
     desc_src = av_pix_fmt_desc_get(sws->src_format);
 
@@ -1348,7 +1371,9 @@ av_cold int ff_sws_init_single_context(SwsContext *sws, SwsFilter *srcFilter,
                                  ff_yuv2rgb_coeffs[SWS_CS_DEFAULT],
                                  sws->dst_range, 0, 1 << 16, 1 << 16);
 
-    handle_formats(sws);
+    ret = handle_formats(sws);
+    if (ret < 0)
+        return ret;
     srcFormat = sws->src_format;
     dstFormat = sws->dst_format;
     desc_src = av_pix_fmt_desc_get(srcFormat);
@@ -2517,6 +2542,9 @@ void sws_freeContext(SwsContext *sws)
 
     av_freep(&c->gamma);
     av_freep(&c->inv_gamma);
+#if CONFIG_SMALL
+    av_freep(&c->xyzgamma);
+#endif
 
     av_freep(&c->rgb0_scratch);
     av_freep(&c->xyz_scratch);
