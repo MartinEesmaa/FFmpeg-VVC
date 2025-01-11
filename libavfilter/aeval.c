@@ -114,9 +114,10 @@ static int parse_channel_expressions(AVFilterContext *ctx,
     if (!args1)
         return AVERROR(ENOMEM);
 
-    if (!eval->exprs) {
+    if (!eval->exprs || !*eval->exprs) {
         av_log(ctx, AV_LOG_ERROR, "Channels expressions list is empty\n");
-        return AVERROR(EINVAL);
+        ret = AVERROR(EINVAL);
+        goto end;
     }
 
     if (!strcmp(ctx->filter->name, "aeval")) {

@@ -267,6 +267,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_MOTIONPIXELS:maxpixels  /= 256;   break;
     case AV_CODEC_ID_MP4ALS:      maxsamples /= 65536; break;
     case AV_CODEC_ID_MSA1:        maxpixels  /= 16384; break;
+    case AV_CODEC_ID_MSCC:        maxpixels  /= 4096;  break;
     case AV_CODEC_ID_MSRLE:       maxpixels  /= 16;    break;
     case AV_CODEC_ID_MSS2:        maxpixels  /= 16384; break;
     case AV_CODEC_ID_MSZH:        maxpixels  /= 128;   break;
@@ -303,6 +304,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_SRGC:        maxpixels  /= 128;   break;
     case AV_CODEC_ID_TARGA:       maxpixels  /= 128;   break;
     case AV_CODEC_ID_TAK:         maxsamples /= 1024;  break;
+    case AV_CODEC_ID_TDSC:        maxpixels  /= 128;   break;
     case AV_CODEC_ID_TGV:         maxpixels  /= 32;    break;
     case AV_CODEC_ID_THEORA:      maxpixels  /= 16384; break;
     case AV_CODEC_ID_TQI:         maxpixels  /= 1024;  break;
@@ -318,6 +320,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     case AV_CODEC_ID_VP3:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP4:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP5:         maxpixels  /= 256;   break;
+    case AV_CODEC_ID_VP6:         maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP6F:        maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP6A:        maxpixels  /= 4096;  break;
     case AV_CODEC_ID_VP7:         maxpixels  /= 256;   break;

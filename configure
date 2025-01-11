@@ -1528,7 +1528,7 @@ test_pkg_config(){
     funcs="$4"
     shift 4
     disable $name
-    test_cmd $pkg_config --exists --print-errors $pkg_version || return
+    test_cmd $pkg_config --exists --print-errors "$pkg_version" || return
     pkg_cflags=$($pkg_config --cflags $pkg_config_flags $pkg)
     pkg_libs=$($pkg_config --libs $pkg_config_flags $pkg)
     pkg_incdir=$($pkg_config --variable=includedir $pkg_config_flags $pkg)
@@ -1548,7 +1548,7 @@ test_pkg_config_cpp(){
     cond="$4"
     shift 4
     disable $name
-    test_cmd $pkg_config --exists --print-errors $pkg_version || return
+    test_cmd $pkg_config --exists --print-errors "$pkg_version" || return
     pkg_cflags=$($pkg_config --cflags $pkg_config_flags $pkg)
     pkg_incdir=$($pkg_config --variable=includedir $pkg_config_flags $pkg)
     pkg_incflags=$($pkg_config --cflags-only-I $pkg_config_flags $pkg)
@@ -3573,6 +3573,8 @@ libgsm_ms_decoder_deps="libgsm"
 libgsm_ms_encoder_deps="libgsm"
 libilbc_decoder_deps="libilbc"
 libilbc_encoder_deps="libilbc"
+libjxl_anim_decoder_deps="libjxl libjxl_threads"
+libjxl_anim_encoder_deps="libjxl libjxl_threads"
 libjxl_decoder_deps="libjxl libjxl_threads"
 libjxl_encoder_deps="libjxl libjxl_threads"
 libkvazaar_encoder_deps="libkvazaar"
@@ -8258,7 +8260,7 @@ cat > $TMPH <<EOF
 #define FFMPEG_CONFIG_H
 #define FFMPEG_CONFIGURATION "$(c_escape $FFMPEG_CONFIGURATION)"
 #define FFMPEG_LICENSE "$(c_escape $license)"
-#define CONFIG_THIS_YEAR 2024
+#define CONFIG_THIS_YEAR 2025
 #define FFMPEG_DATADIR "$(eval c_escape $datadir)"
 #define AVCONV_DATADIR "$(eval c_escape $datadir)"
 #define CC_IDENT "$(c_escape ${cc_ident:-Unknown compiler})"
