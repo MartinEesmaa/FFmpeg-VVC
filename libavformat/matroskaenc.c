@@ -40,6 +40,7 @@
 #include "riff.h"
 #include "version.h"
 #include "vorbiscomment.h"
+#include "vvc.h"
 #include "wv.h"
 
 #include "libavutil/avstring.h"
@@ -3446,9 +3447,9 @@ static int mkv_init(struct AVFormatContext *s)
         case AV_CODEC_ID_H264:
         case AV_CODEC_ID_HEVC:
         case AV_CODEC_ID_VVC:
-            if ((par->codec_id == AV_CODEC_ID_H264 && par->extradata_size > 0 ||
-                 par->codec_id == AV_CODEC_ID_HEVC && par->extradata_size > 6 ||
-                 par->codec_id == AV_CODEC_ID_VVC && par->extradata_size > 0) &&
+            if (((par->codec_id == AV_CODEC_ID_H264 && par->extradata_size > 0) ||
+                 (par->codec_id == AV_CODEC_ID_HEVC && par->extradata_size > 6) ||
+                 (par->codec_id == AV_CODEC_ID_VVC  && par->extradata_size >= 6)) &&
                 (AV_RB24(par->extradata) == 1 || AV_RB32(par->extradata) == 1))
                 track->reformat = mkv_reformat_h2645;
             break;

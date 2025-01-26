@@ -61,6 +61,8 @@ typedef struct BufferSourceContext {
     enum AVSampleFormat sample_fmt;
     int channels;
     AVChannelLayout ch_layout;
+    AVFrameSideData **side_data;
+    int nb_side_data;
 
     int eof;
     int64_t last_pts;
@@ -158,6 +160,17 @@ int av_buffersrc_parameters_set(AVFilterContext *ctx, AVBufferSrcParameters *par
         break;
     default:
         return AVERROR_BUG;
+    }
+
+    if (param->nb_side_data > 0)
+        av_frame_side_data_free(&s->side_data, &s->nb_side_data);
+    for (int i = 0; i < param->nb_side_data; i++) {
+        int ret = av_frame_side_data_clone(&s->side_data, &s->nb_side_data,
+                                           param->side_data[i], 0);
+        if (ret < 0) {
+            av_frame_side_data_free(&s->side_data, &s->nb_side_data);
+            return ret;
+        }
     }
 
     return 0;
@@ -432,6 +445,7 @@ static av_cold void uninit(AVFilterContext *ctx)
     BufferSourceContext *s = ctx->priv;
     av_buffer_unref(&s->hw_frames_ctx);
     av_channel_layout_uninit(&s->ch_layout);
+    av_frame_side_data_free(&s->side_data, &s->nb_side_data);
 }
 
 static int query_formats(const AVFilterContext *ctx,
@@ -523,6 +537,18 @@ static int config_props(AVFilterLink *link)
         return AVERROR(EINVAL);
     }
 
+    for (int i = 0; i < c->nb_side_data; i++) {
+        const AVSideDataDescriptor *desc = av_frame_side_data_desc(c->side_data[i]->type);
+        int ret;
+
+        ret = av_frame_side_data_clone(&link->side_data, &link->nb_side_data,
+                                       c->side_data[i], 0);
+        if (ret < 0) {
+            av_frame_side_data_free(&link->side_data, &link->nb_side_data);
+            return ret;
+        }
+    }
+
     link->time_base = c->time_base;
     l->frame_rate = c->frame_rate;
     return 0;
@@ -554,18 +580,17 @@ static const AVFilterPad avfilter_vsrc_buffer_outputs[] = {
     },
 };
 
-const AVFilter ff_vsrc_buffer = {
-    .name      = "buffer",
-    .description = NULL_IF_CONFIG_SMALL("Buffer video frames, and make them accessible to the filterchain."),
+const FFFilter ff_vsrc_buffer = {
+    .p.name        = "buffer",
+    .p.description = NULL_IF_CONFIG_SMALL("Buffer video frames, and make them accessible to the filterchain."),
+    .p.priv_class  = &buffer_class,
     .priv_size = sizeof(BufferSourceContext),
     .activate  = activate,
     .init      = init_video,
     .uninit    = uninit,
 
-    .inputs    = NULL,
     FILTER_OUTPUTS(avfilter_vsrc_buffer_outputs),
     FILTER_QUERY_FUNC2(query_formats),
-    .priv_class = &buffer_class,
 };
 
 static const AVFilterPad avfilter_asrc_abuffer_outputs[] = {
@@ -576,16 +601,15 @@ static const AVFilterPad avfilter_asrc_abuffer_outputs[] = {
     },
 };
 
-const AVFilter ff_asrc_abuffer = {
-    .name          = "abuffer",
-    .description   = NULL_IF_CONFIG_SMALL("Buffer audio frames, and make them accessible to the filterchain."),
+const FFFilter ff_asrc_abuffer = {
+    .p.name        = "abuffer",
+    .p.description = NULL_IF_CONFIG_SMALL("Buffer audio frames, and make them accessible to the filterchain."),
+    .p.priv_class  = &abuffer_class,
     .priv_size     = sizeof(BufferSourceContext),
     .activate  = activate,
     .init      = init_audio,
     .uninit    = uninit,
 
-    .inputs    = NULL,
     FILTER_OUTPUTS(avfilter_asrc_abuffer_outputs),
     FILTER_QUERY_FUNC2(query_formats),
-    .priv_class = &abuffer_class,
 };

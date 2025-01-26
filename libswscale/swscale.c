@@ -1403,7 +1403,7 @@ int sws_scale_frame(SwsContext *sws, AVFrame *dst, const AVFrame *src)
             int dst_linesize[4], src_linesize[4];
             get_frame_pointers(dst, dst_data, dst_linesize, field);
             get_frame_pointers(src, src_data, src_linesize, field);
-            sws_graph_run(graph, dst_data, dst_linesize,
+            ff_sws_graph_run(graph, dst_data, dst_linesize,
                           (const uint8_t **) src_data, src_linesize);
             if (!graph->dst.interlaced)
                 break;
@@ -1442,6 +1442,7 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
     for (int field = 0; field < 2; field++) {
         SwsFormat src_fmt = ff_fmt_from_frame(src, field);
         SwsFormat dst_fmt = ff_fmt_from_frame(dst, field);
+        int src_ok, dst_ok;
 
         if ((src->flags ^ dst->flags) & AV_FRAME_FLAG_INTERLACED) {
             err_msg = "Cannot convert interlaced to progressive frames or vice versa.\n";
@@ -1449,19 +1450,15 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
             goto fail;
         }
 
-        if (!ff_test_fmt(&src_fmt, 0)) {
-            err_msg = "Unsupported input";
+        src_ok = ff_test_fmt(&src_fmt, 0);
+        dst_ok = ff_test_fmt(&dst_fmt, 1);
+        if ((!src_ok || !dst_ok) && !ff_props_equal(&src_fmt, &dst_fmt)) {
+            err_msg = src_ok ? "Unsupported output" : "Unsupported input";
             ret = AVERROR(ENOTSUP);
             goto fail;
         }
 
-        if (!ff_test_fmt(&dst_fmt, 1)) {
-            err_msg = "Unsupported output";
-            ret = AVERROR(ENOTSUP);
-            goto fail;
-        }
-
-        ret = sws_graph_reinit(ctx, &dst_fmt, &src_fmt, field, &s->graph[field]);
+        ret = ff_sws_graph_reinit(ctx, &dst_fmt, &src_fmt, field, &s->graph[field]);
         if (ret < 0) {
             err_msg = "Failed initializing scaling graph";
             goto fail;
@@ -1474,7 +1471,7 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
         }
 
         if (!src_fmt.interlaced) {
-            sws_graph_free(&s->graph[FIELD_BOTTOM]);
+            ff_sws_graph_free(&s->graph[FIELD_BOTTOM]);
             break;
         }
 
@@ -1490,7 +1487,7 @@ int sws_frame_setup(SwsContext *ctx, const AVFrame *dst, const AVFrame *src)
                av_color_primaries_name(dst_fmt.color.prim), av_color_transfer_name(dst_fmt.color.trc));
 
         for (int i = 0; i < FF_ARRAY_ELEMS(s->graph); i++)
-            sws_graph_free(&s->graph[i]);
+            ff_sws_graph_free(&s->graph[i]);
 
         return ret;
     }

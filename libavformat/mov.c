@@ -5081,6 +5081,24 @@ static int mov_update_iamf_streams(MOVContext *c, const AVStream *st)
 }
 #endif
 
+static int sanity_checks(void *log_obj, MOVStreamContext *sc, int index)
+{
+    if ((sc->chunk_count && (!sc->stts_count || !sc->stsc_count ||
+                            (!sc->sample_size && !sc->sample_count))) ||
+        (!sc->chunk_count && sc->sample_count)) {
+        av_log(log_obj, AV_LOG_ERROR, "stream %d, missing mandatory atoms, broken header\n",
+               index);
+        return 1;
+    }
+
+    if (sc->stsc_count && sc->stsc_data[ sc->stsc_count - 1 ].first > sc->chunk_count) {
+        av_log(log_obj, AV_LOG_ERROR, "stream %d, contradictionary STSC and STCO\n",
+               index);
+        return 2;
+    }
+    return 0;
+}
+
 static int mov_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
 {
     AVStream *st;
@@ -5113,19 +5131,9 @@ static int mov_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         av_freep(&sc->stsc_data);
     }
 
-    /* sanity checks */
-    if ((sc->chunk_count && (!sc->stts_count || !sc->stsc_count ||
-                            (!sc->sample_size && !sc->sample_count))) ||
-        (!sc->chunk_count && sc->sample_count)) {
-        av_log(c->fc, AV_LOG_ERROR, "stream %d, missing mandatory atoms, broken header\n",
-               st->index);
-        return 0;
-    }
-    if (sc->stsc_count && sc->stsc_data[ sc->stsc_count - 1 ].first > sc->chunk_count) {
-        av_log(c->fc, AV_LOG_ERROR, "stream %d, contradictionary STSC and STCO\n",
-               st->index);
-        return AVERROR_INVALIDDATA;
-    }
+    ret = sanity_checks(c->fc, sc, st->index);
+    if (ret)
+        return ret > 1 ? AVERROR_INVALIDDATA : 0;
 
     fix_timescale(c, sc);
 
@@ -5191,7 +5199,7 @@ static int mov_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         }
 
 #if FF_API_R_FRAME_RATE
-        for (int i = 1; sc->stts_count && i < sc->tts_count - 1; i++) {
+        for (unsigned int i = 1; sc->stts_count && i + 1 < sc->tts_count; i++) {
             if (sc->tts_data[i].duration == sc->tts_data[0].duration)
                 continue;
             stts_constant = 0;
@@ -10324,7 +10332,8 @@ static int mov_parse_heif_items(AVFormatContext *s)
         st->codecpar->width  = item->width;
         st->codecpar->height = item->height;
 
-        if (sc->sample_count != 1 || sc->chunk_count != 1)
+        err = sanity_checks(s, sc, item->item_id);
+        if (err)
             return AVERROR_INVALIDDATA;
 
         sc->sample_sizes[0]  = item->extent_length;
