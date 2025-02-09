@@ -627,6 +627,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #if CONFIG_HEVC_VULKAN_HWACCEL
         *fmt++ = AV_PIX_FMT_VULKAN;
 #endif
+#if CONFIG_HEVC_NVDEC_HWACCEL
+        *fmt++ = AV_PIX_FMT_CUDA;
+#endif
         break;
     case AV_PIX_FMT_YUV444P10:
 #if CONFIG_HEVC_VIDEOTOOLBOX_HWACCEL
@@ -654,6 +657,9 @@ static enum AVPixelFormat get_format(HEVCContext *s, const HEVCSPS *sps)
 #endif
 #if CONFIG_HEVC_VULKAN_HWACCEL
         *fmt++ = AV_PIX_FMT_VULKAN;
+#endif
+#if CONFIG_HEVC_NVDEC_HWACCEL
+        *fmt++ = AV_PIX_FMT_CUDA;
 #endif
         break;
     }
@@ -2040,9 +2046,10 @@ static void hls_prediction_unit(HEVCLocalContext *lc,
                                 int x0, int y0, int nPbW, int nPbH,
                                 int log2_cb_size, int partIdx, int idx)
 {
-#define POS(c_idx, x, y)                                                              \
+#define POS(c_idx, x, y)                                                          \
+    &s->cur_frame->f->data[c_idx] ?                                               \
     &s->cur_frame->f->data[c_idx][((y) >> sps->vshift[c_idx]) * linesize[c_idx] + \
-                           (((x) >> sps->hshift[c_idx]) << sps->pixel_shift)]
+                           (((x) >> sps->hshift[c_idx]) << sps->pixel_shift)] : NULL
     const HEVCContext *const s = lc->parent;
     int merge_idx = 0;
     struct MvField current_mv = {{{ 0 }}};

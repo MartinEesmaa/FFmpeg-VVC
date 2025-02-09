@@ -3541,7 +3541,7 @@ static int mov_read_stts(MOVContext *c, AVIOContext *pb, MOVAtom atom)
         current_dts += sc->stts_data[i].duration * (uint64_t)sample_count;
 
         if (current_dts > corrected_dts) {
-            int64_t drift = (current_dts - corrected_dts)/FFMAX(sample_count, 1);
+            int64_t drift = av_sat_sub64(current_dts, corrected_dts) / FFMAX(sample_count, 1);
             uint32_t correction = (sc->stts_data[i].duration > drift) ? drift : sc->stts_data[i].duration - 1;
             current_dts -= correction * (uint64_t)sample_count;
             sc->stts_data[i].duration -= correction;
@@ -5186,7 +5186,7 @@ static int mov_read_trak(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     }
 
     if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-        int stts_constant = !!sc->stts_count;
+        int stts_constant = sc->stts_count && sc->tts_count;
         if (sc->h_spacing && sc->v_spacing)
             av_reduce(&st->sample_aspect_ratio.num, &st->sample_aspect_ratio.den,
                       sc->h_spacing, sc->v_spacing, INT_MAX);
@@ -8868,12 +8868,12 @@ static int mov_read_iinf(MOVContext *c, AVIOContext *pb, MOVAtom atom)
     for (i = 0; i < entry_count; i++) {
         MOVAtom infe;
 
+        infe.size = avio_rb32(pb) - 8;
+        infe.type = avio_rl32(pb);
         if (avio_feof(pb)) {
             ret = AVERROR_INVALIDDATA;
             goto fail;
         }
-        infe.size = avio_rb32(pb) - 8;
-        infe.type = avio_rl32(pb);
         ret = mov_read_infe(c, pb, infe, i);
         if (ret < 0)
             goto fail;
@@ -10426,6 +10426,30 @@ static int mov_parse_lcevc_streams(AVFormatContext *s)
     return 0;
 }
 
+static void fix_stream_ids(AVFormatContext *s)
+{
+    int highest_id = 0;
+
+    for (int i = 0; i < s->nb_streams; i++) {
+        const AVStream *st = s->streams[i];
+        const MOVStreamContext *sc = st->priv_data;
+        if (!sc->iamf)
+            highest_id = FFMAX(highest_id, st->id);
+    }
+    highest_id += !highest_id;
+    for (int i = 0; highest_id > 1 && i < s->nb_stream_groups; i++) {
+        AVStreamGroup *stg = s->stream_groups[i];
+        if (stg->type != AV_STREAM_GROUP_PARAMS_IAMF_AUDIO_ELEMENT)
+            continue;
+        for (int j = 0; j < stg->nb_streams; j++) {
+            AVStream *st = stg->streams[j];
+            MOVStreamContext *sc = st->priv_data;
+            st->id += highest_id;
+            sc->iamf_stream_offset = highest_id;
+        }
+    }
+}
+
 static int mov_read_header(AVFormatContext *s)
 {
     MOVContext *mov = s->priv_data;
@@ -10649,6 +10673,9 @@ static int mov_read_header(AVFormatContext *s)
             break;
         }
     }
+
+    fix_stream_ids(s);
+
     ff_configure_buffers_for_index(s, AV_TIME_BASE);
 
     for (i = 0; i < mov->frag_index.nb_items; i++)
@@ -10933,7 +10960,7 @@ static int mov_read_packet(AVFormatContext *s, AVPacket *pkt)
             pos = pkt->pos; flags = pkt->flags;
             duration = pkt->duration;
             while (!ret && size > 0) {
-                ret = ff_iamf_read_packet(s, sc->iamf, sc->pb, size, pkt);
+                ret = ff_iamf_read_packet(s, sc->iamf, sc->pb, size, sc->iamf_stream_offset, pkt);
                 if (ret < 0) {
                     if (should_retry(sc->pb, ret))
                         mov_current_sample_dec(sc);
