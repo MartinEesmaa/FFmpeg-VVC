@@ -2502,6 +2502,7 @@ TYPES_LIST="
     kCVImageBufferColorPrimaries_ITU_R_2020
     kCVImageBufferTransferFunction_ITU_R_2020
     kCVImageBufferTransferFunction_SMPTE_ST_428_1
+    kVTQPModulationLevel_Default
     socklen_t
     struct_addrinfo
     struct_group_source_req
@@ -3940,6 +3941,7 @@ iccdetect_filter_deps="lcms2"
 iccgen_filter_deps="lcms2"
 identity_filter_select="scene_sad"
 interlace_filter_deps="gpl"
+interlace_vulkan_filter_deps="vulkan spirv_compiler"
 kerndeint_filter_deps="gpl"
 ladspa_filter_deps="ladspa libdl"
 lcevc_filter_deps="liblcevc_dec"
@@ -6770,6 +6772,7 @@ enabled videotoolbox && {
     check_func_headers CoreVideo/CVImageBuffer.h kCVImageBufferColorPrimaries_ITU_R_2020 "-framework CoreVideo"
     check_func_headers CoreVideo/CVImageBuffer.h kCVImageBufferTransferFunction_ITU_R_2020 "-framework CoreVideo"
     check_func_headers CoreVideo/CVImageBuffer.h kCVImageBufferTransferFunction_SMPTE_ST_428_1 "-framework CoreVideo"
+    check_func_headers VideoToolbox/VTCompressionProperties.h kVTQPModulationLevel_Default "-framework CoreVideo"
 }
 
 enabled metal && test_cmd $metalcc -v || disable metal

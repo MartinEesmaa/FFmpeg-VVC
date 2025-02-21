@@ -189,7 +189,7 @@ int ff_vk_load_props(FFVulkanContext *s)
         };
         s->qf_props[i] = (VkQueueFamilyProperties2) {
             .sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2,
-            .pNext = &s->video_props[i],
+            .pNext = s->extensions & FF_VK_EXT_VIDEO_QUEUE ? &s->video_props[i] : NULL,
         };
     }
 
@@ -2190,9 +2190,9 @@ print:
 
         if (prop->buf_content) {
             GLSLA(" {\n    ");
-            if (desc[i].elems) {
+            if (desc[i].buf_elems) {
                 GLSLA("%s", desc[i].buf_content);
-                GLSLA("[%i];", desc[i].elems);
+                GLSLA("[%i];", desc[i].buf_elems);
             } else {
                 GLSLA("%s", desc[i].buf_content);
             }
@@ -2595,10 +2595,12 @@ void ff_vk_shader_free(FFVulkanContext *s, FFVulkanShader *shd)
         av_free(set->binding_offset);
     }
 
-    for (int i = 0; i < shd->nb_descriptor_sets; i++)
-        if (shd->desc_layout[i])
-            vk->DestroyDescriptorSetLayout(s->hwctx->act_dev, shd->desc_layout[i],
-                                           s->hwctx->alloc);
+    if (shd->desc_layout) {
+        for (int i = 0; i < shd->nb_descriptor_sets; i++)
+            if (shd->desc_layout[i])
+                vk->DestroyDescriptorSetLayout(s->hwctx->act_dev, shd->desc_layout[i],
+                                               s->hwctx->alloc);
+    }
 
     av_freep(&shd->desc_pool_size);
     av_freep(&shd->desc_layout);
