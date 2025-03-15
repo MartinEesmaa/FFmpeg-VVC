@@ -476,6 +476,15 @@ enum AVPixelFormat {
      */
     AV_PIX_FMT_AMF_SURFACE,
 
+    AV_PIX_FMT_GRAY32BE,    ///<         Y        , 32bpp, big-endian
+    AV_PIX_FMT_GRAY32LE,    ///<         Y        , 32bpp, little-endian
+
+    AV_PIX_FMT_YAF32BE,  ///< IEEE-754 single precision packed YA, 32 bits gray, 32 bits alpha, 64bpp, big-endian
+    AV_PIX_FMT_YAF32LE,  ///< IEEE-754 single precision packed YA, 32 bits gray, 32 bits alpha, 64bpp, little-endian
+
+    AV_PIX_FMT_YAF16BE,  ///< IEEE-754 half precision packed YA, 16 bits gray, 16 bits alpha, 32bpp, big-endian
+    AV_PIX_FMT_YAF16LE,  ///< IEEE-754 half precision packed YA, 16 bits gray, 16 bits alpha, 32bpp, little-endian
+
     AV_PIX_FMT_NB         ///< number of pixel formats, DO NOT USE THIS if you want to link with shared libav* because the number of formats might differ between versions
 };
 
@@ -497,6 +506,7 @@ enum AVPixelFormat {
 #define AV_PIX_FMT_GRAY12 AV_PIX_FMT_NE(GRAY12BE, GRAY12LE)
 #define AV_PIX_FMT_GRAY14 AV_PIX_FMT_NE(GRAY14BE, GRAY14LE)
 #define AV_PIX_FMT_GRAY16 AV_PIX_FMT_NE(GRAY16BE, GRAY16LE)
+#define AV_PIX_FMT_GRAY32 AV_PIX_FMT_NE(GRAY32BE, GRAY32LE)
 #define AV_PIX_FMT_YA16   AV_PIX_FMT_NE(YA16BE,   YA16LE)
 #define AV_PIX_FMT_RGB48  AV_PIX_FMT_NE(RGB48BE,  RGB48LE)
 #define AV_PIX_FMT_RGB565 AV_PIX_FMT_NE(RGB565BE, RGB565LE)
@@ -549,6 +559,9 @@ enum AVPixelFormat {
 
 #define AV_PIX_FMT_GRAYF16    AV_PIX_FMT_NE(GRAYF16BE, GRAYF16LE)
 #define AV_PIX_FMT_GRAYF32    AV_PIX_FMT_NE(GRAYF32BE, GRAYF32LE)
+
+#define AV_PIX_FMT_YAF16      AV_PIX_FMT_NE(YAF16BE, YAF16LE)
+#define AV_PIX_FMT_YAF32      AV_PIX_FMT_NE(YAF32BE, YAF32LE)
 
 #define AV_PIX_FMT_YUVA420P9  AV_PIX_FMT_NE(YUVA420P9BE , YUVA420P9LE)
 #define AV_PIX_FMT_YUVA422P9  AV_PIX_FMT_NE(YUVA422P9BE , YUVA422P9LE)

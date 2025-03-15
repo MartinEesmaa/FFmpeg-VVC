@@ -172,6 +172,7 @@ OBJS = adler32.o                                                        \
        rc4.o                                                            \
        ripemd.o                                                         \
        samplefmt.o                                                      \
+       side_data.o                                                      \
        sha.o                                                            \
        sha512.o                                                         \
        slicethread.o                                                    \
@@ -180,6 +181,7 @@ OBJS = adler32.o                                                        \
        threadmessage.o                                                  \
        time.o                                                           \
        timecode.o                                                       \
+       timecode_internal.o                                              \
        timestamp.o                                                      \
        tree.o                                                           \
        twofish.o                                                        \

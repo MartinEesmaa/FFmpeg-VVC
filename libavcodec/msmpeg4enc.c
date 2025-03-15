@@ -236,7 +236,7 @@ void ff_msmpeg4_encode_picture_header(MpegEncContext * s)
     s->per_mb_rl_table = 0;
     if (s->msmpeg4_version == MSMP4_WMV1)
         s->inter_intra_pred= (s->width*s->height < 320*240 && s->bit_rate<=II_BITRATE && s->pict_type==AV_PICTURE_TYPE_P);
-    ff_dlog(s, "%d %"PRId64" %d %d %d\n", s->pict_type, s->bit_rate,
+    ff_dlog(s->avctx, "%d %"PRId64" %d %d %d\n", s->pict_type, s->bit_rate,
             s->inter_intra_pred, s->width, s->height);
 
     if (s->pict_type == AV_PICTURE_TYPE_I) {
@@ -680,10 +680,10 @@ const FFCodec ff_msmpeg4v2_encoder = {
     CODEC_LONG_NAME("MPEG-4 part 2 Microsoft variant version 2"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MSMPEG4V2,
-    .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &ff_mpv_enc_class,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,
@@ -696,10 +696,10 @@ const FFCodec ff_msmpeg4v3_encoder = {
     CODEC_LONG_NAME("MPEG-4 part 2 Microsoft variant version 3"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_MSMPEG4V3,
-    .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &ff_mpv_enc_class,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,
@@ -712,10 +712,10 @@ const FFCodec ff_wmv1_encoder = {
     CODEC_LONG_NAME("Windows Media Video 7"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_WMV1,
-    .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &ff_mpv_enc_class,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MSMPEG4EncContext),
     .init           = ff_mpv_encode_init,

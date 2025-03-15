@@ -45,6 +45,20 @@
 #include "mpegvideoenc.h"
 #include "profiles.h"
 
+/**
+ * Buffer of JPEG frame data.
+ *
+ * Optimal Huffman table generation requires the frame data to be loaded into
+ * a buffer so that the tables can be computed.
+ * There are at most mb_width*mb_height*12*64 of these per frame.
+ */
+typedef struct MJpegHuffmanCode {
+    // 0=DC lum, 1=DC chrom, 2=AC lum, 3=AC chrom
+    uint8_t table_id; ///< The Huffman table id associated with the data.
+    uint8_t code;     ///< The exponent.
+    uint16_t mant;    ///< The mantissa.
+} MJpegHuffmanCode;
+
 /* The following is the private context of MJPEG/AMV decoder.
  * Note that when using slice threading only the main thread's
  * MpegEncContext is followed by a MjpegContext; the other threads
@@ -301,7 +315,7 @@ av_cold int ff_mjpeg_encode_init(MpegEncContext *s)
                  (s->avctx->active_thread_type & FF_THREAD_SLICE) &&
                  s->avctx->thread_count > 1;
 
-    if (s->codec_id == AV_CODEC_ID_AMV || use_slices)
+    if (use_slices)
         m->huffman = HUFFMAN_TABLE_DEFAULT;
 
     if (s->mpv_flags & FF_MPV_FLAG_QP_RD) {
@@ -318,7 +332,7 @@ av_cold int ff_mjpeg_encode_init(MpegEncContext *s)
         return ret;
 
     if (s->width > 65500 || s->height > 65500) {
-        av_log(s, AV_LOG_ERROR, "JPEG does not support resolutions above 65500x65500\n");
+        av_log(s->avctx, AV_LOG_ERROR, "JPEG does not support resolutions above 65500x65500\n");
         return AVERROR(EINVAL);
     }
 
@@ -376,7 +390,7 @@ static av_cold int mjpeg_encode_close(AVCodecContext *avctx)
  * @param table_id Which Huffman table the code belongs to.
  * @param code The encoded exponent of the coefficients and the run-bits.
  */
-static inline void ff_mjpeg_encode_code(MJpegContext *s, uint8_t table_id, int code)
+static inline void mjpeg_encode_code(MJpegContext *s, uint8_t table_id, int code)
 {
     MJpegHuffmanCode *c = &s->huff_buffer[s->huff_ncode++];
     c->table_id = table_id;
@@ -391,13 +405,13 @@ static inline void ff_mjpeg_encode_code(MJpegContext *s, uint8_t table_id, int c
  * @param val The coefficient.
  * @param run The run-bits.
  */
-static void ff_mjpeg_encode_coef(MJpegContext *s, uint8_t table_id, int val, int run)
+static void mjpeg_encode_coef(MJpegContext *s, uint8_t table_id, int val, int run)
 {
     int mant, code;
 
     if (val == 0) {
         av_assert0(run == 0);
-        ff_mjpeg_encode_code(s, table_id, 0);
+        mjpeg_encode_code(s, table_id, 0);
     } else {
         mant = val;
         if (val < 0) {
@@ -408,7 +422,7 @@ static void ff_mjpeg_encode_coef(MJpegContext *s, uint8_t table_id, int val, int
         code = (run << 4) | (av_log2_16bit(val) + 1);
 
         s->huff_buffer[s->huff_ncode].mant = mant;
-        ff_mjpeg_encode_code(s, table_id, code);
+        mjpeg_encode_code(s, table_id, code);
     }
 }
 
@@ -431,7 +445,7 @@ static void record_block(MpegEncContext *s, int16_t *block, int n)
     dc = block[0]; /* overflow is impossible */
     val = dc - s->last_dc[component];
 
-    ff_mjpeg_encode_coef(m, table_id, val, 0);
+    mjpeg_encode_coef(m, table_id, val, 0);
 
     s->last_dc[component] = dc;
 
@@ -449,26 +463,26 @@ static void record_block(MpegEncContext *s, int16_t *block, int n)
             run++;
         } else {
             while (run >= 16) {
-                ff_mjpeg_encode_code(m, table_id, 0xf0);
+                mjpeg_encode_code(m, table_id, 0xf0);
                 run -= 16;
             }
-            ff_mjpeg_encode_coef(m, table_id, val, run);
+            mjpeg_encode_coef(m, table_id, val, run);
             run = 0;
         }
     }
 
     /* output EOB only if not already 64 values */
     if (last_index < 63 || run != 0)
-        ff_mjpeg_encode_code(m, table_id, 0);
+        mjpeg_encode_code(m, table_id, 0);
 }
 
 static void encode_block(MpegEncContext *s, int16_t *block, int n)
 {
     int mant, nbits, code, i, j;
     int component, dc, run, last_index, val;
-    MJpegContext *m = s->mjpeg_ctx;
-    uint8_t *huff_size_ac;
-    uint16_t *huff_code_ac;
+    const MJpegContext *const m = s->mjpeg_ctx;
+    const uint16_t *huff_code_ac;
+    const uint8_t  *huff_size_ac;
 
     /* DC coef */
     component = (n <= 3 ? 0 : (n&1) + 1);
@@ -624,11 +638,12 @@ static int amv_encode_picture(AVCodecContext *avctx, AVPacket *pkt,
 #define OFFSET(x) offsetof(MJPEGEncContext, mjpeg.x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
-FF_MPV_COMMON_OPTS
+#define AMV_OPTIONS_OFFSET 4
 { "huffman", "Huffman table strategy", OFFSET(huffman), AV_OPT_TYPE_INT, { .i64 = HUFFMAN_TABLE_OPTIMAL }, 0, NB_HUFFMAN_TABLE_OPTION - 1, VE, .unit = "huffman" },
     { "default", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = HUFFMAN_TABLE_DEFAULT }, INT_MIN, INT_MAX, VE, .unit = "huffman" },
     { "optimal", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = HUFFMAN_TABLE_OPTIMAL }, INT_MIN, INT_MAX, VE, .unit = "huffman" },
 { "force_duplicated_matrix", "Always write luma and chroma matrix for mjpeg, useful for rtp streaming.", OFFSET(force_duplicated_matrix), AV_OPT_TYPE_BOOL, {.i64 = 0 }, 0, 1, VE },
+FF_MPV_COMMON_OPTS
 { NULL},
 };
 
@@ -660,7 +675,7 @@ static int mjpeg_get_supported_config(const AVCodecContext *avctx,
     return ff_default_get_supported_config(avctx, codec, config, flags, out, out_num);
 }
 
-FFCodec ff_mjpeg_encoder = {
+const FFCodec ff_mjpeg_encoder = {
     .p.name         = "mjpeg",
     CODEC_LONG_NAME("MJPEG (Motion JPEG)"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
@@ -669,14 +684,12 @@ FFCodec ff_mjpeg_encoder = {
     .init           = ff_mpv_encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = mjpeg_encode_close,
-    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS |
+    .p.capabilities = AV_CODEC_CAP_DR1 |
+                      AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_FRAME_THREADS |
                       AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP | FF_CODEC_CAP_ICC_PROFILES,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
-        AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P,
-        AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ444P,
+                  AV_PIX_FMT_YUV420P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV444P),
     .p.priv_class   = &mjpeg_class,
     .p.profiles     = NULL_IF_CONFIG_SMALL(ff_mjpeg_profiles),
     .get_supported_config = mjpeg_get_supported_config,
@@ -687,7 +700,7 @@ FFCodec ff_mjpeg_encoder = {
 static const AVClass amv_class = {
     .class_name = "amv encoder",
     .item_name  = av_default_item_name,
-    .option     = options,
+    .option     = options + AMV_OPTIONS_OFFSET,
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
@@ -696,16 +709,14 @@ const FFCodec ff_amv_encoder = {
     CODEC_LONG_NAME("AMV Video"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_AMV,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(MJPEGEncContext),
     .init           = ff_mpv_encode_init,
     FF_CODEC_ENCODE_CB(amv_encode_picture),
     .close          = mjpeg_encode_close,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) {
-        AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUVJ420P),
     .color_ranges   = AVCOL_RANGE_JPEG,
     .p.priv_class   = &amv_class,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
 };
 #endif

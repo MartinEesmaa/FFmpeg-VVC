@@ -220,6 +220,14 @@ static int decode_slice_header(const FFV1Context *f,
                 return AVERROR_INVALIDDATA;
             }
         }
+        if (f->combined_version >= 0x40004) {
+            sc->remap = ff_ffv1_get_symbol(c, state, 0);
+            if (sc->remap > 2U ||
+                sc->remap && !f->flt) {
+                av_log(f->avctx, AV_LOG_ERROR, "unsupported remap %d\n", sc->remap);
+                return AVERROR_INVALIDDATA;
+            }
+        }
     }
 
     return 0;
@@ -233,6 +241,38 @@ static void slice_set_damaged(FFV1Context *f, FFV1SliceContext *sc)
     // not used and setting it would be a race
     if (f->avctx->active_thread_type & FF_THREAD_FRAME)
         f->frame_damaged = 1;
+}
+
+static int decode_remap(FFV1Context *f, FFV1SliceContext *sc)
+{
+    int transparency = f->transparency;
+    int flip = sc->remap == 2 ? 0x7FFF : 0;
+
+    for (int p= 0; p<3 + transparency; p++) {
+        int j = 0;
+        int lu = 0;
+        uint8_t state[2][32];
+        memset(state, 128, sizeof(state));
+
+        for (int i= 0; i<65536; i++) {
+            int run = get_symbol_inline(&sc->c, state[lu], 0);
+            if (run > 65536U - i)
+                return AVERROR_INVALIDDATA;
+            if (lu) {
+                lu ^= !run;
+                while (run--) {
+                    sc->fltmap[p][j++] = i ^ ((i&0x8000) ? 0 : flip);
+                    i++;
+                }
+            } else {
+                i += run;
+                if (i != 65536)
+                    sc->fltmap[p][j++] = i ^ ((i&0x8000) ? 0 : flip);
+                lu ^= !run;
+            }
+        }
+    }
+    return 0;
 }
 
 static int decode_slice(AVCodecContext *c, void *arg)
@@ -276,6 +316,12 @@ static int decode_slice(AVCodecContext *c, void *arg)
     height = sc->slice_height;
     x      = sc->slice_x;
     y      = sc->slice_y;
+
+    if (sc->remap) {
+        ret = decode_remap(f, sc);
+        if (ret < 0)
+            return ret;
+    }
 
     if (ac == AC_GOLOMB_RICE) {
         if (f->combined_version >= 0x30002)
@@ -651,6 +697,13 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     if (ret < 0)
         return ret;
 
+    if (avctx->debug & FF_DEBUG_PICT_INFO)
+        av_log(avctx, AV_LOG_DEBUG, "ver:%d keyframe:%d coder:%d ec:%d slices:%d bps:%d\n",
+               f->version, !!f->key_frame, f->ac, f->ec, f->slice_count, f->avctx->bits_per_raw_sample);
+
+    if (avctx->skip_frame >= AVDISCARD_ALL)
+        return avpkt->size;
+
     ret = ff_progress_frame_get_buffer(avctx, &f->picture,
                                        AV_GET_BUFFER_FLAG_REF);
     if (ret < 0)
@@ -667,10 +720,6 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
         if (avctx->field_order == AV_FIELD_TT || avctx->field_order == AV_FIELD_TB)
             p->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
     }
-
-    if (avctx->debug & FF_DEBUG_PICT_INFO)
-        av_log(avctx, AV_LOG_DEBUG, "ver:%d keyframe:%d coder:%d ec:%d slices:%d bps:%d\n",
-               f->version, !!(p->flags & AV_FRAME_FLAG_KEY), f->ac, f->ec, f->slice_count, f->avctx->bits_per_raw_sample);
 
     ff_thread_finish_setup(avctx);
 
@@ -775,5 +824,6 @@ const FFCodec ff_ffv1_decoder = {
     .p.capabilities = AV_CODEC_CAP_DR1 |
                       AV_CODEC_CAP_FRAME_THREADS | AV_CODEC_CAP_SLICE_THREADS,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
+                      FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM |
                       FF_CODEC_CAP_USES_PROGRESSFRAMES,
 };

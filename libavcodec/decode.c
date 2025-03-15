@@ -817,9 +817,6 @@ int ff_decode_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     AVCodecInternal *avci = avctx->internal;
     int ret;
 
-    if (!avcodec_is_open(avctx) || !av_codec_is_decoder(avctx->codec))
-        return AVERROR(EINVAL);
-
     if (avci->buffer_frame->buf[0]) {
         av_frame_move_ref(frame, avci->buffer_frame);
     } else {
@@ -1570,6 +1567,15 @@ int ff_decode_frame_props(AVCodecContext *avctx, AVFrame *frame)
     if (ret < 0)
         return ret;
 
+    for (int i = 0; i < avctx->nb_decoded_side_data; i++) {
+        const AVFrameSideData *src = avctx->decoded_side_data[i];
+        if (av_frame_get_side_data(frame, src->type))
+            continue;
+        ret = av_frame_side_data_clone(&frame->side_data, &frame->nb_side_data, src, 0);
+        if (ret < 0)
+            return ret;
+    }
+
     if (!(ffcodec(avctx->codec)->caps_internal & FF_CODEC_CAP_SETS_FRAME_PROPS)) {
         const AVPacket *pkt = avctx->internal->last_pkt_props;
 
@@ -1700,7 +1706,7 @@ int ff_get_buffer(AVCodecContext *avctx, AVFrame *frame, int flags)
     int override_dimensions = 1;
     int ret;
 
-    av_assert0(av_codec_is_decoder(avctx->codec));
+    av_assert0(ff_codec_is_decoder(avctx->codec));
 
     if (avctx->codec_type == AVMEDIA_TYPE_VIDEO) {
         if ((unsigned)avctx->width > INT_MAX - STRIDE_ALIGN ||

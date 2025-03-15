@@ -64,6 +64,8 @@ OBJS = ac3_parser.o                                                     \
        vorbis_parser.o                                                  \
        xiph.o                                                           \
 
+SHLIBOBJS = timecode_internal.o                                         \
+
 # subsystems
 include $(SRC_PATH)/libavcodec/aac/Makefile
 include $(SRC_PATH)/libavcodec/hevc/Makefile
@@ -716,7 +718,7 @@ OBJS-$(CONFIG_SUBVIEWER1_DECODER)      += textdec.o ass.o
 OBJS-$(CONFIG_SUBVIEWER_DECODER)       += subviewerdec.o ass.o
 OBJS-$(CONFIG_SUNRAST_DECODER)         += sunrast.o
 OBJS-$(CONFIG_SUNRAST_ENCODER)         += sunrastenc.o
-OBJS-$(CONFIG_SBC_DECODER)             += sbcdec.o sbcdec_data.o sbc.o
+OBJS-$(CONFIG_SBC_DECODER)             += sbcdec.o sbc.o
 OBJS-$(CONFIG_SBC_ENCODER)             += sbcenc.o sbc.o sbcdsp.o sbcdsp_data.o
 OBJS-$(CONFIG_SVQ1_DECODER)            += svq1dec.o svq1.o h263data.o
 OBJS-$(CONFIG_SVQ1_ENCODER)            += svq1enc.o svq1.o  h263data.o  \
@@ -1085,7 +1087,6 @@ STLIBOBJS-$(CONFIG_ISO_MEDIA)          += mpegaudiotabs.o
 STLIBOBJS-$(CONFIG_FLV_MUXER)          += mpeg4audio_sample_rates.o
 STLIBOBJS-$(CONFIG_HLS_DEMUXER)        += ac3_channel_layout_tab.o
 STLIBOBJS-$(CONFIG_IMAGE_JPEGXL_PIPE_DEMUXER) += jpegxl_parse.o
-STLIBOBJS-$(CONFIG_JNI)                += ffjni.o
 STLIBOBJS-$(CONFIG_JPEGXL_ANIM_DEMUXER)       += jpegxl_parse.o
 STLIBOBJS-$(CONFIG_MATROSKA_DEMUXER)   += mpeg4audio_sample_rates.o
 STLIBOBJS-$(CONFIG_MOV_DEMUXER)        += ac3_channel_layout_tab.o

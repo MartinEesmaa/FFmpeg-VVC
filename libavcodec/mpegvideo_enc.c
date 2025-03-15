@@ -93,7 +93,6 @@ static int dct_quantize_c(MpegEncContext *s,
                           int qscale, int *overflow);
 static int dct_quantize_trellis_c(MpegEncContext *s, int16_t *block, int n, int qscale, int *overflow);
 
-static uint8_t default_mv_penalty[MAX_FCODE + 1][MAX_DMV * 2 + 1];
 static uint8_t default_fcode_tab[MAX_MV * 2 + 1];
 
 static const AVOption mpv_generic_options[] = {
@@ -287,8 +286,7 @@ static void mpv_encode_defaults(MpegEncContext *s)
 
     ff_thread_once(&init_static_once, mpv_encode_init_static);
 
-    s->me.mv_penalty = default_mv_penalty;
-    s->fcode_tab     = default_fcode_tab;
+    s->fcode_tab     = default_fcode_tab + MAX_MV;
 
     s->input_picture_number  = 0;
     s->picture_in_gop_number = 0;
@@ -346,6 +344,74 @@ static av_cold int me_cmp_init(MpegEncContext *s, AVCodecContext *avctx)
         s->n_sse_cmp[0] = mecc.sse[0];
         s->n_sse_cmp[1] = mecc.sse[1];
     }
+
+    return 0;
+}
+
+#define ALLOCZ_ARRAYS(p, mult, numb) ((p) = av_calloc(numb, mult * sizeof(*(p))))
+static av_cold int init_matrices(MpegEncContext *s, AVCodecContext *avctx)
+{
+    const int nb_matrices = 1 + (s->out_format == FMT_MJPEG) + !s->intra_only;
+    const uint16_t *intra_matrix, *inter_matrix;
+    int ret;
+
+    if (!ALLOCZ_ARRAYS(s->q_intra_matrix,   32, nb_matrices) ||
+        !ALLOCZ_ARRAYS(s->q_intra_matrix16, 32, nb_matrices))
+        return AVERROR(ENOMEM);
+
+    if (s->out_format == FMT_MJPEG) {
+        s->q_chroma_intra_matrix   = s->q_intra_matrix   + 32;
+        s->q_chroma_intra_matrix16 = s->q_intra_matrix16 + 32;
+        // No need to set q_inter_matrix
+        av_assert1(s->intra_only);
+        // intra_matrix, chroma_intra_matrix will be set later for MJPEG.
+        return 0;
+    } else {
+        s->q_chroma_intra_matrix   = s->q_intra_matrix;
+        s->q_chroma_intra_matrix16 = s->q_intra_matrix16;
+    }
+    if (!s->intra_only) {
+        s->q_inter_matrix   = s->q_intra_matrix   + 32;
+        s->q_inter_matrix16 = s->q_intra_matrix16 + 32;
+    }
+
+    if (CONFIG_MPEG4_ENCODER && s->codec_id == AV_CODEC_ID_MPEG4 &&
+        s->mpeg_quant) {
+        intra_matrix = ff_mpeg4_default_intra_matrix;
+        inter_matrix = ff_mpeg4_default_non_intra_matrix;
+    } else if (s->out_format == FMT_H263 || s->out_format == FMT_H261) {
+        intra_matrix =
+        inter_matrix = ff_mpeg1_default_non_intra_matrix;
+    } else {
+        /* MPEG-1/2, SpeedHQ */
+        intra_matrix = ff_mpeg1_default_intra_matrix;
+        inter_matrix = ff_mpeg1_default_non_intra_matrix;
+    }
+    if (avctx->intra_matrix)
+        intra_matrix = avctx->intra_matrix;
+    if (avctx->inter_matrix)
+        inter_matrix = avctx->inter_matrix;
+
+    /* init q matrix */
+    for (int i = 0; i < 64; i++) {
+        int j = s->idsp.idct_permutation[i];
+
+        s->intra_matrix[j] = s->chroma_intra_matrix[j] = intra_matrix[i];
+        s->inter_matrix[j] = inter_matrix[i];
+    }
+
+    /* precompute matrix */
+    ret = ff_check_codec_matrices(avctx, FF_MATRIX_TYPE_INTRA | FF_MATRIX_TYPE_INTER, 1, 255);
+    if (ret < 0)
+        return ret;
+
+    ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
+                      s->intra_matrix, s->intra_quant_bias, avctx->qmin,
+                      31, 1);
+    if (s->q_inter_matrix)
+        ff_convert_matrix(s, s->q_inter_matrix, s->q_inter_matrix16,
+                          s->inter_matrix, s->inter_quant_bias, avctx->qmin,
+                          31, 0);
 
     return 0;
 }
@@ -522,17 +588,6 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
             avctx->bit_rate_tolerance = INT_MAX;
     }
 
-    if (avctx->rc_max_rate &&
-        avctx->rc_min_rate == avctx->rc_max_rate &&
-        (s->codec_id == AV_CODEC_ID_MPEG1VIDEO ||
-         s->codec_id == AV_CODEC_ID_MPEG2VIDEO) &&
-        90000LL * (avctx->rc_buffer_size - 1) >
-            avctx->rc_max_rate * 0xFFFFLL) {
-        av_log(avctx, AV_LOG_INFO,
-               "Warning vbv_delay will be set to 0xFFFF (=VBR) as the "
-               "specified vbv buffer is too large for the given bitrate!\n");
-    }
-
     if ((avctx->flags & AV_CODEC_FLAG_4MV) && s->codec_id != AV_CODEC_ID_MPEG4 &&
         s->codec_id != AV_CODEC_ID_H263 && s->codec_id != AV_CODEC_ID_H263P &&
         s->codec_id != AV_CODEC_ID_FLV1) {
@@ -636,14 +691,6 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
             av_log(avctx, AV_LOG_ERROR,
                    "B-frames cannot be used with low delay\n");
             return AVERROR(EINVAL);
-        }
-    }
-
-    if (s->q_scale_type == 1) {
-        if (avctx->qmax > 28) {
-            av_log(avctx, AV_LOG_ERROR,
-                   "non linear quant only supports qmax <= 28 currently\n");
-            return AVERROR_PATCHWELCOME;
         }
     }
 
@@ -867,17 +914,15 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         return ret;
 
     if (!(avctx->stats_out = av_mallocz(256))               ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_intra_matrix,          32) ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_chroma_intra_matrix,   32) ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_inter_matrix,          32) ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_intra_matrix16,        32) ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_chroma_intra_matrix16, 32) ||
-        !FF_ALLOCZ_TYPED_ARRAY(s->q_inter_matrix16,        32) ||
         !FF_ALLOCZ_TYPED_ARRAY(s->input_picture,           MAX_B_FRAMES + 1) ||
         !FF_ALLOCZ_TYPED_ARRAY(s->reordered_input_picture, MAX_B_FRAMES + 1) ||
         !(s->new_pic = av_frame_alloc()) ||
         !(s->picture_pool = ff_mpv_alloc_pic_pool(0)))
         return AVERROR(ENOMEM);
+
+    ret = init_matrices(s, avctx);
+    if (ret < 0)
+        return ret;
 
     /* Allocate MV tables; the MV and MB tables will be copied
      * to slice contexts by ff_update_duplicate_context().  */
@@ -900,14 +945,11 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
     mb_array_size = s->mb_stride * s->mb_height;
     if (!FF_ALLOCZ_TYPED_ARRAY(s->mb_type,      mb_array_size) ||
         !FF_ALLOCZ_TYPED_ARRAY(s->lambda_table, mb_array_size) ||
-        !FF_ALLOC_TYPED_ARRAY (s->cplx_tab,     mb_array_size) ||
-        !FF_ALLOC_TYPED_ARRAY (s->bits_tab,     mb_array_size) ||
         !FF_ALLOCZ_TYPED_ARRAY(s->mc_mb_var,    mb_array_size) ||
         !FF_ALLOCZ_TYPED_ARRAY(s->mb_var, mb_array_size) ||
         !(s->mb_mean = av_mallocz(mb_array_size)))
         return AVERROR(ENOMEM);
 
-#define ALLOCZ_ARRAYS(p, mult, numb) ((p) = av_calloc(numb, mult * sizeof(*(p))))
     if (s->codec_id == AV_CODEC_ID_MPEG4 ||
         (s->avctx->flags & AV_CODEC_FLAG_INTERLACED_ME)) {
         int16_t (*tmp1)[2];
@@ -950,9 +992,6 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         s->dct_unquantize_inter = s->dct_unquantize_mpeg1_inter;
     }
 
-    if ((CONFIG_H263P_ENCODER || CONFIG_RV20_ENCODER) && s->modified_quant)
-        s->chroma_qscale_table = ff_h263_chroma_qscale_table;
-
     if (s->slice_context_count > 1) {
         s->rtp_mode = 1;
 
@@ -966,46 +1005,6 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         if (s->msmpeg4_version != MSMP4_UNUSED)
             ff_msmpeg4_encode_init(s);
 #endif
-    }
-
-    /* init q matrix */
-    for (i = 0; i < 64; i++) {
-        int j = s->idsp.idct_permutation[i];
-        if (CONFIG_MPEG4_ENCODER && s->codec_id == AV_CODEC_ID_MPEG4 &&
-            s->mpeg_quant) {
-            s->intra_matrix[j] = ff_mpeg4_default_intra_matrix[i];
-            s->inter_matrix[j] = ff_mpeg4_default_non_intra_matrix[i];
-        } else if (s->out_format == FMT_H263 || s->out_format == FMT_H261) {
-            s->intra_matrix[j] =
-            s->inter_matrix[j] = ff_mpeg1_default_non_intra_matrix[i];
-        } else if (CONFIG_SPEEDHQ_ENCODER && s->codec_id == AV_CODEC_ID_SPEEDHQ) {
-            s->intra_matrix[j] =
-            s->inter_matrix[j] = ff_mpeg1_default_intra_matrix[i];
-        } else {
-            /* MPEG-1/2 */
-            s->chroma_intra_matrix[j] =
-            s->intra_matrix[j] = ff_mpeg1_default_intra_matrix[i];
-            s->inter_matrix[j] = ff_mpeg1_default_non_intra_matrix[i];
-        }
-        if (avctx->intra_matrix)
-            s->intra_matrix[j] = avctx->intra_matrix[i];
-        if (avctx->inter_matrix)
-            s->inter_matrix[j] = avctx->inter_matrix[i];
-    }
-
-    /* precompute matrix */
-    /* for mjpeg, we do include qscale in the matrix */
-    if (s->out_format != FMT_MJPEG) {
-        ret = ff_check_codec_matrices(avctx, FF_MATRIX_TYPE_INTRA | FF_MATRIX_TYPE_INTER, 1, 255);
-        if (ret < 0)
-            return ret;
-
-        ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
-                          s->intra_matrix, s->intra_quant_bias, avctx->qmin,
-                          31, 1);
-        ff_convert_matrix(s, s->q_inter_matrix, s->q_inter_matrix16,
-                          s->inter_matrix, s->inter_quant_bias, avctx->qmin,
-                          31, 0);
     }
 
     if ((ret = ff_rate_control_init(s)) < 0)
@@ -1074,17 +1073,8 @@ av_cold int ff_mpv_encode_end(AVCodecContext *avctx)
     av_freep(&s->mb_type);
     av_freep(&s->lambda_table);
 
-    av_freep(&s->cplx_tab);
-    av_freep(&s->bits_tab);
-
-    if(s->q_chroma_intra_matrix   != s->q_intra_matrix  ) av_freep(&s->q_chroma_intra_matrix);
-    if(s->q_chroma_intra_matrix16 != s->q_intra_matrix16) av_freep(&s->q_chroma_intra_matrix16);
-    s->q_chroma_intra_matrix=   NULL;
-    s->q_chroma_intra_matrix16= NULL;
     av_freep(&s->q_intra_matrix);
-    av_freep(&s->q_inter_matrix);
     av_freep(&s->q_intra_matrix16);
-    av_freep(&s->q_inter_matrix16);
     av_freep(&s->input_picture);
     av_freep(&s->reordered_input_picture);
     av_freep(&s->dct_offset);
@@ -1118,10 +1108,6 @@ static inline void add_dequant_dct(MpegEncContext *s,
  */
 static void mpv_reconstruct_mb(MpegEncContext *s, int16_t block[12][64])
 {
-    const int mb_xy = s->mb_y * s->mb_stride + s->mb_x;
-
-    s->cur_pic.qscale_table[mb_xy] = s->qscale;
-
     if (s->avctx->debug & FF_DEBUG_DCT_COEFF) {
        /* print DCT coefficients */
        av_log(s->avctx, AV_LOG_DEBUG, "DCT coeffs of MB at %dx%d:\n", s->mb_x, s->mb_y);
@@ -3382,8 +3368,6 @@ static int encode_thread(AVCodecContext *c, void *arg){
                     }
                 }
 
-                s->cur_pic.qscale_table[xy] = best_s.qscale;
-
                 copy_context_after_encode(s, &best_s);
 
                 pb_bits_count= put_bits_count(&s->pb);
@@ -3537,6 +3521,8 @@ static int encode_thread(AVCodecContext *c, void *arg){
 
                 mpv_reconstruct_mb(s, s->block);
             }
+
+            s->cur_pic.qscale_table[xy] = s->qscale;
 
             /* clean the MV table in IPS frames for direct mode in B-frames */
             if(s->mb_intra /* && I,P,S_TYPE */){
@@ -3706,13 +3692,6 @@ static int encode_picture(MpegEncContext *s, const AVPacket *pkt)
         update_qscale(s);
     }
 
-    if (s->out_format != FMT_MJPEG) {
-        if(s->q_chroma_intra_matrix   != s->q_intra_matrix  ) av_freep(&s->q_chroma_intra_matrix);
-        if(s->q_chroma_intra_matrix16 != s->q_intra_matrix16) av_freep(&s->q_chroma_intra_matrix16);
-        s->q_chroma_intra_matrix   = s->q_intra_matrix;
-        s->q_chroma_intra_matrix16 = s->q_intra_matrix16;
-    }
-
     ff_me_init_pic(s);
 
     s->mb_intra=0; //for the rate distortion & bit compare functions
@@ -3771,7 +3750,7 @@ static int encode_picture(MpegEncContext *s, const AVPacket *pkt)
             s->mb_type[i]= CANDIDATE_MB_TYPE_INTRA;
         if (s->msmpeg4_version >= MSMP4_V3)
             s->no_rounding=1;
-        ff_dlog(s, "Scene change detected, encoding as I Frame %"PRId64" %"PRId64"\n",
+        ff_dlog(s->avctx, "Scene change detected, encoding as I Frame %"PRId64" %"PRId64"\n",
                 s->mb_var_sum, s->mc_mb_var_sum);
     }
 
@@ -3836,38 +3815,33 @@ static int encode_picture(MpegEncContext *s, const AVPacket *pkt)
         s->qscale= 3; //reduce clipping problems
 
     if (s->out_format == FMT_MJPEG) {
-        const uint16_t *  luma_matrix = ff_mpeg1_default_intra_matrix;
-        const uint16_t *chroma_matrix = ff_mpeg1_default_intra_matrix;
-
         ret = ff_check_codec_matrices(s->avctx, FF_MATRIX_TYPE_INTRA | FF_MATRIX_TYPE_CHROMA_INTRA, (7 + s->qscale) / s->qscale, 65535);
         if (ret < 0)
             return ret;
 
-        if (s->avctx->intra_matrix) {
-            chroma_matrix =
-            luma_matrix = s->avctx->intra_matrix;
-        }
-        if (s->avctx->chroma_intra_matrix)
-            chroma_matrix = s->avctx->chroma_intra_matrix;
+        if (s->codec_id != AV_CODEC_ID_AMV) {
+            const uint16_t *  luma_matrix = ff_mpeg1_default_intra_matrix;
+            const uint16_t *chroma_matrix = ff_mpeg1_default_intra_matrix;
 
-        /* for mjpeg, we do include qscale in the matrix */
-        for(i=1;i<64;i++){
-            int j = s->idsp.idct_permutation[i];
+            if (s->avctx->intra_matrix) {
+                chroma_matrix =
+                luma_matrix = s->avctx->intra_matrix;
+            }
+            if (s->avctx->chroma_intra_matrix)
+                chroma_matrix = s->avctx->chroma_intra_matrix;
 
-            s->chroma_intra_matrix[j] = av_clip_uint8((chroma_matrix[i] * s->qscale) >> 3);
-            s->       intra_matrix[j] = av_clip_uint8((  luma_matrix[i] * s->qscale) >> 3);
-        }
-        s->y_dc_scale_table=
-        s->c_dc_scale_table = ff_mpeg12_dc_scale_table[s->intra_dc_precision];
-        s->chroma_intra_matrix[0] =
-        s->intra_matrix[0]  = ff_mpeg12_dc_scale_table[s->intra_dc_precision][8];
-        ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
-                       s->intra_matrix, s->intra_quant_bias, 8, 8, 1);
-        ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
-                       s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
-        s->qscale= 8;
+            /* for mjpeg, we do include qscale in the matrix */
+            for (int i = 1; i < 64; i++) {
+                int j = s->idsp.idct_permutation[i];
 
-        if (s->codec_id == AV_CODEC_ID_AMV) {
+                s->chroma_intra_matrix[j] = av_clip_uint8((chroma_matrix[i] * s->qscale) >> 3);
+                s->       intra_matrix[j] = av_clip_uint8((  luma_matrix[i] * s->qscale) >> 3);
+            }
+            s->y_dc_scale_table =
+            s->c_dc_scale_table = ff_mpeg12_dc_scale_table[s->intra_dc_precision];
+            s->chroma_intra_matrix[0] =
+            s->intra_matrix[0]  = ff_mpeg12_dc_scale_table[s->intra_dc_precision][8];
+        } else {
             static const uint8_t y[32] = {13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13,13};
             static const uint8_t c[32] = {14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14,14};
             for (int i = 1; i < 64; i++) {
@@ -3880,12 +3854,12 @@ static int encode_picture(MpegEncContext *s, const AVPacket *pkt)
             s->c_dc_scale_table = c;
             s->intra_matrix[0] = 13;
             s->chroma_intra_matrix[0] = 14;
-            ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
-                              s->intra_matrix, s->intra_quant_bias, 8, 8, 1);
-            ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
-                              s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
-            s->qscale = 8;
         }
+        ff_convert_matrix(s, s->q_intra_matrix, s->q_intra_matrix16,
+                          s->intra_matrix, s->intra_quant_bias, 8, 8, 1);
+        ff_convert_matrix(s, s->q_chroma_intra_matrix, s->q_chroma_intra_matrix16,
+                          s->chroma_intra_matrix, s->intra_quant_bias, 8, 8, 1);
+        s->qscale = 8;
     }
 
     if (s->pict_type == AV_PICTURE_TYPE_I) {

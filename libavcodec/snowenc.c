@@ -240,7 +240,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
         return AVERROR(ENOMEM);
     mpv->me.score_map = mpv->me.map + ME_MAP_SIZE;
 
-    ff_h263_encode_init(mpv); //mv_penalty
+    mpv->me.mv_penalty = ff_h263_get_mv_penalty();
 
     s->max_ref_frames = av_clip(avctx->refs, 1, MAX_REF_FRAMES);
 
@@ -2039,7 +2039,7 @@ redo_frame:
 
     update_last_header_values(s);
 
-    ff_snow_release_buffer(avctx);
+    av_frame_unref(s->last_picture[s->max_ref_frames - 1]);
 
     s->current_picture->pict_type = pic->pict_type;
     s->current_picture->quality = pic->quality;
@@ -2118,7 +2118,7 @@ static const AVOption options[] = {
      "defined in the section 'Expression Evaluation', the following functions are available: "
      "bits2qp(bits), qp2bits(qp). Also the following constants are available: iTex pTex tex mv "
      "fCode iCount mcVar var isI isP isB avgQP qComp avgIITex avgPITex avgPPTex avgBPTex avgTex.",
-                                                                                  OFFSET(m.rc_eq), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, VE },
+                                                                                  OFFSET(m.rc_context.rc_eq), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, VE },
     { NULL },
 };
 
@@ -2141,11 +2141,8 @@ const FFCodec ff_snow_encoder = {
     .init           = encode_init,
     FF_CODEC_ENCODE_CB(encode_frame),
     .close          = encode_end,
-    .p.pix_fmts     = (const enum AVPixelFormat[]){
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV444P,
-        AV_PIX_FMT_GRAY8,
-        AV_PIX_FMT_NONE
-    },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV444P,
+                  AV_PIX_FMT_GRAY8),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &snowenc_class,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,

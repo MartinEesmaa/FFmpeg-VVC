@@ -30,13 +30,13 @@
 #include "config_components.h"
 
 #include <limits.h>
+#include <string.h>
 
 #include "libavutil/attributes.h"
 #include "libavutil/thread.h"
 #include "avcodec.h"
 #include "codec_internal.h"
 #include "mpegvideo.h"
-#include "mpegvideodata.h"
 #include "flvenc.h"
 #include "mpegvideoenc.h"
 #include "h263.h"
@@ -53,11 +53,6 @@
 static uint8_t mv_penalty[MAX_FCODE+1][MAX_DMV*2+1];
 
 /**
- * Minimal fcode that a motion vector component would need.
- */
-static uint8_t fcode_tab[MAX_MV*2+1];
-
-/**
  * Minimal fcode that a motion vector component would need in umv.
  * All entries in this table are 1.
  */
@@ -71,6 +66,126 @@ static uint8_t  uni_h263_inter_rl_len [64*64*2*2];
 //#define UNI_MPEG4_ENC_INDEX(last,run,level) ((last)*128*64 + (run) + (level)*64)
 #define UNI_MPEG4_ENC_INDEX(last,run,level) ((last)*128*64 + (run)*128 + (level))
 
+static av_cold void init_mv_penalty_and_fcode(void)
+{
+    for (int f_code = 1; f_code <= MAX_FCODE; f_code++) {
+        for (int mv = -MAX_DMV; mv <= MAX_DMV; mv++) {
+            int len;
+
+            if (mv == 0) len = 1; // ff_mvtab[0][1]
+            else {
+                int val, bit_size, code;
+
+                bit_size = f_code - 1;
+
+                val = mv;
+                if (val < 0)
+                    val = -val;
+                val--;
+                code = (val >> bit_size) + 1;
+                if (code < 33) {
+                    len = ff_mvtab[code][1] + 1 + bit_size;
+                } else {
+                    len = 12 /* ff_mvtab[32][1] */ + av_log2(code>>5) + 2 + bit_size;
+                }
+            }
+
+            mv_penalty[f_code][mv + MAX_DMV] = len;
+        }
+    }
+
+    memset(umv_fcode_tab, 1, sizeof(umv_fcode_tab));
+}
+
+static av_cold void init_uni_h263_rl_tab(const RLTable *rl, uint8_t *len_tab)
+{
+    av_assert0(MAX_LEVEL >= 64);
+    av_assert0(MAX_RUN   >= 63);
+
+    for (int slevel = -64; slevel < 64; slevel++) {
+        if (slevel == 0) continue;
+        for (int run = 0; run < 64; run++) {
+            for (int last = 0; last <= 1; last++) {
+                const int index = UNI_MPEG4_ENC_INDEX(last, run, slevel + 64);
+                int level = slevel < 0 ? -slevel : slevel;
+                int sign  = slevel < 0 ? 1 : 0;
+                int bits, len, code;
+
+                len_tab[index] = 100;
+
+                /* ESC0 */
+                code = get_rl_index(rl, last, run, level);
+                bits = rl->table_vlc[code][0];
+                len  = rl->table_vlc[code][1];
+                bits = bits * 2 + sign;
+                len++;
+
+                if (code != rl->n && len < len_tab[index])
+                    len_tab[index] = len;
+
+                /* ESC */
+                bits = rl->table_vlc[rl->n][0];
+                len  = rl->table_vlc[rl->n][1];
+                bits = bits *   2 + last; len++;
+                bits = bits *  64 + run;  len += 6;
+                bits = bits * 256 + (level & 0xff); len += 8;
+
+                if (len < len_tab[index])
+                    len_tab[index] = len;
+            }
+        }
+    }
+}
+
+static av_cold void h263_encode_init_static(void)
+{
+    static uint8_t rl_intra_table[2][2 * MAX_RUN + MAX_LEVEL + 3];
+
+    ff_rl_init(&ff_rl_intra_aic, rl_intra_table);
+    ff_h263_init_rl_inter();
+
+    init_uni_h263_rl_tab(&ff_rl_intra_aic,  uni_h263_intra_aic_rl_len);
+    init_uni_h263_rl_tab(&ff_h263_rl_inter, uni_h263_inter_rl_len);
+
+    init_mv_penalty_and_fcode();
+}
+
+av_cold const uint8_t (*ff_h263_get_mv_penalty(void))[MAX_DMV*2+1]
+{
+    static AVOnce init_static_once = AV_ONCE_INIT;
+
+    ff_thread_once(&init_static_once, h263_encode_init_static);
+
+    return mv_penalty;
+}
+
+void ff_h263_encode_motion(PutBitContext *pb, int val, int f_code)
+{
+    if (val == 0) {
+        /* zero vector -- corresponds to ff_mvtab[0] */
+        put_bits(pb, 1, 1);
+    } else {
+        int sign, code, bits;
+        int bit_size = f_code - 1;
+        int range = 1 << bit_size;
+        /* modulo encoding */
+        val = sign_extend(val, 6 + bit_size);
+        sign = val>>31;
+        val= (val^sign)-sign;
+        sign&=1;
+
+        val--;
+        code = (val >> bit_size) + 1;
+        bits = val & (range - 1);
+
+        put_bits(pb, ff_mvtab[code][1] + 1, (ff_mvtab[code][0] << 1) | sign);
+        if (bit_size > 0) {
+            put_bits(pb, bit_size, bits);
+        }
+    }
+}
+
+#if CONFIG_H263_ENCODER // Snow and SVQ1 need the above
 static const uint8_t wrong_run[102] = {
  1,  2,  3,  5,  4, 10,  9,  8,
 11, 15, 17, 16, 23, 22, 21, 20,
@@ -704,151 +819,31 @@ void ff_h263_update_mb(MpegEncContext *s)
     ff_h263_update_motion_val(s);
 }
 
-void ff_h263_encode_motion(PutBitContext *pb, int val, int f_code)
-{
-    int range, bit_size, sign, code, bits;
-
-    if (val == 0) {
-        /* zero vector -- corresponds to ff_mvtab[0] */
-        put_bits(pb, 1, 1);
-    } else {
-        bit_size = f_code - 1;
-        range = 1 << bit_size;
-        /* modulo encoding */
-        val = sign_extend(val, 6 + bit_size);
-        sign = val>>31;
-        val= (val^sign)-sign;
-        sign&=1;
-
-        val--;
-        code = (val >> bit_size) + 1;
-        bits = val & (range - 1);
-
-        put_bits(pb, ff_mvtab[code][1] + 1, (ff_mvtab[code][0] << 1) | sign);
-        if (bit_size > 0) {
-            put_bits(pb, bit_size, bits);
-        }
-    }
-}
-
-static av_cold void init_mv_penalty_and_fcode(void)
-{
-    int f_code;
-    int mv;
-
-    for(f_code=1; f_code<=MAX_FCODE; f_code++){
-        for(mv=-MAX_DMV; mv<=MAX_DMV; mv++){
-            int len;
-
-            if (mv==0) len = 1; // ff_mvtab[0][1]
-            else{
-                int val, bit_size, code;
-
-                bit_size = f_code - 1;
-
-                val=mv;
-                if (val < 0)
-                    val = -val;
-                val--;
-                code = (val >> bit_size) + 1;
-                if(code<33){
-                    len= ff_mvtab[code][1] + 1 + bit_size;
-                }else{
-                    len = 12 /* ff_mvtab[32][1] */ + av_log2(code>>5) + 2 + bit_size;
-                }
-            }
-
-            mv_penalty[f_code][mv+MAX_DMV]= len;
-        }
-    }
-
-    for(f_code=MAX_FCODE; f_code>0; f_code--){
-        for(mv=-(16<<f_code); mv<(16<<f_code); mv++){
-            fcode_tab[mv+MAX_MV]= f_code;
-        }
-    }
-
-    for(mv=0; mv<MAX_MV*2+1; mv++){
-        umv_fcode_tab[mv]= 1;
-    }
-}
-
-static av_cold void init_uni_h263_rl_tab(const RLTable *rl, uint8_t *len_tab)
-{
-    int slevel, run, last;
-
-    av_assert0(MAX_LEVEL >= 64);
-    av_assert0(MAX_RUN   >= 63);
-
-    for(slevel=-64; slevel<64; slevel++){
-        if(slevel==0) continue;
-        for(run=0; run<64; run++){
-            for(last=0; last<=1; last++){
-                const int index= UNI_MPEG4_ENC_INDEX(last, run, slevel+64);
-                int level= slevel < 0 ? -slevel : slevel;
-                int sign= slevel < 0 ? 1 : 0;
-                int bits, len, code;
-
-                len_tab[index]= 100;
-
-                /* ESC0 */
-                code= get_rl_index(rl, last, run, level);
-                bits= rl->table_vlc[code][0];
-                len=  rl->table_vlc[code][1];
-                bits=bits*2+sign; len++;
-
-                if (code != rl->n && len < len_tab[index])
-                    len_tab [index]= len;
-
-                /* ESC */
-                bits= rl->table_vlc[rl->n][0];
-                len = rl->table_vlc[rl->n][1];
-                bits=bits*2+last; len++;
-                bits=bits*64+run; len+=6;
-                bits=bits*256+(level&0xff); len+=8;
-
-                if (len < len_tab[index])
-                    len_tab [index]= len;
-            }
-        }
-    }
-}
-
-static av_cold void h263_encode_init_static(void)
-{
-    static uint8_t rl_intra_table[2][2 * MAX_RUN + MAX_LEVEL + 3];
-
-    ff_rl_init(&ff_rl_intra_aic, rl_intra_table);
-    ff_h263_init_rl_inter();
-
-    init_uni_h263_rl_tab(&ff_rl_intra_aic,  uni_h263_intra_aic_rl_len);
-    init_uni_h263_rl_tab(&ff_h263_rl_inter, uni_h263_inter_rl_len);
-
-    init_mv_penalty_and_fcode();
-}
-
 av_cold void ff_h263_encode_init(MpegEncContext *s)
 {
-    static AVOnce init_static_once = AV_ONCE_INIT;
-
-    s->me.mv_penalty= mv_penalty; // FIXME exact table for MSMPEG4 & H.263+
+    s->me.mv_penalty = ff_h263_get_mv_penalty(); // FIXME exact table for MSMPEG4 & H.263+
 
     s->intra_ac_vlc_length     =s->inter_ac_vlc_length     = uni_h263_inter_rl_len;
     s->intra_ac_vlc_last_length=s->inter_ac_vlc_last_length= uni_h263_inter_rl_len + 128*64;
     if(s->h263_aic){
         s->intra_ac_vlc_length     = uni_h263_intra_aic_rl_len;
         s->intra_ac_vlc_last_length= uni_h263_intra_aic_rl_len + 128*64;
+
+        s->y_dc_scale_table =
+        s->c_dc_scale_table = ff_aic_dc_scale_table;
     }
     s->ac_esc_length= 7+1+6+8;
+
+    if (s->modified_quant)
+        s->chroma_qscale_table = ff_h263_chroma_qscale_table;
 
     // use fcodes >1 only for MPEG-4 & H.263 & H.263+ FIXME
     switch(s->codec_id){
     case AV_CODEC_ID_MPEG4:
-        s->fcode_tab= fcode_tab;
         break;
     case AV_CODEC_ID_H263P:
         if(s->umvplus)
-            s->fcode_tab= umv_fcode_tab;
+            s->fcode_tab = umv_fcode_tab + MAX_MV;
         if(s->modified_quant){
             s->min_qcoeff= -2047;
             s->max_qcoeff=  2047;
@@ -871,19 +866,8 @@ av_cold void ff_h263_encode_init(MpegEncContext *s)
         s->min_qcoeff= -127;
         s->max_qcoeff=  127;
     }
-    if(s->h263_aic){
-         s->y_dc_scale_table=
-         s->c_dc_scale_table= ff_aic_dc_scale_table;
-    }else{
-        s->y_dc_scale_table=
-        s->c_dc_scale_table= ff_mpeg1_dc_scale_table;
-    }
 
-#if CONFIG_H263_ENCODER // Snow and SVQ1 call this
     ff_h263dsp_init(&s->h263dsp);
-#endif
-
-    ff_thread_once(&init_static_once, h263_encode_init_static);
 }
 
 void ff_h263_encode_mba(MpegEncContext *s)
@@ -919,10 +903,10 @@ const FFCodec ff_h263_encoder = {
     CODEC_LONG_NAME("H.263 / H.263-1996"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_H263,
-    .p.pix_fmts = (const enum AVPixelFormat[]){AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE},
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &h263_class,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MpegEncContext),
     .init           = ff_mpv_encode_init,
@@ -951,13 +935,15 @@ const FFCodec ff_h263p_encoder = {
     CODEC_LONG_NAME("H.263+ / H.263-1998 / H.263 version 2"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_H263P,
-    .p.pix_fmts     = (const enum AVPixelFormat[]){ AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .p.priv_class   = &h263p_class,
-    .p.capabilities = AV_CODEC_CAP_SLICE_THREADS | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_SLICE_THREADS |
+                      AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
     .priv_data_size = sizeof(MpegEncContext),
     .init           = ff_mpv_encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = ff_mpv_encode_end,
 };
+#endif

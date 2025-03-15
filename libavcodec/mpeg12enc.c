@@ -201,6 +201,14 @@ static av_cold int encode_init(AVCodecContext *avctx)
         }
     }
 
+    if (mpeg12->mpeg.q_scale_type == 1) {
+        if (avctx->qmax > 28) {
+            av_log(avctx, AV_LOG_ERROR,
+                   "non linear quant only supports qmax <= 28 currently\n");
+            return AVERROR_PATCHWELCOME;
+        }
+    }
+
     if (avctx->profile == AV_PROFILE_UNKNOWN) {
         if (avctx->level != AV_LEVEL_UNKNOWN) {
             av_log(avctx, AV_LOG_ERROR, "Set profile and level\n");
@@ -245,6 +253,15 @@ static av_cold int encode_init(AVCodecContext *avctx)
                    "MPEG-1/2 does not support %d/%d fps, there may be AV sync issues\n",
                    avctx->time_base.den, avctx->time_base.num);
         }
+    }
+
+    if (avctx->rc_max_rate &&
+        avctx->rc_min_rate == avctx->rc_max_rate &&
+        90000LL * (avctx->rc_buffer_size - 1) >
+            avctx->rc_max_rate * 0xFFFFLL) {
+        av_log(avctx, AV_LOG_INFO,
+               "Warning vbv_delay will be set to 0xFFFF (=VBR) as the "
+               "specified vbv buffer is too large for the given bitrate!\n");
     }
 
     if (mpeg12->drop_frame_timecode)
@@ -577,10 +594,8 @@ void ff_mpeg1_encode_picture_header(MpegEncContext *s)
 
         if (fpa_type != 0) {
             put_header(s, USER_START_CODE);
-            put_bits(&s->pb, 8, 'J');   // S3D_video_format_signaling_identifier
-            put_bits(&s->pb, 8, 'P');
-            put_bits(&s->pb, 8, '3');
-            put_bits(&s->pb, 8, 'D');
+            // S3D_video_format_signaling_identifier
+            put_bits32(&s->pb, MKBETAG('J','P','3','D'));
             put_bits(&s->pb, 8, 0x03);  // S3D_video_format_length
 
             put_bits(&s->pb, 1, 1);     // reserved_bit
@@ -595,21 +610,15 @@ void ff_mpeg1_encode_picture_header(MpegEncContext *s)
             AV_FRAME_DATA_A53_CC);
         if (side_data) {
             if (side_data->size <= A53_MAX_CC_COUNT * 3 && side_data->size % 3 == 0) {
-                int i = 0;
-
                 put_header (s, USER_START_CODE);
 
-                put_bits(&s->pb, 8, 'G');                   // user_identifier
-                put_bits(&s->pb, 8, 'A');
-                put_bits(&s->pb, 8, '9');
-                put_bits(&s->pb, 8, '4');
+                put_bits32(&s->pb, MKBETAG('G','A','9','4')); // user_identifier
                 put_bits(&s->pb, 8, 3);                     // user_data_type_code
                 put_bits(&s->pb, 8,
                     (side_data->size / 3 & A53_MAX_CC_COUNT) | 0x40); // flags, cc_count
                 put_bits(&s->pb, 8, 0xff);                  // em_data
 
-                for (i = 0; i < side_data->size; i++)
-                    put_bits(&s->pb, 8, side_data->data[i]);
+                ff_copy_bits(&s->pb, side_data->data, side_data->size);
 
                 put_bits(&s->pb, 8, 0xff);                  // marker_bits
             } else {
@@ -1148,7 +1157,7 @@ av_cold void ff_mpeg1_encode_init(MpegEncContext *s)
     s->c_dc_scale_table = ff_mpeg12_dc_scale_table[s->intra_dc_precision];
 
     s->me.mv_penalty = mv_penalty;
-    s->fcode_tab     = fcode_tab;
+    s->fcode_tab     = fcode_tab + MAX_MV;
     if (s->codec_id == AV_CODEC_ID_MPEG1VIDEO) {
         s->min_qcoeff = -255;
         s->max_qcoeff = 255;
@@ -1240,11 +1249,11 @@ const FFCodec ff_mpeg1video_encoder = {
     .init                 = encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close                = ff_mpv_encode_end,
-    .p.supported_framerates = ff_mpeg12_frame_rate_tab + 1,
-    .p.pix_fmts           = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
-                                                           AV_PIX_FMT_NONE },
+    CODEC_FRAMERATES_ARRAY(ff_mpeg12_frame_rate_tab + 1),
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges         = AVCOL_RANGE_MPEG,
-    .p.capabilities       = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS |
+    .p.capabilities       = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+                            AV_CODEC_CAP_SLICE_THREADS |
                             AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal        = FF_CODEC_CAP_INIT_CLEANUP,
     .p.priv_class         = &mpeg1_class,
@@ -1259,12 +1268,11 @@ const FFCodec ff_mpeg2video_encoder = {
     .init                 = encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close                = ff_mpv_encode_end,
-    .p.supported_framerates = ff_mpeg2_frame_rate_tab,
-    .p.pix_fmts           = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
-                                                           AV_PIX_FMT_YUV422P,
-                                                           AV_PIX_FMT_NONE },
+    CODEC_FRAMERATES_ARRAY(ff_mpeg2_frame_rate_tab),
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P),
     .color_ranges         = AVCOL_RANGE_MPEG,
-    .p.capabilities       = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_SLICE_THREADS |
+    .p.capabilities       = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_DELAY |
+                            AV_CODEC_CAP_SLICE_THREADS |
                             AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .caps_internal        = FF_CODEC_CAP_INIT_CLEANUP,
     .p.priv_class         = &mpeg2_class,

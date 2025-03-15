@@ -46,6 +46,10 @@ static struct VLCLUT {
     uint16_t code;
 } vlc_lut[H261_MAX_RUN + 1][32 /* 0..2 * H261_MAX_LEN are used */];
 
+// Not const despite never being initialized because doing so would
+// put it into .rodata instead of .bss and bloat the binary.
+// mv_penalty exists so that the motion estimation code can avoid branches.
+static uint8_t mv_penalty[MAX_FCODE + 1][MAX_DMV * 2 + 1];
 static uint8_t uni_h261_rl_len     [64 * 128];
 static uint8_t uni_h261_rl_len_last[64 * 128];
 static uint8_t h261_mv_codes[64][2];
@@ -370,6 +374,8 @@ av_cold int ff_h261_encode_init(MpegEncContext *s)
     s->max_qcoeff       = 127;
     s->ac_esc_length    = H261_ESC_LEN;
 
+    s->me.mv_penalty = mv_penalty;
+
     s->intra_ac_vlc_length      = s->inter_ac_vlc_length      = uni_h261_rl_len;
     s->intra_ac_vlc_last_length = s->inter_ac_vlc_last_length = uni_h261_rl_len_last;
     ff_thread_once(&init_static_once, h261_encode_init_static);
@@ -383,13 +389,12 @@ const FFCodec ff_h261_encoder = {
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_H261,
     .p.priv_class   = &ff_mpv_enc_class,
+    .p.capabilities = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
     .priv_data_size = sizeof(H261EncContext),
     .init           = ff_mpv_encode_init,
     FF_CODEC_ENCODE_CB(ff_mpv_encode_picture),
     .close          = ff_mpv_encode_end,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV420P,
-                                                     AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV420P),
     .color_ranges   = AVCOL_RANGE_MPEG,
-    .p.capabilities = AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
 };

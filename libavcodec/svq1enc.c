@@ -631,7 +631,7 @@ static av_cold int svq1_encode_init(AVCodecContext *avctx)
 
     ff_svq1enc_init(&s->svq1encdsp);
 
-    ff_h263_encode_init(&s->m); // mv_penalty
+    s->m.me.mv_penalty = ff_h263_get_mv_penalty();
 
     return write_ident(avctx, s->avctx->flags & AV_CODEC_FLAG_BITEXACT ? "Lavc" : LIBAVCODEC_IDENT);
 }
@@ -745,8 +745,7 @@ const FFCodec ff_svq1_encoder = {
     .init           = svq1_encode_init,
     FF_CODEC_ENCODE_CB(svq1_encode_frame),
     .close          = svq1_encode_end,
-    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUV410P,
-                                                     AV_PIX_FMT_NONE },
+    CODEC_PIXFMTS(AV_PIX_FMT_YUV410P),
     .color_ranges   = AVCOL_RANGE_MPEG,
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP,
 };
