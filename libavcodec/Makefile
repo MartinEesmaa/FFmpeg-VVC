@@ -43,7 +43,6 @@ OBJS = ac3_parser.o                                                     \
        dirac.o                                                          \
        dv_profile.o                                                     \
        encode.o                                                         \
-       executor.o                                                       \
        get_buffer.o                                                     \
        imgconvert.o                                                     \
        jni.o                                                            \
@@ -367,12 +366,12 @@ OBJS-$(CONFIG_EIGHTSVX_FIB_DECODER)    += 8svx.o
 OBJS-$(CONFIG_ESCAPE124_DECODER)       += escape124.o
 OBJS-$(CONFIG_ESCAPE130_DECODER)       += escape130.o
 OBJS-$(CONFIG_EVRC_DECODER)            += evrcdec.o acelp_vectors.o lsp.o
-OBJS-$(CONFIG_EXR_DECODER)             += exr.o exrdsp.o half2float.o
-OBJS-$(CONFIG_EXR_ENCODER)             += exrenc.o float2half.o
+OBJS-$(CONFIG_EXR_DECODER)             += exr.o exrdsp.o
+OBJS-$(CONFIG_EXR_ENCODER)             += exrenc.o
 OBJS-$(CONFIG_FASTAUDIO_DECODER)       += fastaudio.o
 OBJS-$(CONFIG_FFV1_DECODER)            += ffv1dec.o ffv1_parse.o ffv1.o
 OBJS-$(CONFIG_FFV1_ENCODER)            += ffv1enc.o ffv1_parse.o ffv1.o
-OBJS-$(CONFIG_FFV1_VULKAN_ENCODER)     += ffv1enc.o ffv1.o ffv1enc_vulkan.o
+OBJS-$(CONFIG_FFV1_VULKAN_ENCODER)     += ffv1enc.o ffv1.o ffv1_vulkan.o ffv1enc_vulkan.o
 OBJS-$(CONFIG_FFWAVESYNTH_DECODER)     += ffwavesynth.o
 OBJS-$(CONFIG_FIC_DECODER)             += fic.o
 OBJS-$(CONFIG_FITS_DECODER)            += fitsdec.o fits.o
@@ -468,7 +467,7 @@ OBJS-$(CONFIG_HEVC_V4L2M2M_ENCODER)    += v4l2_m2m_enc.o
 OBJS-$(CONFIG_HEVC_VIDEOTOOLBOX_ENCODER) += videotoolboxenc.o
 OBJS-$(CONFIG_HNM4_VIDEO_DECODER)      += hnm4video.o
 OBJS-$(CONFIG_HQ_HQA_DECODER)          += hq_hqa.o hq_hqadsp.o canopus.o
-OBJS-$(CONFIG_HQX_DECODER)             += hqx.o hqxvlc.o hqxdsp.o canopus.o
+OBJS-$(CONFIG_HQX_DECODER)             += hqx.o hqxdsp.o canopus.o
 OBJS-$(CONFIG_HUFFYUV_DECODER)         += huffyuv.o huffyuvdec.o
 OBJS-$(CONFIG_HUFFYUV_ENCODER)         += huffyuv.o huffyuvenc.o
 OBJS-$(CONFIG_HYMT_DECODER)            += huffyuv.o huffyuvdec.o
@@ -614,8 +613,8 @@ OBJS-$(CONFIG_PGMYUV_DECODER)          += pnmdec.o pnm.o
 OBJS-$(CONFIG_PGMYUV_ENCODER)          += pnmenc.o
 OBJS-$(CONFIG_PGSSUB_DECODER)          += pgssubdec.o
 OBJS-$(CONFIG_PGX_DECODER)             += pgxdec.o
-OBJS-$(CONFIG_PHM_DECODER)             += pnmdec.o pnm.o half2float.o
-OBJS-$(CONFIG_PHM_ENCODER)             += pnmenc.o float2half.o
+OBJS-$(CONFIG_PHM_DECODER)             += pnmdec.o pnm.o
+OBJS-$(CONFIG_PHM_ENCODER)             += pnmenc.o
 OBJS-$(CONFIG_PHOTOCD_DECODER)         += photocd.o
 OBJS-$(CONFIG_PICTOR_DECODER)          += pictordec.o cga_data.o
 OBJS-$(CONFIG_PIXLET_DECODER)          += pixlet.o
@@ -810,6 +809,7 @@ OBJS-$(CONFIG_VPLAYER_DECODER)         += textdec.o ass.o
 OBJS-$(CONFIG_VP9_V4L2M2M_DECODER)     += v4l2_m2m_dec.o
 OBJS-$(CONFIG_VQA_DECODER)             += vqavideo.o
 OBJS-$(CONFIG_VQC_DECODER)             += vqcdec.o
+OBJS-$(CONFIG_VVC_DECODER)             += executor.o h2645data.o
 OBJS-$(CONFIG_WADY_DPCM_DECODER)       += dpcm.o
 OBJS-$(CONFIG_WAVARC_DECODER)          += wavarc.o
 OBJS-$(CONFIG_WAVPACK_DECODER)         += wavpack.o wavpackdata.o dsd.o
@@ -1019,6 +1019,7 @@ OBJS-$(CONFIG_AV1_VAAPI_HWACCEL)          += vaapi_av1.o
 OBJS-$(CONFIG_AV1_VDPAU_HWACCEL)          += vdpau_av1.o
 OBJS-$(CONFIG_AV1_VIDEOTOOLBOX_HWACCEL)   += videotoolbox_av1.o
 OBJS-$(CONFIG_AV1_VULKAN_HWACCEL)         += vulkan_decode.o vulkan_av1.o
+OBJS-$(CONFIG_FFV1_VULKAN_HWACCEL)        += vulkan_decode.o ffv1_vulkan.o vulkan_ffv1.o
 OBJS-$(CONFIG_H263_VAAPI_HWACCEL)         += vaapi_mpeg4.o
 OBJS-$(CONFIG_H263_VIDEOTOOLBOX_HWACCEL)  += videotoolbox.o
 OBJS-$(CONFIG_H264_D3D11VA_HWACCEL)       += dxva2_h264.o
@@ -1076,6 +1077,11 @@ OBJS-$(CONFIG_VVC_VAAPI_HWACCEL)          += vaapi_vvc.o
 
 # Objects duplicated from other libraries for shared builds
 SHLIBOBJS                              += log2_tab.o reverse.o
+
+SHLIBOBJS-$(CONFIG_EXR_DECODER)        += half2float.o float2half.o
+SHLIBOBJS-$(CONFIG_EXR_ENCODER)        += float2half.o
+SHLIBOBJS-$(CONFIG_PHM_DECODER)        += half2float.o
+SHLIBOBJS-$(CONFIG_PHM_ENCODER)        += float2half.o
 
 # General libavformat dependencies
 OBJS-$(CONFIG_FITS_DEMUXER)            += fits.o
@@ -1312,7 +1318,8 @@ SKIPHEADERS-$(CONFIG_QSVENC)           += qsvenc.h
 SKIPHEADERS-$(CONFIG_VAAPI)            += vaapi_decode.h vaapi_hevc.h vaapi_encode.h
 SKIPHEADERS-$(CONFIG_VDPAU)            += vdpau.h vdpau_internal.h
 SKIPHEADERS-$(CONFIG_VIDEOTOOLBOX)     += videotoolbox.h vt_internal.h
-SKIPHEADERS-$(CONFIG_VULKAN)           += vulkan_video.h vulkan_encode.h vulkan_decode.h
+SKIPHEADERS-$(CONFIG_VULKAN)           += ffv1_vulkan.h vulkan_video.h \
+                                          vulkan_encode.h vulkan_decode.h
 SKIPHEADERS-$(CONFIG_V4L2_M2M)         += v4l2_buffers.h v4l2_context.h v4l2_m2m.h
 SKIPHEADERS-$(CONFIG_ZLIB)             += zlib_wrapper.h
 

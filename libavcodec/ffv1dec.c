@@ -41,6 +41,9 @@
 #include "libavutil/refstruct.h"
 #include "thread.h"
 #include "decode.h"
+#include "hwconfig.h"
+#include "hwaccel_internal.h"
+#include "config_components.h"
 
 static inline int get_vlc_symbol(GetBitContext *gb, VlcState *const state,
                                  int bits)
@@ -92,7 +95,7 @@ static int is_input_end(RangeCoder *c, GetBitContext *gb, int ac)
 static int decode_plane(FFV1Context *f, FFV1SliceContext *sc,
                         GetBitContext *gb,
                         uint8_t *src, int w, int h, int stride, int plane_index,
-                        int pixel_stride, int ac)
+                        int remap_index, int pixel_stride, int ac)
 {
     int x, y;
     int16_t *sample[2];
@@ -116,19 +119,36 @@ static int decode_plane(FFV1Context *f, FFV1SliceContext *sc,
             int ret = decode_line(f, sc, gb, w, sample, plane_index, 8, ac);
             if (ret < 0)
                 return ret;
+            if (sc->remap)
+                for (x = 0; x < w; x++)
+                    sample[1][x] = sc->fltmap[remap_index][sample[1][x]];
             for (x = 0; x < w; x++)
                 src[x*pixel_stride + stride * y] = sample[1][x];
         } else {
             int ret = decode_line(f, sc, gb, w, sample, plane_index, f->avctx->bits_per_raw_sample, ac);
             if (ret < 0)
                 return ret;
-            if (f->packed_at_lsb) {
-                for (x = 0; x < w; x++) {
-                    ((uint16_t*)(src + stride*y))[x*pixel_stride] = sample[1][x];
+
+            if (sc->remap) {
+                if (f->packed_at_lsb || f->avctx->bits_per_raw_sample == 16) {
+                    for (x = 0; x < w; x++) {
+                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = sc->fltmap[remap_index][sample[1][x] & 0xFFFF];
+                    }
+                } else {
+                    for (x = 0; x < w; x++) {
+                        int v = sc->fltmap[remap_index][sample[1][x] & 0xFFFF];
+                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = v << (16 - f->avctx->bits_per_raw_sample) | v >> (2 * f->avctx->bits_per_raw_sample - 16);
+                    }
                 }
             } else {
-                for (x = 0; x < w; x++) {
-                    ((uint16_t*)(src + stride*y))[x*pixel_stride] = sample[1][x] << (16 - f->avctx->bits_per_raw_sample) | ((uint16_t **)sample)[1][x] >> (2 * f->avctx->bits_per_raw_sample - 16);
+                if (f->packed_at_lsb || f->avctx->bits_per_raw_sample == 16) {
+                    for (x = 0; x < w; x++) {
+                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = sample[1][x];
+                    }
+                } else {
+                    for (x = 0; x < w; x++) {
+                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = sample[1][x] << (16 - f->avctx->bits_per_raw_sample) | ((uint16_t **)sample)[1][x] >> (2 * f->avctx->bits_per_raw_sample - 16);
+                    }
                 }
             }
         }
@@ -245,10 +265,9 @@ static void slice_set_damaged(FFV1Context *f, FFV1SliceContext *sc)
 
 static int decode_remap(FFV1Context *f, FFV1SliceContext *sc)
 {
-    int transparency = f->transparency;
     int flip = sc->remap == 2 ? 0x7FFF : 0;
 
-    for (int p= 0; p<3 + transparency; p++) {
+    for (int p= 0; p < 1 + 2*f->chroma_planes + f->transparency; p++) {
         int j = 0;
         int lu = 0;
         uint8_t state[2][32];
@@ -338,17 +357,18 @@ static int decode_slice(AVCodecContext *c, void *arg)
         const int chroma_height = AV_CEIL_RSHIFT(height, f->chroma_v_shift);
         const int cx            = x >> f->chroma_h_shift;
         const int cy            = y >> f->chroma_v_shift;
-        decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0], width, height, p->linesize[0], 0, 1, ac);
+        decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0], width, height, p->linesize[0], 0, 0, 1, ac);
 
         if (f->chroma_planes) {
-            decode_plane(f, sc, &gb, p->data[1] + ps*cx+cy*p->linesize[1], chroma_width, chroma_height, p->linesize[1], 1, 1, ac);
-            decode_plane(f, sc, &gb, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1, 1, ac);
+            decode_plane(f, sc, &gb, p->data[1] + ps*cx+cy*p->linesize[1], chroma_width, chroma_height, p->linesize[1], 1, 1, 1, ac);
+            decode_plane(f, sc, &gb, p->data[2] + ps*cx+cy*p->linesize[2], chroma_width, chroma_height, p->linesize[2], 1, 2, 1, ac);
         }
         if (f->transparency)
-            decode_plane(f, sc, &gb, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], (f->version >= 4 && !f->chroma_planes) ? 1 : 2, 1, ac);
+            decode_plane(f, sc, &gb, p->data[3] + ps*x + y*p->linesize[3], width, height, p->linesize[3], (f->version >= 4 && !f->chroma_planes) ? 1 : 2,
+                                                                                                          (f->version >= 4 && !f->chroma_planes) ? 1 : 3, 1, ac);
     } else if (f->colorspace == 0) {
-         decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0]    , width, height, p->linesize[0], 0, 2, ac);
-         decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0] + 1, width, height, p->linesize[0], 1, 2, ac);
+         decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0]          , width, height, p->linesize[0], 0, 0, 2, ac);
+         decode_plane(f, sc, &gb, p->data[0] + ps*x + y*p->linesize[0] + (ps>>1), width, height, p->linesize[0], 1, 1, 2, ac);
     } else if (f->use32bit) {
         uint8_t *planes[4] = { p->data[0] + ps * x + y * p->linesize[0],
                                p->data[1] + ps * x + y * p->linesize[1],
@@ -384,6 +404,9 @@ static int decode_slice(AVCodecContext *c, void *arg)
 static enum AVPixelFormat get_pixel_format(FFV1Context *f)
 {
     enum AVPixelFormat pix_fmts[] = {
+#if CONFIG_FFV1_VULKAN_HWACCEL
+        AV_PIX_FMT_VULKAN,
+#endif
         f->pix_fmt,
         AV_PIX_FMT_NONE,
     };
@@ -403,9 +426,12 @@ static int read_header(FFV1Context *f, RangeCoder *c)
     if (ret < 0)
         return ret;
 
-    f->avctx->pix_fmt = get_pixel_format(f);
-    if (f->avctx->pix_fmt < 0)
-        return AVERROR(EINVAL);
+    if (f->configured_pix_fmt != f->pix_fmt) {
+        f->avctx->pix_fmt = get_pixel_format(f);
+        if (f->avctx->pix_fmt < 0)
+            return AVERROR(EINVAL);
+        f->configured_pix_fmt = f->pix_fmt;
+    }
 
     ff_dlog(f->avctx, "%d %d %d\n",
             f->chroma_h_shift, f->chroma_v_shift, f->pix_fmt);
@@ -497,6 +523,9 @@ static av_cold int decode_init(AVCodecContext *avctx)
 {
     FFV1Context *f = avctx->priv_data;
     int ret;
+
+    f->pix_fmt = AV_PIX_FMT_NONE;
+    f->configured_pix_fmt = AV_PIX_FMT_NONE;
 
     if ((ret = ff_ffv1_common_init(avctx, f)) < 0)
         return ret;
@@ -682,13 +711,16 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     FFV1Context *f      = avctx->priv_data;
     int ret;
     AVFrame *p;
+    const FFHWAccel *hwaccel = NULL;
 
     /* This is copied onto the first slice's range coder context */
     RangeCoder c;
 
     ff_progress_frame_unref(&f->last_picture);
-    FFSWAP(ProgressFrame, f->picture, f->last_picture);
+    av_refstruct_unref(&f->hwaccel_last_picture_private);
 
+    FFSWAP(ProgressFrame, f->picture, f->last_picture);
+    FFSWAP(void *, f->hwaccel_picture_private, f->hwaccel_last_picture_private);
 
     f->avctx = avctx;
     f->frame_damaged = 0;
@@ -704,8 +736,15 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
     if (avctx->skip_frame >= AVDISCARD_ALL)
         return avpkt->size;
 
+    if (avctx->hwaccel)
+        hwaccel = ffhwaccel(avctx->hwaccel);
+
     ret = ff_progress_frame_get_buffer(avctx, &f->picture,
                                        AV_GET_BUFFER_FLAG_REF);
+    if (ret < 0)
+        return ret;
+
+    ret = ff_hwaccel_frame_priv_alloc(avctx, &f->hwaccel_picture_private);
     if (ret < 0)
         return ret;
 
@@ -721,15 +760,53 @@ static int decode_frame(AVCodecContext *avctx, AVFrame *rframe,
             p->flags |= AV_FRAME_FLAG_TOP_FIELD_FIRST;
     }
 
+    /* Start */
+    if (hwaccel) {
+        ret = hwaccel->start_frame(avctx, avpkt->buf, avpkt->data, avpkt->size);
+        if (ret < 0)
+            return ret;
+    }
+
     ff_thread_finish_setup(avctx);
 
-    ret = decode_slices(avctx, c, avpkt);
-    if (ret < 0)
-        return ret;
+    /* Decode slices */
+    if (hwaccel) {
+        uint8_t *buf_end = avpkt->data + avpkt->size;
+
+        if (!(p->flags & AV_FRAME_FLAG_KEY) && f->last_picture.f)
+            ff_progress_frame_await(&f->last_picture, f->slice_count - 1);
+
+        for (int i = f->slice_count - 1; i >= 0; i--) {
+            uint8_t *pos;
+            uint32_t len;
+            ret = find_next_slice(avctx, avpkt->data, buf_end, i,
+                                  &pos, &len);
+            if (ret < 0)
+                return ret;
+
+            buf_end -= len;
+
+            ret = hwaccel->decode_slice(avctx, pos, len);
+            if (ret < 0)
+                return ret;
+        }
+    } else {
+        ret = decode_slices(avctx, c, avpkt);
+        if (ret < 0)
+            return ret;
+    }
+
+    /* Finalize */
+    if (hwaccel) {
+        ret = hwaccel->end_frame(avctx);
+        if (ret < 0)
+            return ret;
+    }
 
     ff_progress_frame_report(&f->picture, INT_MAX);
 
     ff_progress_frame_unref(&f->last_picture);
+    av_refstruct_unref(&f->hwaccel_last_picture_private);
     if ((ret = av_frame_ref(rframe, f->picture.f)) < 0)
         return ret;
 
@@ -758,6 +835,7 @@ static int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
     fdst->ac                  = fsrc->ac;
     fdst->colorspace          = fsrc->colorspace;
     fdst->pix_fmt             = fsrc->pix_fmt;
+    fdst->configured_pix_fmt  = fsrc->configured_pix_fmt;
 
     fdst->ec                  = fsrc->ec;
     fdst->intra               = fsrc->intra;
@@ -793,6 +871,8 @@ static int update_thread_context(AVCodecContext *dst, const AVCodecContext *src)
     av_assert1(fdst->max_slice_count == fsrc->max_slice_count);
 
     ff_progress_frame_replace(&fdst->picture, &fsrc->picture);
+    av_refstruct_replace(&fdst->hwaccel_picture_private,
+                         fsrc->hwaccel_picture_private);
 
     return 0;
 }
@@ -803,8 +883,10 @@ static av_cold int ffv1_decode_close(AVCodecContext *avctx)
     FFV1Context *const s = avctx->priv_data;
 
     ff_progress_frame_unref(&s->picture);
+    av_refstruct_unref(&s->hwaccel_picture_private);
+
     ff_progress_frame_unref(&s->last_picture);
-    av_freep(&avctx->stats_out);
+    av_refstruct_unref(&s->hwaccel_last_picture_private);
 
     ff_ffv1_close(s);
 
@@ -826,4 +908,10 @@ const FFCodec ff_ffv1_decoder = {
     .caps_internal  = FF_CODEC_CAP_INIT_CLEANUP |
                       FF_CODEC_CAP_SKIP_FRAME_FILL_PARAM |
                       FF_CODEC_CAP_USES_PROGRESSFRAMES,
+    .hw_configs     = (const AVCodecHWConfigInternal *const []) {
+#if CONFIG_FFV1_VULKAN_HWACCEL
+        HWACCEL_VULKAN(ffv1),
+#endif
+        NULL
+    },
 };
