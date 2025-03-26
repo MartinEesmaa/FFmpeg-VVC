@@ -2974,6 +2974,7 @@ eamad_decoder_select="aandcttables blockdsp bswapdsp"
 eatgq_decoder_select="aandcttables"
 eatqi_decoder_select="aandcttables blockdsp bswapdsp"
 exr_decoder_deps="zlib"
+exr_decoder_select="bswapdsp"
 exr_encoder_deps="zlib"
 ffv1_decoder_select="rangecoder"
 ffv1_encoder_select="rangecoder"
@@ -5249,12 +5250,6 @@ elif $ar 2>&1 | grep -q "\[D\] "; then
 else
     arflags="rc"
     ar_o='$@'
-fi
-
-if $ar 2>&1 | grep -qi  "@.*file"; then
-    ar_objs="true"
-else
-    ar_objs=""
 fi
 
 add_cflags $extra_cflags
@@ -7786,6 +7781,13 @@ case $ld_type in
         check_ldflags -Qunused-arguments
     ;;
 esac
+
+{
+ar_out=${FFTMPDIR}/test$LIBSUF
+respfile="@/dev/null"
+out_arg="$(echo $ar_o | sed "s;\$@;$ar_out;g")"
+test_cmd $ar $arflags $out_arg $respfile && ar_objs="true" || ar_objs=""
+}
 
 enable frame_thread_encoder
 
