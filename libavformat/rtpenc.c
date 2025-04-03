@@ -219,6 +219,14 @@ static int rtp_write_header(AVFormatContext *s1)
             s->nal_length_size = (st->codecpar->extradata[21] & 0x03) + 1;
         }
         break;
+    case AV_CODEC_ID_MJPEG:
+    case AV_CODEC_ID_BITPACKED:
+    case AV_CODEC_ID_RAWVIDEO:
+        if (st->codecpar->width <= 0 || st->codecpar->height <= 0) {
+            av_log(s1, AV_LOG_ERROR, "dimensions not set\n");
+            return AVERROR(EINVAL);
+        }
+        break;
     case AV_CODEC_ID_VP9:
         if (s1->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
             av_log(s, AV_LOG_ERROR,
@@ -685,5 +693,5 @@ const FFOutputFormat ff_rtp_muxer = {
     .write_packet      = rtp_write_packet,
     .write_trailer     = rtp_write_trailer,
     .p.priv_class      = &rtp_muxer_class,
-    .p.flags           = AVFMT_TS_NONSTRICT,
+    .p.flags           = AVFMT_NODIMENSIONS | AVFMT_TS_NONSTRICT,
 };

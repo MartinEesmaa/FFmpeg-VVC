@@ -3329,6 +3329,8 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
         }
     }
 
+    s->f_code = 1;
+    s->b_code = 1;
     if (ctx->shape != BIN_ONLY_SHAPE) {
         s->chroma_qscale = s->qscale = get_bits(gb, ctx->quant_precision);
         if (s->qscale == 0) {
@@ -3345,8 +3347,7 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
                 s->f_code = 1;
                 return AVERROR_INVALIDDATA;  // makes no sense to continue, as there is nothing left from the image then
             }
-        } else
-            s->f_code = 1;
+        }
 
         if (s->pict_type == AV_PICTURE_TYPE_B) {
             s->b_code = get_bits(gb, 3);
@@ -3356,8 +3357,7 @@ static int decode_vop_header(Mpeg4DecContext *ctx, GetBitContext *gb,
                 s->b_code=1;
                 return AVERROR_INVALIDDATA; // makes no sense to continue, as the MV decoding will break very quickly
             }
-        } else
-            s->b_code = 1;
+        }
 
         if (s->avctx->debug & FF_DEBUG_PICT_INFO) {
             av_log(s->avctx, AV_LOG_DEBUG,
@@ -3795,12 +3795,10 @@ static int mpeg4_update_thread_context(AVCodecContext *dst,
     memcpy(s->sprite_shift, s1->sprite_shift, sizeof(s1->sprite_shift));
     memcpy(s->sprite_traj,  s1->sprite_traj,  sizeof(s1->sprite_traj));
 
-    ret = av_buffer_replace(&s->bitstream_buffer, s1->bitstream_buffer);
-
     if (!init && s1->xvid_build >= 0)
         ff_xvid_idct_init(&s->m.idsp, dst);
 
-    return 0;
+    return av_buffer_replace(&s->bitstream_buffer, s1->bitstream_buffer);
 }
 
 static int mpeg4_update_thread_context_for_user(AVCodecContext *dst,

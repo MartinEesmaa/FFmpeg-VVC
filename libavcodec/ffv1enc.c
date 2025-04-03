@@ -1252,87 +1252,47 @@ static void load_rgb_float32_frame(FFV1Context *f, FFV1SliceContext *sc,
         AV_QSORT(sc->unit[3], i, struct Unit, CMP);
 }
 
-typedef struct RemapEncoderState {
+static int encode_float32_remap_segment(FFV1SliceContext *sc,
+                                        int p, int mul_count, int *mul_tab, int update, int final)
+{
+    const int pixel_num = sc->slice_width * sc->slice_height;
     uint8_t state[2][3][32];
     int mul[4096+1];
-    RangeCoder rc;
-    int lu;
-    int run;
-    int64_t last_val;
-    int compact_index;
-    int mul_count;
-    int i;
-    int pixel_num;
-    int p;
-    int current_mul_index;
-    int run1final;
+    RangeCoder rc = sc->c;
+    int lu = 0;
+    int run = 0;
+    int64_t last_val = -1;
+    int compact_index = -1;
+    int i = 0;
+    int current_mul_index = -1;
+    int run1final = 0;
     int64_t run1start_i;
     int64_t run1start_last_val;
-} RemapEncoderState;
+    int run1start_mul_index;
 
-static inline void copy_state(RemapEncoderState *dst, const RemapEncoderState *src)
-{
-    dst->rc = src->rc;
-    memcpy(dst->mul, src->mul, (src->mul_count + 1) * sizeof(src->mul[0]));
-    memcpy(dst->state, src->state, sizeof(dst->state));
-    dst->lu             = src->lu;
-    dst->run            = src->run;
-    dst->last_val       = src->last_val;
-    dst->compact_index  = src->compact_index;
-    dst->mul_count      = src->mul_count;
-    dst->i              = src->i;
-    dst->pixel_num      = src->pixel_num;
-    dst->p              = src->p;
-    dst->current_mul_index = src->current_mul_index;
-    dst->run1final      = src->run1final;
-    dst->run1start_i    = src->run1start_i;
-    dst->run1start_last_val = src->run1start_last_val;
-}
+    memcpy(mul, mul_tab, sizeof(*mul_tab)*(mul_count+1));
+    memset(state, 128, sizeof(state));
+    put_symbol(&rc, state[0][0], mul_count, 0);
+    memset(state, 128, sizeof(state));
 
-static inline void encode_mul(RemapEncoderState *s, int mul_index)
-{
-    av_assert2(s->mul[ mul_index ]);
-    if (s->mul[ mul_index ] < 0) {
-        s->mul[ mul_index ] *= -1;
-        put_symbol_inline(&s->rc, s->state[0][2], s->mul[ mul_index ], 0, NULL, NULL);
-    }
-}
-
-static int encode_float32_remap_segment(FFV1SliceContext *sc,
-                                        RemapEncoderState *state_arg, int update, int final)
-{
-    RemapEncoderState s;
-
-    copy_state(&s, state_arg);
-
-    if (s.i == 0) {
-        memset(s.state, 128, sizeof(s.state));
-        put_symbol(&s.rc, s.state[0][0], s.mul_count, 0);
-        memset(s.state, 128, sizeof(s.state));
-        s.last_val = -1;
-        s.compact_index = -1;
-        s.lu = 0;
-        s.run = 0;
-        s.current_mul_index = -1;
-        s.run1final = 0;
-    }
-
-    for (; s.i < s.pixel_num+1; s.i++) {
-        int current_mul = s.current_mul_index < 0 ? 1 : FFABS(s.mul[s.current_mul_index]);
+    for (; i < pixel_num+1; i++) {
+        int current_mul = current_mul_index < 0 ? 1 : FFABS(mul[current_mul_index]);
         int64_t val;
-        if (s.i == s.pixel_num) {
-            if (s.last_val == 0xFFFFFFFF) {
+        if (i == pixel_num) {
+            if (last_val == 0xFFFFFFFF) {
                 break;
             } else {
-                val = 1LL<<32;
+                val = last_val + ((1LL<<32) - last_val + current_mul - 1) / current_mul * current_mul;
+                av_assert2(val >= (1LL<<32));
+                val += lu * current_mul; //ensure a run1 ends
             }
         } else
-            val = sc->unit[s.p][s.i].val;
+            val = sc->unit[p][i].val;
 
-        if (s.last_val != val) {
-            int64_t delta = val - s.last_val;
+        if (last_val != val) {
+            int64_t delta = val - last_val;
             int64_t step  = FFMAX(1, (delta + current_mul/2) / current_mul);
-            av_assert2(s.last_val < val);
+            av_assert2(last_val < val);
             av_assert2(current_mul > 0);
 
             delta -= step*current_mul;
@@ -1340,126 +1300,168 @@ static int encode_float32_remap_segment(FFV1SliceContext *sc,
             av_assert2(delta > -current_mul);
 
             av_assert2(step > 0);
-            if (s.lu) {
-                if (!s.run) {
-                    s.run1start_i        = s.i - 1;
-                    s.run1start_last_val = s.last_val;
+            if (lu) {
+                if (!run) {
+                    run1start_i        = i - 1;
+                    run1start_last_val = last_val;
+                    run1start_mul_index= current_mul_index;
                 }
                 if (step == 1) {
-                    if (s.run1final) {
+                    if (run1final) {
                         if (current_mul>1)
-                            put_symbol_inline(&s.rc, s.state[s.lu][1], delta, 1, NULL, NULL);
+                            put_symbol_inline(&rc, state[lu][1], delta, 1, NULL, NULL);
                     }
-                    s.run ++;
-                    av_assert2(s.last_val + current_mul + delta == val);
+                    run ++;
+                    av_assert2(last_val + current_mul + delta == val);
                 } else {
-                    if (s.run1final) {
-                        if (s.run == 0)
-                            s.lu ^= 1;
-                        s.i--; // we did not encode val so we need to backstep
-                        s.last_val += current_mul;
+                    if (run1final) {
+                        if (run == 0)
+                            lu ^= 1;
+                        i--; // we did not encode val so we need to backstep
+                        last_val += current_mul;
                     } else {
-                        put_symbol_inline(&s.rc, s.state[s.lu][0], s.run, 0, NULL, NULL);
-                        s.i                 = s.run1start_i;
-                        s.last_val          = s.run1start_last_val; // we could compute this instead of storing
-                        av_assert2(s.last_val >= 0 && s.i > 0); // first state is zero run so we cant have this in a one run and current_mul_index would be -1
-                        if (s.run)
-                            s.current_mul_index = ((s.last_val + 1) * s.mul_count) >> 32;
+                        put_symbol_inline(&rc, state[lu][0], run, 0, NULL, NULL);
+                        i                 = run1start_i;
+                        last_val          = run1start_last_val; // we could compute this instead of storing
+                        current_mul_index = run1start_mul_index;
                     }
-                    s.run1final ^= 1;
+                    run1final ^= 1;
 
-                    s.run = 0;
+                    run = 0;
                     continue;
                 }
             } else {
-                av_assert2(s.run == 0);
-                av_assert2(s.run1final == 0);
-                put_symbol_inline(&s.rc, s.state[s.lu][0], step - 1, 0, NULL, NULL);
+                av_assert2(run == 0);
+                av_assert2(run1final == 0);
+                put_symbol_inline(&rc, state[lu][0], step - 1, 0, NULL, NULL);
 
                 if (current_mul > 1)
-                    put_symbol_inline(&s.rc, s.state[s.lu][1], delta, 1, NULL, NULL);
+                    put_symbol_inline(&rc, state[lu][1], delta, 1, NULL, NULL);
                 if (step == 1)
-                    s.lu ^= 1;
+                    lu ^= 1;
 
-                av_assert2(s.last_val + step * current_mul + delta == val);
+                av_assert2(last_val + step * current_mul + delta == val);
             }
-            s.last_val = val;
-            s.current_mul_index = ((s.last_val + 1) * s.mul_count) >> 32;
-            if (!s.run || s.run1final) {
-                encode_mul(&s, s.current_mul_index);
-                s.compact_index ++;
+            last_val = val;
+            current_mul_index = ((last_val + 1) * mul_count) >> 32;
+            if (!run || run1final) {
+                av_assert2(mul[ current_mul_index ]);
+                if (mul[ current_mul_index ] < 0) {
+                    av_assert2(i < pixel_num);
+                    mul[ current_mul_index ] *= -1;
+                    put_symbol_inline(&rc, state[0][2], mul[ current_mul_index ], 0, NULL, NULL);
+                }
+                compact_index ++;
             }
         }
-        if (!s.run || s.run1final)
-            if (final && s.i < s.pixel_num)
-                sc->bitmap[s.p][sc->unit[s.p][s.i].ndx] = s.compact_index;
+        if (!run || run1final)
+            if (final && i < pixel_num)
+                sc->bitmap[p][sc->unit[p][i].ndx] = compact_index;
     }
 
     if (update) {
-        copy_state(state_arg, &s);
+        sc->c = rc;
     }
-    return get_rac_count(&s.rc);
+    return get_rac_count(&rc);
 }
 
 static void encode_float32_remap(FFV1Context *f, FFV1SliceContext *sc,
                                  const uint8_t *src[4])
 {
-    RemapEncoderState s;
-    s.pixel_num = sc->slice_width * sc->slice_height;
+    int pixel_num = sc->slice_width * sc->slice_height;
+    const int max_log2_mul_count  = ((int[]){  1,  1,  1,  9,  9,  10})[f->remap_optimizer];
+    const int log2_mul_count_step = ((int[]){  1,  1,  1,  9,  9,   1})[f->remap_optimizer];
+    const int max_log2_mul        = ((int[]){  1,  8,  8,  9, 22,  22})[f->remap_optimizer];
+    const int log2_mul_step       = ((int[]){  1,  8,  1,  1,  1,   1})[f->remap_optimizer];
+    const int bruteforce_count    = ((int[]){  0,  0,  0,  1,  1,   1})[f->remap_optimizer];
+    const int stair_mode          = ((int[]){  0,  0,  0,  1,  0,   0})[f->remap_optimizer];
+    const int magic_log2          = ((int[]){  1,  1,  1,  1,  0,   0})[f->remap_optimizer];
 
-    av_assert0 (s.pixel_num <= 65536);
+    av_assert0 (pixel_num <= 65536);
 
     for (int p= 0; p < 1 + 2*f->chroma_planes + f->transparency; p++) {
-        float score_tab[16] = {0};
-        int64_t last_val = -1;
-        int best_index = 0;
-        s.rc = sc->c;
-        s.i = 0;
-        s.p = p;
+        int best_log2_mul_count = 0;
+        float score_sum[11] = {0};
+        int mul_all[11][1025];
 
-        for(int v = 0; v< 512; v++) {
-            if (v >= 0x378/8 && v <= 23 + 0x378/8) {
-                s.mul[v] = -(0x800080 >> (v - 0x378/8));
-            } else
-                s.mul[v] = -1;
-        }
-        for (int i= 0; i<s.pixel_num; i++) {
-            int64_t val = sc->unit[p][i].val;
-            if (val != last_val) {
-                av_assert2(last_val < val);
-                for(int si= 0; si < FF_ARRAY_ELEMS(score_tab); si++) {
-                    int64_t delta = val - last_val;
-                    int mul;
-                    int64_t cost;
+        for (int log2_mul_count= 0; log2_mul_count <= max_log2_mul_count; log2_mul_count += log2_mul_count_step) {
+            float score_tab_all[1025][23] = {0};
+            int64_t last_val = -1;
+            int *mul_tab = mul_all[log2_mul_count];
+            int last_mul_index = -1;
+            int mul_count = 1 << log2_mul_count;
 
-                    if (last_val < 0) {
-                        mul = 1;
-                    } else if (si + 1 == FF_ARRAY_ELEMS(score_tab)) {
-                        mul = -s.mul[ (last_val + 1) >> (32-9) ];
-                    } else
-                        mul = 1<<si;
+            score_sum[log2_mul_count] = 2 * log2_mul_count;
+            if (magic_log2)
+                score_sum[log2_mul_count] = av_float2int((float)mul_count * mul_count);
+            for (int i= 0; i<pixel_num; i++) {
+                int64_t val = sc->unit[p][i].val;
+                int mul_index = (val + 1LL)*mul_count >> 32;
+                if (val != last_val) {
+                    float *score_tab = score_tab_all[(last_val + 1LL)*mul_count >> 32];
+                    av_assert2(last_val < val);
+                    for(int si= 0; si <= max_log2_mul; si += log2_mul_step) {
+                        int64_t delta = val - last_val;
+                        int mul;
+                        int64_t cost;
 
-                    cost = FFMAX((delta + mul/2)  / mul, 1);
-                    score_tab[si] += log2(cost) + log2(fabs(delta - cost*mul)+1);
+                        if (last_val < 0) {
+                            mul = 1;
+                        } else if (stair_mode && mul_count == 512 && si == max_log2_mul ) {
+                            if (mul_index >= 0x378/8 && mul_index <= 23 + 0x378/8) {
+                                mul = (0x800080 >> (mul_index - 0x378/8));
+                            } else
+                                mul = 1;
+                        } else {
+                            mul = (0x10001LL)<<si >> 16;
+                        }
+
+                        cost = FFMAX((delta + mul/2)  / mul, 1);
+                        float score = 1;
+                        if (mul > 1) {
+                            score *= (fabs(delta - cost*mul)+1);
+                            if (mul_count > 1)
+                                score *= score;
+                        }
+                        score *= cost;
+                        score *= score;
+                        if (mul_index != last_mul_index)
+                            score *= mul;
+                        if (magic_log2) {
+                            score_tab[si] += av_float2int(score);
+                        } else
+                            score_tab[si] += log2f(score);
+                    }
                 }
                 last_val = val;
+                last_mul_index = mul_index;
             }
-        }
-        for(int si= 1; si < FF_ARRAY_ELEMS(score_tab); si++) {
-            if (score_tab[si] < score_tab[ best_index ])
-                best_index = si;
-        }
-        if (best_index + 1 < FF_ARRAY_ELEMS(score_tab)) {
-            s.mul[0] = -1 << best_index;
-            s.mul_count = 1;
-        } else {
-            s.mul_count = 512;
-        }
-        s.mul[s.mul_count] = 1;
+            for(int i= 0; i<mul_count; i++) {
+                int best_index = 0;
+                float *score_tab = score_tab_all[i];
+                for(int si= 0; si <= max_log2_mul; si += log2_mul_step) {
+                    if (score_tab[si] < score_tab[ best_index ])
+                        best_index = si;
+                }
+                if (stair_mode && mul_count == 512 && best_index == max_log2_mul ) {
+                    if (i >= 0x378/8 && i <= 23 + 0x378/8) {
+                        mul_tab[i] = -(0x800080 >> (i - 0x378/8));
+                    } else
+                        mul_tab[i] = -1;
+                } else
+                    mul_tab[i] = -((0x10001LL)<<best_index >> 16);
+                score_sum[log2_mul_count] += score_tab[ best_index ];
+            }
+            mul_tab[mul_count] = 1;
 
-        encode_float32_remap_segment(sc, &s, 1, 1);
+            if (bruteforce_count)
+                score_sum[log2_mul_count] = encode_float32_remap_segment(sc, p, mul_count, mul_all[log2_mul_count], 0, 0);
 
-        sc->c = s.rc;
+            if (score_sum[log2_mul_count] < score_sum[best_log2_mul_count])
+                best_log2_mul_count = log2_mul_count;
+        }
+
+        encode_float32_remap_segment(sc, p, 1<<best_log2_mul_count, mul_all[best_log2_mul_count], 1, 1);
     }
 }
 
@@ -1845,7 +1847,7 @@ static const AVOption options[] = {
             { .i64 =  1 }, INT_MIN, INT_MAX, VE, .unit = "remap_mode" },
         { "flipdualrle", "Dual RLE", 0, AV_OPT_TYPE_CONST,
             { .i64 =  2 }, INT_MIN, INT_MAX, VE, .unit = "remap_mode" },
-
+    { "remap_optimizer", "Remap Optimizer", OFFSET(remap_optimizer), AV_OPT_TYPE_INT, { .i64 = 3 }, 0, 5, VE, .unit = "remap_optimizer" },
 
     { NULL }
 };

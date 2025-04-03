@@ -167,7 +167,7 @@ int ff_videotoolbox_alloc_frame(AVCodecContext *avctx, AVFrame *frame)
     }
     frame->buf[0] = buf;
 
-    fdd = (FrameDecodeData*)frame->private_ref->data;
+    fdd = frame->private_ref;
     fdd->post_process = videotoolbox_postproc_frame;
 
     frame->width  = avctx->width;
@@ -728,7 +728,8 @@ static void videotoolbox_decoder_callback(void *opaque,
     }
 
     if (!image_buffer) {
-        if (status != kVTVideoDecoderReferenceMissingErr)
+        // kVTVideoDecoderReferenceMissingErr, defined since the macOS 12 SDKs
+        if (status != -17694)
             vtctx->reconfig_needed = true;
 
         av_log(vtctx->logctx, status ? AV_LOG_WARNING : AV_LOG_DEBUG,

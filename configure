@@ -433,6 +433,7 @@ Toolchain options:
   --enable-thumb           compile for Thumb instruction set
   --enable-lto[=arg]       use link-time optimization
   --env="ENV=override"     override the environment variables
+  --disable-response-files Don't pass the list of objects to linker in a file [autodetect]
 
 Advanced options (experts only):
   --malloc-prefix=PREFIX   prefix malloc and related names with PREFIX
@@ -2298,11 +2299,6 @@ HEADERS_LIST="
     cdio_paranoia_paranoia_h
     cuda_h
     dispatch_dispatch_h
-    dev_bktr_ioctl_bt848_h
-    dev_bktr_ioctl_meteor_h
-    dev_ic_bt8xx_h
-    dev_video_bktr_ioctl_bt848_h
-    dev_video_meteor_ioctl_meteor_h
     direct_h
     dirent_h
     dxgidebug_h
@@ -2312,11 +2308,8 @@ HEADERS_LIST="
     io_h
     linux_dma_buf_h
     linux_perf_event_h
-    machine_ioctl_bt848_h
-    machine_ioctl_meteor_h
     malloc_h
     opencv2_core_core_c_h
-    OpenGL_gl3_h
     poll_h
     pthread_np_h
     sys_hwprobe_h
@@ -2681,6 +2674,7 @@ CMDLINE_SELECT="
     extra_warnings
     logging
     optimizations
+    response_files
     rpath
     stripping
     version_tracking
@@ -3650,7 +3644,7 @@ libxvid_encoder_deps="libxvid"
 libzvbi_teletext_decoder_deps="libzvbi"
 vapoursynth_demuxer_deps="vapoursynth"
 videotoolbox_suggest="coreservices"
-videotoolbox_deps="corefoundation coremedia corevideo"
+videotoolbox_deps="corefoundation coremedia corevideo VTDecompressionSessionDecodeFrame"
 videotoolbox_encoder_deps="videotoolbox VTCompressionSessionPrepareToEncodeFrames"
 libsvt_hevc_encoder_deps="libsvthevc"
 libsvtjpegxs_encoder_deps="libsvtjpegxs"
@@ -3768,9 +3762,8 @@ alsa_outdev_deps="alsa"
 avfoundation_indev_deps="avfoundation corevideo coremedia pthreads"
 avfoundation_indev_suggest="coregraphics applicationservices"
 avfoundation_indev_extralibs="-framework Foundation"
-audiotoolbox_outdev_deps="audiotoolbox pthreads"
+audiotoolbox_outdev_deps="audiotoolbox pthreads AudioObjectPropertyAddress"
 audiotoolbox_outdev_extralibs="-framework AudioToolbox -framework CoreAudio"
-bktr_indev_deps_any="dev_bktr_ioctl_bt848_h machine_ioctl_bt848_h dev_video_bktr_ioctl_bt848_h dev_ic_bt8xx_h"
 caca_outdev_deps="libcaca"
 decklink_deps_any="libdl LoadLibrary"
 decklink_indev_deps="decklink threads"
@@ -3795,13 +3788,10 @@ lavfi_indev_deps="avfilter"
 libcdio_indev_deps="libcdio"
 libdc1394_indev_deps="libdc1394"
 openal_indev_deps="openal"
-opengl_outdev_deps="opengl"
-opengl_outdev_suggest="sdl2"
 oss_indev_deps_any="sys_soundcard_h"
 oss_outdev_deps_any="sys_soundcard_h"
 pulse_indev_deps="libpulse"
 pulse_outdev_deps="libpulse"
-sdl2_outdev_deps="sdl2"
 sndio_indev_deps="sndio"
 sndio_outdev_deps="sndio"
 v4l2_indev_deps_any="linux_videodev2_h sys_videoio_h"
@@ -4164,6 +4154,7 @@ objformat="elf32"
 x86asmexe_default="nasm"
 windres_default="windres"
 striptype="direct"
+response_files_default="auto"
 
 # OS
 target_os_default=$(tolower $(uname -s))
@@ -5209,7 +5200,7 @@ test -n "$cc_type" && enable $cc_type ||
 : ${dep_cc_default:=$cc}
 : ${ld_default:=$cc}
 : ${host_ld_default:=$host_cc}
-set_default ar as objcc dep_cc ld ln_s host_ld windres
+set_default ar as objcc dep_cc ld ln_s host_ld windres response_files
 
 probe_cc as "$as"
 asflags_filter=$_flags_filter
@@ -6717,6 +6708,7 @@ check_headers termios.h
 check_headers unistd.h
 check_headers valgrind/valgrind.h
 check_func_headers VideoToolbox/VTCompressionSession.h VTCompressionSessionPrepareToEncodeFrames -framework VideoToolbox
+check_func_headers VideoToolbox/VideoToolbox.h VTDecompressionSessionDecodeFrame -framework VideoToolbox
 check_func_headers VideoToolbox/VideoToolbox.h VTPixelTransferSessionCreate -framework VideoToolbox
 check_func_headers VideoToolbox/VideoToolbox.h VTPixelRotationSessionCreate -framework VideoToolbox
 check_headers windows.h
@@ -6756,6 +6748,10 @@ check_apple_framework CoreFoundation
 check_apple_framework CoreMedia
 check_apple_framework CoreVideo
 check_apple_framework CoreAudio
+
+enabled audiotoolbox && {
+    check_type AudioToolbox/AudioToolbox.h AudioObjectPropertyAddress
+}
 
 enabled avfoundation && {
     disable coregraphics applicationservices
@@ -7289,12 +7285,6 @@ check_cpp_condition vfwcap_defines vfw.h "WM_CAP_DRIVER_CONNECT > WM_USER"
 
 check_type "dshow.h" IBaseFilter
 
-# check for ioctl_meteor.h, ioctl_bt848.h and alternatives
-check_headers "dev/bktr/ioctl_meteor.h dev/bktr/ioctl_bt848.h"                   ||
-    check_headers "machine/ioctl_meteor.h machine/ioctl_bt848.h"                 ||
-    check_headers "dev/video/meteor/ioctl_meteor.h dev/video/bktr/ioctl_bt848.h" ||
-    check_headers "dev/ic/bt8xx.h"
-
 if check_struct sys/soundcard.h audio_buf_info bytes; then
     enable_sanitized sys/soundcard.h
 else
@@ -7782,12 +7772,18 @@ case $ld_type in
     ;;
 esac
 
-{
-ar_out=${FFTMPDIR}/test$LIBSUF
-respfile="@/dev/null"
-out_arg="$(echo $ar_o | sed "s;\$@;$ar_out;g")"
-test_cmd $ar $arflags $out_arg $respfile && ar_objs="true" || ar_objs=""
-}
+if [ "$response_files" != "no" ]; then
+    ar_out=${FFTMPDIR}/test$LIBSUF
+    respfile="@/dev/null"
+    out_arg="$(echo $ar_o | sed "s;\$@;$ar_out;g")"
+    if test_cmd $ar $arflags $out_arg $respfile; then
+        response_files="yes"
+    elif [ "$response_files" = "auto" ]; then
+        response_files="no"
+    else
+        die "Response files are not available with this toolchain. Exiting"
+    fi
+fi
 
 enable frame_thread_encoder
 
@@ -7924,10 +7920,6 @@ enabled uspp_filter         && prepend avfilter_deps "avcodec"
 enabled zoompan_filter      && prepend avfilter_deps "swscale"
 
 enabled lavfi_indev         && prepend avdevice_deps "avfilter"
-
-#FIXME
-enabled_any sdl2_outdev opengl_outdev && enabled sdl2 &&
-    add_cflags $(filter_out '-Dmain=SDL_main' $sdl2_cflags)
 
 enabled opus_decoder    && prepend avcodec_deps "swresample"
 
@@ -8169,7 +8161,7 @@ DEPX86ASM=$x86asmexe
 DEPX86ASMFLAGS=\$(X86ASMFLAGS)
 AR=$ar
 ARFLAGS=$arflags
-AR_OBJS=$ar_objs
+RESPONSE_FILES=$response_files
 AR_O=$ar_o
 AR_CMD=$ar
 NM_CMD=$nm

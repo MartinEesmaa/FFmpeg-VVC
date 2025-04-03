@@ -3800,7 +3800,6 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     AVVulkanDeviceContext *hwctx = &p->p;
     FFVulkanFunctions *vk = &p->vkctx.vkfn;
     VulkanFramesPriv *fp = hwfc->hwctx;
-    AVVulkanFramesContext *hwfctx = &fp->p;
     const int planes = av_pix_fmt_count_planes(hwfc->sw_format);
     VkImageDrmFormatModifierPropertiesEXT drm_mod = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT,
@@ -3882,9 +3881,6 @@ static int vulkan_map_to_drm(AVHWFramesContext *hwfc, AVFrame *dst,
         vk->GetImageSubresourceLayout(hwctx->act_dev, f->img[i], &sub, &layout);
         drm_desc->layers[i].planes[0].offset = layout.offset;
         drm_desc->layers[i].planes[0].pitch  = layout.rowPitch;
-
-        if (hwfctx->flags & AV_VK_FRAME_FLAG_CONTIGUOUS_MEMORY)
-            drm_desc->layers[i].planes[0].offset += f->offset[i];
     }
 
     dst->width   = src->width;
