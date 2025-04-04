@@ -158,21 +158,21 @@ static int config_enc_params(EB_H265_ENC_CONFIGURATION *param,
 
     param->profile = svt_enc->profile;
 
-    if (FF_PROFILE_HEVC_MAIN_STILL_PICTURE == param->profile) {
+    if (AV_PROFILE_HEVC_MAIN_STILL_PICTURE == param->profile) {
         av_log(avctx, AV_LOG_ERROR, "Main Still Picture Profile not supported\n");
         return EB_ErrorBadParameter;
     }
 
     if ((param->encoderColorFormat >= EB_YUV422) &&
-        (param->profile != FF_PROFILE_HEVC_REXT)) {
+        (param->profile != AV_PROFILE_HEVC_REXT)) {
         av_log(avctx, AV_LOG_WARNING, "Rext Profile forced for 422 or 444\n");
-        param->profile = FF_PROFILE_HEVC_REXT;
+        param->profile = AV_PROFILE_HEVC_REXT;
     }
 
-    if ((FF_PROFILE_HEVC_MAIN == param->profile) &&
+    if ((AV_PROFILE_HEVC_MAIN == param->profile) &&
         (param->encoderBitDepth > 8)) {
         av_log(avctx, AV_LOG_WARNING, "Main10 Profile forced for 10 bits\n");
-        param->profile = FF_PROFILE_HEVC_MAIN_10;
+        param->profile = AV_PROFILE_HEVC_MAIN_10;
     }
 
     param->targetBitRate = avctx->bit_rate;
@@ -185,11 +185,11 @@ static int config_enc_params(EB_H265_ENC_CONFIGURATION *param,
     if ((avctx->framerate.num > 0) && (avctx->framerate.den > 0)) {
         param->frameRateNumerator = avctx->framerate.num;
         param->frameRateDenominator =
-            avctx->framerate.den * avctx->ticks_per_frame;
+            avctx->framerate.den * avctx->framerate.den;
     } else {
         param->frameRateNumerator = avctx->time_base.den;
         param->frameRateDenominator =
-            avctx->time_base.num * avctx->ticks_per_frame;
+            avctx->time_base.num * avctx->time_base.den;
     }
 
     param->hierarchicalLevels = svt_enc->hierarchical_level;
@@ -503,7 +503,7 @@ static const AVOption options[] = {
       OFFSET(enc_mode), AV_OPT_TYPE_INT, { .i64 = 7 }, 0, 12, VE },
 
     { "profile", "Profile setting, Main Still Picture Profile not supported", OFFSET(profile),
-      AV_OPT_TYPE_INT, { .i64 = FF_PROFILE_HEVC_MAIN }, FF_PROFILE_HEVC_MAIN, FF_PROFILE_HEVC_REXT, VE, "profile"},
+      AV_OPT_TYPE_INT, { .i64 = AV_PROFILE_HEVC_MAIN }, AV_PROFILE_HEVC_MAIN, AV_PROFILE_HEVC_REXT, VE, "profile"},
 
     { "qp", "QP value for intra frames", OFFSET(qp),
       AV_OPT_TYPE_INT, { .i64 = 32 }, 0, 51, VE },

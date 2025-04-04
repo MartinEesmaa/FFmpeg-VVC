@@ -211,10 +211,10 @@ static int config_enc_params(EbSvtVp9EncConfiguration *param,
 
     if (avctx->framerate.num > 0 && avctx->framerate.den > 0) {
         param->frame_rate_numerator     = avctx->framerate.num;
-        param->frame_rate_denominator   = avctx->framerate.den * avctx->ticks_per_frame;
+        param->frame_rate_denominator   = avctx->framerate.den;
     } else {
         param->frame_rate_numerator     = avctx->time_base.den;
-        param->frame_rate_denominator   = avctx->time_base.num * avctx->ticks_per_frame;
+        param->frame_rate_denominator   = avctx->time_base.num;
     }
 
     if (param->rate_control_mode) {
