@@ -99,6 +99,16 @@ static int decode_plane(FFV1Context *f, FFV1SliceContext *sc,
 {
     int x, y;
     int16_t *sample[2];
+    int bits;
+    unsigned mask;
+
+    if (sc->remap) {
+        bits = av_ceil_log2(sc->remap_count[remap_index]);
+        mask = (1<<bits)-1;
+    } else {
+        bits = f->avctx->bits_per_raw_sample;
+    }
+
     sample[0] = sc->sample_buffer + 3;
     sample[1] = sc->sample_buffer + w + 6 + 3;
 
@@ -125,18 +135,18 @@ static int decode_plane(FFV1Context *f, FFV1SliceContext *sc,
             for (x = 0; x < w; x++)
                 src[x*pixel_stride + stride * y] = sample[1][x];
         } else {
-            int ret = decode_line(f, sc, gb, w, sample, plane_index, f->avctx->bits_per_raw_sample, ac);
+            int ret = decode_line(f, sc, gb, w, sample, plane_index, bits, ac);
             if (ret < 0)
                 return ret;
 
             if (sc->remap) {
                 if (f->packed_at_lsb || f->avctx->bits_per_raw_sample == 16) {
                     for (x = 0; x < w; x++) {
-                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = sc->fltmap[remap_index][sample[1][x] & 0xFFFF];
+                        ((uint16_t*)(src + stride*y))[x*pixel_stride] = sc->fltmap[remap_index][sample[1][x] & mask];
                     }
                 } else {
                     for (x = 0; x < w; x++) {
-                        int v = sc->fltmap[remap_index][sample[1][x] & 0xFFFF];
+                        int v = sc->fltmap[remap_index][sample[1][x] & mask];
                         ((uint16_t*)(src + stride*y))[x*pixel_stride] = v << (16 - f->avctx->bits_per_raw_sample) | v >> (2 * f->avctx->bits_per_raw_sample - 16);
                     }
                 }
@@ -254,10 +264,6 @@ static int decode_slice_header(const FFV1Context *f,
             av_log(f->avctx, AV_LOG_ERROR, "unsupported remap\n");
             return AVERROR_INVALIDDATA;
         }
-        if (sc->slice_width * sc->slice_height > 65536) {
-            av_log(f->avctx, AV_LOG_ERROR, "32bit needs remap\n");
-            return AVERROR_INVALIDDATA;
-        }
     }
 
     return 0;
@@ -288,6 +294,7 @@ static int decode_remap(FFV1Context *f, FFV1SliceContext *sc)
 {
     unsigned int end = (1LL<<f->avctx->bits_per_raw_sample) - 1;
     int flip = sc->remap == 2 ? (end>>1) : 0;
+    const int pixel_num = sc->slice_width * sc->slice_height;
 
     for (int p= 0; p < 1 + 2*f->chroma_planes + f->transparency; p++) {
         int j = 0;
@@ -326,7 +333,7 @@ static int decode_remap(FFV1Context *f, FFV1SliceContext *sc)
                 }
                 if (i - 1 >= end)
                     break;
-                if (j >= FF_ARRAY_ELEMS(sc->fltmap[p]))
+                if (j >= pixel_num)
                     return AVERROR_INVALIDDATA;
                 if (end <= 0xFFFF) {
                     sc->fltmap  [p][j++] = i ^ ((i&    0x8000) ? 0 : flip);
@@ -340,6 +347,7 @@ static int decode_remap(FFV1Context *f, FFV1SliceContext *sc)
             }
             lu ^= !run;
         }
+        sc->remap_count[p] = j;
     }
     return 0;
 }
@@ -387,6 +395,20 @@ static int decode_slice(AVCodecContext *c, void *arg)
     y      = sc->slice_y;
 
     if (sc->remap) {
+        const int pixel_num = sc->slice_width * sc->slice_height;
+
+        for(int p = 0; p < 1 + 2*f->chroma_planes + f->transparency ; p++) {
+            if (f->avctx->bits_per_raw_sample == 32) {
+                av_fast_malloc(&sc->fltmap32[p], &sc->fltmap32_size[p], pixel_num * sizeof(*sc->fltmap32[p]));
+                if (!sc->fltmap32[p])
+                    return AVERROR(ENOMEM);
+            } else {
+                av_fast_malloc(&sc->fltmap[p], &sc->fltmap_size[p], pixel_num * sizeof(*sc->fltmap[p]));
+                if (!sc->fltmap[p])
+                    return AVERROR(ENOMEM);
+            }
+        }
+
         ret = decode_remap(f, sc);
         if (ret < 0)
             return ret;
