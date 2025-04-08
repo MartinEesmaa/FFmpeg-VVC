@@ -41,7 +41,7 @@ typedef struct ASRContext {
     char *logfn;
 
     ps_decoder_t *ps;
-    cmd_ln_t *config;
+    ps_config_t *config;
 
     int utt_started;
 } ASRContext;
@@ -98,24 +98,17 @@ static int config_input(AVFilterLink *inlink)
 static av_cold int asr_init(AVFilterContext *ctx)
 {
     ASRContext *s = ctx->priv;
-    const float frate = s->rate;
-    char *rate = av_asprintf("%f", frate);
-    const char *argv[] = { "-logfn",    s->logfn,
-                           "-hmm",      s->hmm,
-                           "-lm",       s->lm,
-                           "-lmctl",    s->lmctl,
-                           "-lmname",   s->lmname,
-                           "-dict",     s->dict,
-                           "-samprate", rate,
-                           NULL };
+    ps_config_t *config = ps_config_init(NULL);
+    ps_config_set_str(config, "logfn", s->logfn);
+    ps_config_set_str(config, "hmm", s->hmm);
+    ps_config_set_str(config, "lm", s->lm);
+    ps_config_set_str(config, "lmctl", s->lmctl);
+    ps_config_set_str(config, "lmname", s->lmname);
+    ps_config_set_str(config, "dict", s->dict);
+    ps_config_set_float(config, "samprate", s->rate);
 
-    s->config = cmd_ln_parse_r(NULL, ps_args(), 14, (char **)argv, 0);
-    av_free(rate);
-    if (!s->config)
-        return AVERROR(ENOMEM);
-
-    ps_default_search_args(s->config);
-    s->ps = ps_init(s->config);
+    s->config = config;
+    s->ps = ps_init(config);
     if (!s->ps)
         return AVERROR(ENOMEM);
 
@@ -159,9 +152,7 @@ static av_cold void asr_uninit(AVFilterContext *ctx)
     ASRContext *s = ctx->priv;
 
     ps_free(s->ps);
-    s->ps = NULL;
-    cmd_ln_free_r(s->config);
-    s->config = NULL;
+    ps_config_free(s->config);
 }
 
 static const AVFilterPad asr_inputs[] = {
