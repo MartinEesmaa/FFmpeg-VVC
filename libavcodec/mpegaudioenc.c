@@ -24,9 +24,14 @@
  * The simplest mpeg audio layer 2 encoder.
  */
 
+#include "config.h"
+#include "config_components.h"
+
+#include "libavutil/avassert.h"
 #include "libavutil/channel_layout.h"
 
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "encode.h"
 #include "put_bits.h"
 
@@ -45,12 +50,12 @@
 #define SAMPLES_BUF_SIZE 4096
 
 typedef struct MpegAudioContext {
-    PutBitContext pb;
     int nb_channels;
     int lsf;           /* 1 if mpeg2 low bitrate selected */
     int bitrate_index; /* bit rate */
     int freq_index;
     int frame_size; /* frame size, in bits, without padding */
+    int is_fixed;
     /* padding computation */
     int frame_frac, frame_frac_incr, do_padding;
     short samples_buf[MPA_MAX_CHANNELS][SAMPLES_BUF_SIZE]; /* buffer for filter */
@@ -64,16 +69,19 @@ typedef struct MpegAudioContext {
     int16_t filter_bank[512];
     int scale_factor_table[64];
     unsigned char scale_diff_table[128];
-#if USE_FLOATS
-    float scale_factor_inv_table[64];
-#else
-    int8_t scale_factor_shift[64];
-    unsigned short scale_factor_mult[64];
-#endif
+    union {
+        float scale_factor_inv_table[64];
+        struct {
+            int8_t scale_factor_shift[64];
+            unsigned short scale_factor_mult[64];
+        };
+    };
     unsigned short total_quant_bits[17]; /* total number of bits per allocation group */
 } MpegAudioContext;
 
-static av_cold int MPA_encode_init(AVCodecContext *avctx)
+#define IS_FIXED(s) (CONFIG_MP2_ENCODER && CONFIG_MP2FIXED_ENCODER ? (s)->is_fixed : CONFIG_MP2FIXED_ENCODER)
+
+static av_cold int mpa_encode_init(AVCodecContext *avctx)
 {
     MpegAudioContext *s = avctx->priv_data;
     int freq = avctx->sample_rate;
@@ -89,17 +97,14 @@ static av_cold int MPA_encode_init(AVCodecContext *avctx)
 
     /* encoding freq */
     s->lsf = 0;
-    for(i=0;i<3;i++) {
+    for (i = 0;; i++) {
+        av_assert1(i < 3);
         if (ff_mpa_freq_tab[i] == freq)
             break;
         if ((ff_mpa_freq_tab[i] / 2) == freq) {
             s->lsf = 1;
             break;
         }
-    }
-    if (i == 3){
-        av_log(avctx, AV_LOG_ERROR, "Sampling rate %d is not allowed in mp2\n", freq);
-        return AVERROR(EINVAL);
     }
     s->freq_index = i;
 
@@ -159,13 +164,13 @@ static av_cold int MPA_encode_init(AVCodecContext *avctx)
         if (v <= 0)
             v = 1;
         s->scale_factor_table[i] = v;
-#if USE_FLOATS
-        s->scale_factor_inv_table[i] = exp2(-(3 - i) / 3.0) / (float)(1 << 20);
-#else
+        if (IS_FIXED(s)) {
 #define P 15
-        s->scale_factor_shift[i] = 21 - P - (i / 3);
-        s->scale_factor_mult[i] = (1 << P) * exp2((i % 3) / 3.0);
-#endif
+            s->scale_factor_shift[i] = 21 - P - (i / 3);
+            s->scale_factor_mult[i]  = (1 << P) * exp2((i % 3) / 3.0);
+        } else {
+            s->scale_factor_inv_table[i] = exp2(-(3 - i) / 3.0) / (float)(1 << 20);
+        }
     }
     for(i=0;i<128;i++) {
         v = i - 64;
@@ -502,7 +507,7 @@ static void psycho_acoustic_model(MpegAudioContext *s, short smr[SBLIMIT])
 /* Try to maximize the smr while using a number of bits inferior to
    the frame size. I tried to make the code simpler, faster and
    smaller than other encoders :-) */
-static void compute_bit_allocation(MpegAudioContext *s,
+static unsigned compute_bit_allocation(MpegAudioContext *s,
                                    short smr1[MPA_MAX_CHANNELS][SBLIMIT],
                                    unsigned char bit_alloc[MPA_MAX_CHANNELS][SBLIMIT],
                                    int *padding)
@@ -592,20 +597,86 @@ static void compute_bit_allocation(MpegAudioContext *s,
     }
     *padding = max_frame_size - current_frame_size;
     av_assert0(*padding >= 0);
+    return max_frame_size / 8U;
+}
+
+/// Quantization & write sub band samples
+static av_always_inline void encode_subbands(MpegAudioContext *const s,
+                                             PutBitContext *const p,
+                                             const uint8_t bit_alloc[MPA_MAX_CHANNELS][SBLIMIT],
+                                             int is_fixed)
+{
+    for (int k = 0; k < 3; ++k) {
+        for (int l = 0; l < 12; l += 3) {
+            for (int i = 0, j = 0; i < s->sblimit; ++i) {
+                const int bit_alloc_bits = s->alloc_table[j];
+                for (int ch = 0; ch < s->nb_channels; ++ch) {
+                    const int b = bit_alloc[ch][i];
+                    if (b) {
+                        /* we encode 3 sub band samples of the same sub band at a time */
+                        const int qindex = s->alloc_table[j + b];
+                        const int steps  = ff_mpa_quant_steps[qindex];
+                        int q[3];
+
+                        for (int m = 0; m < 3; ++m) {
+                            const int sample = s->sb_samples[ch][k][l + m][i];
+                            /* divide by scale factor */
+                            if (!is_fixed) {
+                                float a = (float)sample * s->scale_factor_inv_table[s->scale_factors[ch][i][k]];
+                                q[m] = (int)((a + 1.0) * steps * 0.5);
+                            } else {
+                                const int e     = s->scale_factors[ch][i][k];
+                                const int shift = s->scale_factor_shift[e];
+                                const int mult  = s->scale_factor_mult[e];
+                                int q1;
+
+                                /* normalize to P bits */
+                                if (shift < 0)
+                                    q1 = sample * (1 << -shift);
+                                else
+                                    q1 = sample >> shift;
+                                q1 = (q1 * mult) >> P;
+                                q1 += 1 << P;
+                                if (q1 < 0)
+                                    q1 = 0;
+                                q[m] = (q1 * (unsigned)steps) >> (P + 1);
+                            }
+                            if (q[m] >= steps)
+                                q[m] = steps - 1;
+                            av_assert2(q[m] >= 0 && q[m] < steps);
+                        }
+                        const int bits = ff_mpa_quant_bits[qindex];
+                        if (bits < 0) {
+                            /* group the 3 values to save bits */
+                            put_bits(p, -bits,
+                                     q[0] + steps * (q[1] + steps * q[2]));
+                        } else {
+                            put_bits(p, bits, q[0]);
+                            put_bits(p, bits, q[1]);
+                            put_bits(p, bits, q[2]);
+                        }
+                    }
+                }
+                /* next subband in alloc table */
+                j += 1 << bit_alloc_bits;
+            }
+        }
+    }
 }
 
 /*
  * Output the MPEG audio layer 2 frame. Note how the code is small
  * compared to other encoders :-)
  */
-static void encode_frame(MpegAudioContext *s,
+static void encode_frame(MpegAudioContext *s, uint8_t *buf, unsigned buf_size,
                          unsigned char bit_alloc[MPA_MAX_CHANNELS][SBLIMIT],
                          int padding)
 {
-    int i, j, k, l, bit_alloc_bits, b, ch;
+    int i, j, bit_alloc_bits, ch;
     unsigned char *sf;
-    int q[3];
-    PutBitContext *p = &s->pb;
+    PutBitContext p0, *p = &p0;
+
+    init_put_bits(p, buf, buf_size);
 
     /* header */
 
@@ -648,14 +719,11 @@ static void encode_frame(MpegAudioContext *s,
                 sf = &s->scale_factors[ch][i][0];
                 switch(s->scale_code[ch][i]) {
                 case 0:
-                    put_bits(p, 6, sf[0]);
-                    put_bits(p, 6, sf[1]);
-                    put_bits(p, 6, sf[2]);
+                    put_bits(p, 18, sf[0] << 12 | sf[1] << 6 | sf[2]);
                     break;
                 case 3:
                 case 1:
-                    put_bits(p, 6, sf[0]);
-                    put_bits(p, 6, sf[2]);
+                    put_bits(p, 12, sf[0] << 6 | sf[2]);
                     break;
                 case 2:
                     put_bits(p, 6, sf[0]);
@@ -665,76 +733,26 @@ static void encode_frame(MpegAudioContext *s,
         }
     }
 
-    /* quantization & write sub band samples */
-
-    for(k=0;k<3;k++) {
-        for(l=0;l<12;l+=3) {
-            j = 0;
-            for(i=0;i<s->sblimit;i++) {
-                bit_alloc_bits = s->alloc_table[j];
-                for(ch=0;ch<s->nb_channels;ch++) {
-                    b = bit_alloc[ch][i];
-                    if (b) {
-                        int qindex, steps, m, sample, bits;
-                        /* we encode 3 sub band samples of the same sub band at a time */
-                        qindex = s->alloc_table[j+b];
-                        steps = ff_mpa_quant_steps[qindex];
-                        for(m=0;m<3;m++) {
-                            sample = s->sb_samples[ch][k][l + m][i];
-                            /* divide by scale factor */
-#if USE_FLOATS
-                            {
-                                float a;
-                                a = (float)sample * s->scale_factor_inv_table[s->scale_factors[ch][i][k]];
-                                q[m] = (int)((a + 1.0) * steps * 0.5);
-                            }
+#if CONFIG_SMALL
+    encode_subbands(s, p, bit_alloc, IS_FIXED(s));
 #else
-                            {
-                                int q1, e, shift, mult;
-                                e = s->scale_factors[ch][i][k];
-                                shift = s->scale_factor_shift[e];
-                                mult = s->scale_factor_mult[e];
-
-                                /* normalize to P bits */
-                                if (shift < 0)
-                                    q1 = sample * (1 << -shift);
-                                else
-                                    q1 = sample >> shift;
-                                q1 = (q1 * mult) >> P;
-                                q1 += 1 << P;
-                                if (q1 < 0)
-                                    q1 = 0;
-                                q[m] = (q1 * (unsigned)steps) >> (P + 1);
-                            }
+    if (IS_FIXED(s))
+        encode_subbands(s, p, bit_alloc, 1);
+    else
+        encode_subbands(s, p, bit_alloc, 0);
 #endif
-                            if (q[m] >= steps)
-                                q[m] = steps - 1;
-                            av_assert2(q[m] >= 0 && q[m] < steps);
-                        }
-                        bits = ff_mpa_quant_bits[qindex];
-                        if (bits < 0) {
-                            /* group the 3 values to save bits */
-                            put_bits(p, -bits,
-                                     q[0] + steps * (q[1] + steps * q[2]));
-                        } else {
-                            put_bits(p, bits, q[0]);
-                            put_bits(p, bits, q[1]);
-                            put_bits(p, bits, q[2]);
-                        }
-                    }
-                }
-                /* next subband in alloc table */
-                j += 1 << bit_alloc_bits;
-            }
-        }
-    }
+
+    av_assert1(put_bits_left(p) == padding);
+
+    /* flush */
+    flush_put_bits(p);
 
     /* padding */
-    for(i=0;i<padding;i++)
-        put_bits(p, 1, 0);
+    if (put_bytes_left(p, 0))
+        memset(put_bits_ptr(p), 0, put_bytes_left(p, 0));
 }
 
-static int MPA_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
+static int mpa_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
                             const AVFrame *frame, int *got_packet_ptr)
 {
     MpegAudioContext *s = avctx->priv_data;
@@ -754,18 +772,13 @@ static int MPA_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     for(i=0;i<s->nb_channels;i++) {
         psycho_acoustic_model(s, smr[i]);
     }
-    compute_bit_allocation(s, smr, bit_alloc, &padding);
+    unsigned frame_size = compute_bit_allocation(s, smr, bit_alloc, &padding);
 
-    if ((ret = ff_alloc_packet(avctx, avpkt, MPA_MAX_CODED_FRAME_SIZE)) < 0)
+    ret = ff_get_encode_buffer(avctx, avpkt, frame_size, 0);
+    if (ret < 0)
         return ret;
 
-    init_put_bits(&s->pb, avpkt->data, avpkt->size);
-
-    encode_frame(s, bit_alloc, padding);
-
-    /* flush */
-    flush_put_bits(&s->pb);
-    avpkt->size = put_bytes_output(&s->pb);
+    encode_frame(s, avpkt->data, frame_size, bit_alloc, padding);
 
     if (frame->pts != AV_NOPTS_VALUE)
         avpkt->pts = frame->pts - ff_samples_to_time_base(avctx, avctx->initial_padding);
@@ -779,3 +792,44 @@ static const FFCodecDefault mp2_defaults[] = {
     { NULL },
 };
 
+#if CONFIG_MP2_ENCODER
+const FFCodec ff_mp2_encoder = {
+    .p.name                = "mp2",
+    CODEC_LONG_NAME("MP2 (MPEG audio layer 2)"),
+    .p.type                = AVMEDIA_TYPE_AUDIO,
+    .p.id                  = AV_CODEC_ID_MP2,
+    .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .priv_data_size        = sizeof(MpegAudioContext),
+    .init                  = mpa_encode_init,
+    FF_CODEC_ENCODE_CB(mpa_encode_frame),
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
+    CODEC_SAMPLERATES(44100, 48000, 32000, 22050, 24000, 16000),
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_MONO, AV_CHANNEL_LAYOUT_STEREO),
+    .defaults              = mp2_defaults,
+};
+#endif
+
+#if CONFIG_MP2FIXED_ENCODER
+static av_cold int mpa_fixed_encode_init(AVCodecContext *avctx)
+{
+    MpegAudioContext *s = avctx->priv_data;
+
+    s->is_fixed = 1;
+    return mpa_encode_init(avctx);
+}
+
+const FFCodec ff_mp2fixed_encoder = {
+    .p.name                = "mp2fixed",
+    CODEC_LONG_NAME("MP2 fixed point (MPEG audio layer 2)"),
+    .p.type                = AVMEDIA_TYPE_AUDIO,
+    .p.id                  = AV_CODEC_ID_MP2,
+    .p.capabilities        = AV_CODEC_CAP_DR1 | AV_CODEC_CAP_ENCODER_REORDERED_OPAQUE,
+    .priv_data_size        = sizeof(MpegAudioContext),
+    .init                  = mpa_fixed_encode_init,
+    FF_CODEC_ENCODE_CB(mpa_encode_frame),
+    CODEC_SAMPLEFMTS(AV_SAMPLE_FMT_S16),
+    CODEC_SAMPLERATES(44100, 48000, 32000, 22050, 24000, 16000),
+    CODEC_CH_LAYOUTS(AV_CHANNEL_LAYOUT_MONO, AV_CHANNEL_LAYOUT_STEREO),
+    .defaults              = mp2_defaults,
+};
+#endif

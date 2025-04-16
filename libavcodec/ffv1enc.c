@@ -569,7 +569,7 @@ int ff_ffv1_encode_determine_slices(AVCodecContext *avctx)
     int max_v_slices = AV_CEIL_RSHIFT(avctx->height, s->chroma_v_shift);
     s->num_v_slices = (avctx->width > 352 || avctx->height > 288 || !avctx->slices) ? 2 : 1;
     s->num_v_slices = FFMIN(s->num_v_slices, max_v_slices);
-    for (; s->num_v_slices < 32; s->num_v_slices++) {
+    for (; s->num_v_slices <= 32; s->num_v_slices++) {
         for (s->num_h_slices = s->num_v_slices; s->num_h_slices <= 2*s->num_v_slices; s->num_h_slices++) {
             int maxw = (avctx->width  + s->num_h_slices - 1) / s->num_h_slices;
             int maxh = (avctx->height + s->num_v_slices - 1) / s->num_v_slices;
@@ -623,7 +623,8 @@ av_cold int ff_ffv1_encode_init(AVCodecContext *avctx)
             return AVERROR(EINVAL);
         }
         s->version = avctx->level;
-    }
+    } else if (s->version < 3)
+        s->version = 3;
 
     if (s->ec < 0) {
         if (s->version >= 4) {
@@ -1749,7 +1750,11 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     maxsize = ff_ffv1_encode_buffer_size(avctx);
 
     if (maxsize > INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 32) {
-        av_log(avctx, AV_LOG_WARNING, "Cannot allocate worst case packet size, the encoding could fail\n");
+        FFV1Context *f = avctx->priv_data;
+        if (!f->maxsize_warned) {
+            av_log(avctx, AV_LOG_WARNING, "Cannot allocate worst case packet size, the encoding could fail\n");
+            f->maxsize_warned++;
+        }
         maxsize = INT_MAX - AV_INPUT_BUFFER_PADDING_SIZE - 32;
     }
 

@@ -161,7 +161,7 @@ FATE_VCODEC-$(call ENCDEC, FFV1, AVI)   += ffv1 ffv1-v0 ffv1-v2 \
 FATE_VCODEC_SCALE-$(call ENCDEC, FFV1, AVI) += ffv1-v3-yuv422p10 ffv1-v3-yuv444p16 \
                                                ffv1-v3-bgr0 ffv1-v3-rgb48 ffv1-2pass10
 fate-vsynth%-ffv1:               ENCOPTS = -slices 4
-fate-vsynth%-ffv1-v0:            CODEC   = ffv1
+fate-vsynth%-ffv1-v0:            ENCOPTS = -level 0
 fate-vsynth%-ffv1-v2:            ENCOPTS = -level 2 -strict experimental
 fate-vsynth%-ffv1-v3-yuv420p:    ENCOPTS = -level 3 -pix_fmt yuv420p
 fate-vsynth%-ffv1-v3-yuv422p10:  ENCOPTS = -level 3 -pix_fmt yuv422p10 \
@@ -234,10 +234,10 @@ FATE_VCODEC-$(call ENCDEC, LJPEG MJPEG, AVI) += ljpeg
 fate-vsynth%-ljpeg:              ENCOPTS = -strict -1
 
 FATE_VCODEC_SCALE-$(call ENCDEC, MJPEG, AVI) += mjpeg mjpeg-422 mjpeg-444 mjpeg-trell mjpeg-huffman mjpeg-trell-huffman
-fate-vsynth%-mjpeg:                   ENCOPTS = -qscale 9 -pix_fmt yuvj420p
+fate-vsynth%-mjpeg:                   ENCOPTS = -qscale 9 -pix_fmt yuvj420p -huffman default -threads 5 -thread_type slice
 fate-vsynth%-mjpeg-422:               ENCOPTS = -qscale 9 -pix_fmt yuvj422p
 fate-vsynth%-mjpeg-444:               ENCOPTS = -qscale 9 -pix_fmt yuvj444p
-fate-vsynth%-mjpeg-trell:             ENCOPTS = -qscale 9 -pix_fmt yuvj420p -trellis 1
+fate-vsynth%-mjpeg-trell:             ENCOPTS = -qscale 9 -pix_fmt yuvj420p -trellis 1 -huffman default
 fate-vsynth%-mjpeg-huffman:           ENCOPTS = -qscale 9 -pix_fmt yuvj420p -huffman optimal
 fate-vsynth%-mjpeg-trell-huffman:     ENCOPTS = -qscale 9 -pix_fmt yuvj420p -trellis 1 -huffman optimal
 
