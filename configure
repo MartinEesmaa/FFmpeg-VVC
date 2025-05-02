@@ -2574,6 +2574,7 @@ CONFIG_EXTRA="
     bswapdsp
     cabac
     cbs
+    cbs_apv
     cbs_av1
     cbs_h264
     cbs_h265
@@ -2946,6 +2947,7 @@ apng_decoder_select="inflate_wrapper"
 apng_encoder_select="deflate_wrapper llvidencdsp"
 aptx_encoder_select="audio_frame_queue"
 aptx_hd_encoder_select="audio_frame_queue"
+apv_decoder_select="cbs_apv"
 asv1_decoder_select="blockdsp bswapdsp idctdsp"
 asv1_encoder_select="aandcttables bswapdsp fdctdsp pixblockdsp"
 asv2_decoder_select="blockdsp bswapdsp idctdsp"
@@ -3493,6 +3495,7 @@ vvc_qsv_decoder_select="vvc_mp4toannexb_bsf qsvdec"
 
 # parsers
 aac_parser_select="adts_header mpeg4audio"
+apv_parser_select="cbs_apv"
 av1_parser_select="cbs_av1"
 evc_parser_select="evcparse"
 ffv1_parser_select="rangecoder"
@@ -3667,6 +3670,7 @@ act_demuxer_select="riffdec"
 adts_muxer_select="mpeg4audio"
 aiff_muxer_select="iso_media"
 amv_muxer_select="riffenc"
+apv_demuxer_select="apv_parser"
 asf_demuxer_select="riffdec"
 asf_o_demuxer_select="riffdec"
 asf_muxer_select="riffenc"

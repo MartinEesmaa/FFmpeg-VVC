@@ -31,6 +31,9 @@
 
 
 static const CodedBitstreamType *const cbs_type_table[] = {
+#if CBS_APV
+    &CBS_FUNC(type_apv),
+#endif
 #if CBS_AV1
     &CBS_FUNC(type_av1),
 #endif
@@ -58,6 +61,9 @@ static const CodedBitstreamType *const cbs_type_table[] = {
 };
 
 const enum AVCodecID CBS_FUNC(all_codec_ids)[] = {
+#if CBS_APV
+    AV_CODEC_ID_APV,
+#endif
 #if CBS_AV1
     AV_CODEC_ID_AV1,
 #endif
@@ -674,10 +680,7 @@ int CBS_FUNC(write_unsigned)(CodedBitstreamContext *ctx, PutBitContext *pbc,
     if (put_bits_left(pbc) < width)
         return AVERROR(ENOSPC);
 
-    if (width < 32)
-        put_bits(pbc, width, value);
-    else
-        put_bits32(pbc, value);
+    put_bits63(pbc, width, value);
 
     CBS_TRACE_WRITE_END();
 
@@ -746,10 +749,7 @@ int CBS_FUNC(write_signed)(CodedBitstreamContext *ctx, PutBitContext *pbc,
     if (put_bits_left(pbc) < width)
         return AVERROR(ENOSPC);
 
-    if (width < 32)
-        put_sbits(pbc, width, value);
-    else
-        put_bits32(pbc, value);
+    put_bits63(pbc, width, zero_extend(value, width));
 
     CBS_TRACE_WRITE_END();
 

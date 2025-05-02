@@ -1986,6 +1986,13 @@ static const AVCodecDescriptor codec_descriptors[] = {
         .mime_types= MT("image/jxl"),
     },
     {
+        .id        = AV_CODEC_ID_APV,
+        .type      = AVMEDIA_TYPE_VIDEO,
+        .name      = "apv",
+        .long_name = NULL_IF_CONFIG_SMALL("Advanced Professional Video"),
+        .props     = AV_CODEC_PROP_INTRA_ONLY | AV_CODEC_PROP_LOSSY,
+    },
+    {
         .id        = AV_CODEC_ID_JPEGXS,
         .type      = AVMEDIA_TYPE_VIDEO,
         .name      = "jpegxs",

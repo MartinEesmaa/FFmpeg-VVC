@@ -253,7 +253,7 @@ typedef struct FFVkExecPool {
     FFVkExecContext *contexts;
     atomic_uint_least64_t idx;
 
-    VkCommandPool cmd_buf_pool;
+    VkCommandPool *cmd_buf_pools;
     VkCommandBuffer *cmd_bufs;
     int pool_size;
 
@@ -285,6 +285,7 @@ typedef struct FFVulkanContext {
     VkPhysicalDeviceDescriptorBufferPropertiesEXT desc_buf_props;
     VkPhysicalDeviceSubgroupSizeControlProperties subgroup_props;
     VkPhysicalDeviceCooperativeMatrixPropertiesKHR coop_matrix_props;
+    VkPhysicalDevicePushDescriptorPropertiesKHR push_desc_props;
     VkPhysicalDeviceOpticalFlowPropertiesNV optical_flow_props;
     VkQueueFamilyQueryResultStatusPropertiesKHR *query_props;
     VkQueueFamilyVideoPropertiesKHR *video_props;
@@ -348,6 +349,15 @@ static inline void ff_vk_link_struct(void *chain, const void *in)
     out->pNext = (void *)in;
 }
 
+#define FF_VK_STRUCT_EXT(CTX, BASE, STRUCT_P, EXT_FLAG, TYPE) \
+    do {                                                      \
+        if ((EXT_FLAG == FF_VK_EXT_NO_FLAG) ||                \
+            ((CTX)->extensions & EXT_FLAG)) {                 \
+            (STRUCT_P)->sType = TYPE;                         \
+            ff_vk_link_struct(BASE, STRUCT_P);                \
+        }                                                     \
+    } while (0)
+
 /* Identity mapping - r = r, b = b, g = g, a = a */
 extern const VkComponentMapping ff_comp_identity_map;
 
@@ -363,6 +373,12 @@ int ff_vk_init(FFVulkanContext *s, void *log_parent,
  * Converts Vulkan return values to strings
  */
 const char *ff_vk_ret2str(VkResult res);
+
+/**
+ * Map between usage and features.
+ */
+VkImageUsageFlags ff_vk_map_feats_to_usage(VkFormatFeatureFlagBits2 feats);
+VkFormatFeatureFlagBits2 ff_vk_map_usage_to_feats(VkImageUsageFlags usage);
 
 /**
  * Returns 1 if pixfmt is a usable RGB format.

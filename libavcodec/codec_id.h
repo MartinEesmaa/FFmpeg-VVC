@@ -329,6 +329,7 @@ enum AVCodecID {
     AV_CODEC_ID_DNXUC,
     AV_CODEC_ID_RV60,
     AV_CODEC_ID_JPEGXL_ANIM,
+    AV_CODEC_ID_APV,
     AV_CODEC_ID_JPEGXS,
 
     /* various PCM "codecs" */
