@@ -130,7 +130,6 @@ Component options:
   --disable-avformat       disable libavformat build
   --disable-swresample     disable libswresample build
   --disable-swscale        disable libswscale build
-  --disable-postproc       disable libpostproc build
   --disable-avfilter       disable libavfilter build
   --disable-pthreads       disable pthreads [autodetect]
   --disable-w32threads     disable Win32 threads [autodetect]
@@ -250,6 +249,7 @@ External library support:
   --enable-liblensfun      enable lensfun lens correction [no]
   --enable-libmodplug      enable ModPlug via libmodplug [no]
   --enable-libmp3lame      enable MP3 encoding via libmp3lame [no]
+  --enable-liboapv         enable APV encoding/decoding via liboapv [no]
   --enable-libopencore-amrnb enable AMR-NB de/encoding via libopencore-amrnb [no]
   --enable-libopencore-amrwb enable AMR-WB decoding via libopencore-amrwb [no]
   --enable-libopencv       enable video filtering via libopencv [no]
@@ -1957,6 +1957,7 @@ EXTERNAL_LIBRARY_LIST="
     libmodplug
     libmp3lame
     libmysofa
+    liboapv
     libopencv
     libopenh264
     libopenjpeg
@@ -2082,7 +2083,6 @@ LIBRARY_LIST="
     avdevice
     avfilter
     swscale
-    postproc
     avformat
     avcodec
     swresample
@@ -3602,6 +3602,7 @@ liblc3_encoder_select="audio_frame_queue"
 libmodplug_demuxer_deps="libmodplug"
 libmp3lame_encoder_deps="libmp3lame"
 libmp3lame_encoder_select="audio_frame_queue mpegaudioheader"
+liboapv_encoder_deps="liboapv"
 libopencore_amrnb_decoder_deps="libopencore_amrnb"
 libopencore_amrnb_encoder_deps="libopencore_amrnb"
 libopencore_amrnb_encoder_select="audio_frame_queue"
@@ -3987,7 +3988,6 @@ pan_filter_deps="swresample"
 perspective_filter_deps="gpl"
 phase_filter_deps="gpl"
 pp7_filter_deps="gpl"
-pp_filter_deps="gpl postproc"
 prewitt_opencl_filter_deps="opencl"
 procamp_vaapi_filter_deps="vaapi"
 program_opencl_filter_deps="opencl"
@@ -4104,8 +4104,6 @@ avfilter_suggest="libm stdatomic spirv_compiler"
 avformat_deps="avcodec avutil"
 avformat_suggest="libm network zlib stdatomic"
 avutil_suggest="clock_gettime ffnvcodec gcrypt libm libdrm libmfx opencl openssl user32 vaapi vulkan videotoolbox corefoundation corevideo coremedia bcrypt stdatomic"
-postproc_deps="avutil gpl"
-postproc_suggest="libm stdatomic"
 swresample_deps="avutil"
 swresample_suggest="libm libsoxr stdatomic"
 swscale_deps="avutil"
@@ -5869,6 +5867,13 @@ case $target_os in
             clang_version=$($cc -dumpversion)
             test ${clang_version%%.*} -eq 11 && add_cflags -fno-stack-check
         fi
+
+        # Xcode Clang doesn't default to -fno-common while upstream llvm.org
+        # Clang (and GCC) do. This avoids linker warnings on Xcode 16.3 about
+        # "reducing alignment of section __DATA,__common from 0x8000 to 0x4000
+        # because it exceeds segment maximum alignment".
+        check_cflags -fno-common
+
         ;;
     msys*)
         die "Native MSYS builds are discouraged, please use the MINGW environment."
@@ -6951,6 +6956,7 @@ enabled jni               && { [ $target_os = "android" ] && check_headers jni.h
 enabled ladspa            && require_headers "ladspa.h dlfcn.h"
 enabled lcms2             && require_pkg_config lcms2 "lcms2 >= 2.13" lcms2.h cmsCreateContext
 enabled libaom            && require_pkg_config libaom "aom >= 2.0.0" aom/aom_codec.h aom_codec_version
+enabled liboapv           && require_pkg_config liboapv "oapv >= 0.1.13" "oapv/oapv.h" oapve_encode
 enabled libaribb24        && { check_pkg_config libaribb24 "aribb24 > 1.0.3" "aribb24/aribb24.h" arib_instance_new ||
                                { enabled gpl && require_pkg_config libaribb24 aribb24 "aribb24/aribb24.h" arib_instance_new; } ||
                                die "ERROR: libaribb24 requires version higher than 1.0.3 or --enable-gpl."; }
@@ -7550,7 +7556,7 @@ void (^block)(void);
 EOF
 
 # add some linker flags
-check_ldflags -Wl,-rpath-link=:libpostproc:libswresample:libswscale:libavfilter:libavdevice:libavformat:libavcodec:libavutil
+check_ldflags -Wl,-rpath-link=:libswresample:libswscale:libavfilter:libavdevice:libavformat:libavcodec:libavutil
 enabled rpath && add_ldexeflags -Wl,-rpath,$libdir && add_ldsoflags -Wl,-rpath,$libdir
 test_ldflags -Wl,-Bsymbolic && append SHFLAGS -Wl,-Bsymbolic
 
@@ -7915,7 +7921,6 @@ enabled fsync_filter        && prepend avfilter_deps "avformat"
 enabled mcdeint_filter      && prepend avfilter_deps "avcodec"
 enabled movie_filter        && prepend avfilter_deps "avformat avcodec"
 enabled pan_filter          && prepend avfilter_deps "swresample"
-enabled pp_filter           && prepend avfilter_deps "postproc"
 enabled qrencode_filter     && prepend avfilter_deps "swscale"
 enabled qrencodesrc_filter  && prepend avfilter_deps "swscale"
 enabled removelogo_filter   && prepend avfilter_deps "avformat avcodec swscale"
@@ -7966,9 +7971,6 @@ expand_deps(){
     eval is_in $1 \$${1}_deps && die "Dependency cycle at ${1}_deps"
     reorder_by ${1}_deps LIBRARY_LIST  # linking order is expected later
 }
-
-#we have to remove gpl from the deps here as some code assumes all lib deps are libs
-postproc_deps="$(filter_out 'gpl' $postproc_deps)"
 
 map 'expand_deps $v' $LIBRARY_LIST
 
@@ -8060,7 +8062,6 @@ echo "optimize for size         ${small-no}"
 echo "optimizations             ${optimizations-no}"
 echo "static                    ${static-no}"
 echo "shared                    ${shared-no}"
-echo "postprocessing support    ${postproc-no}"
 echo "network support           ${network-no}"
 echo "threading support         ${thread_type-no}"
 echo "safe bitstream reader     ${safe_bitstream_reader-no}"
@@ -8437,7 +8438,6 @@ extralibs_avcodec="$avcodec_extralibs"
 extralibs_avformat="$avformat_extralibs"
 extralibs_avdevice="$avdevice_extralibs"
 extralibs_avfilter="$avfilter_extralibs"
-extralibs_postproc="$postproc_extralibs"
 extralibs_swscale="$swscale_extralibs"
 extralibs_swresample="$swresample_extralibs"
 EOF
