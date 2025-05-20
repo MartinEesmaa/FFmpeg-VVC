@@ -38,6 +38,13 @@ struct ogg_codec {
      *         -1 if an error occurred or for unsupported stream
      */
     int (*header)(AVFormatContext *, int);
+    /**
+     * Attempt to process a packet as a data packet
+     * @return < 0 (AVERROR) code or -1 on error
+     *         == 0 if the packet was a regular data packet.
+     *         == 0 or 1 if the packet was a header from a chained bitstream.
+     *           (1 will cause the packet to be skiped in calling code (ogg_packet())
+     */
     int (*packet)(AVFormatContext *, int);
     /**
      * Translate a granule into a timestamp.

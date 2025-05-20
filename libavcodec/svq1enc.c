@@ -337,7 +337,7 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
         s2->mb_height                     = block_height;
         s2->mb_stride                     = s2->mb_width + 1;
         s2->b8_stride                     = 2 * s2->mb_width + 1;
-        s2->f_code                        = 1;
+        s->m.f_code                       = 1;
         s2->pict_type                     = s->pict_type;
         s->m.me.scene_change_score        = 0;
         // s2->out_format                    = FMT_H263;
@@ -400,7 +400,7 @@ static int svq1_encode_plane(SVQ1EncContext *s, int plane,
         }
 
         ff_fix_long_p_mvs(&s->m, CANDIDATE_MB_TYPE_INTRA);
-        ff_fix_long_mvs(&s->m, NULL, 0, s->m.p_mv_table, s2->f_code,
+        ff_fix_long_mvs(&s->m, NULL, 0, s->m.p_mv_table, s->m.f_code,
                         CANDIDATE_MB_TYPE_INTER, 0);
     }
 
@@ -594,6 +594,15 @@ static av_cold int svq1_encode_init(AVCodecContext *avctx)
     if (!s->current_picture || !s->last_picture) {
         return AVERROR(ENOMEM);
     }
+    ret = ff_encode_alloc_frame(avctx, s->current_picture);
+    if (ret < 0)
+        return ret;
+    ret = ff_encode_alloc_frame(avctx, s->last_picture);
+    if (ret < 0)
+        return ret;
+    s->scratchbuf = av_malloc_array(s->current_picture->linesize[0], 16 * 3);
+    if (!s->scratchbuf)
+        return AVERROR(ENOMEM);
 
     s->frame_width  = avctx->width;
     s->frame_height = avctx->height;
@@ -643,27 +652,6 @@ static int svq1_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                           MAX_MB_BYTES * 3 + FF_INPUT_BUFFER_MIN_SIZE);
     if (ret < 0)
         return ret;
-
-    if (avctx->pix_fmt != AV_PIX_FMT_YUV410P) {
-        av_log(avctx, AV_LOG_ERROR, "unsupported pixel format\n");
-        return -1;
-    }
-
-    if (!s->current_picture->data[0]) {
-        if ((ret = ff_encode_alloc_frame(avctx, s->current_picture)) < 0) {
-            return ret;
-        }
-    }
-    if (!s->last_picture->data[0]) {
-        ret = ff_encode_alloc_frame(avctx, s->last_picture);
-        if (ret < 0)
-            return ret;
-    }
-    if (!s->scratchbuf) {
-        s->scratchbuf = av_malloc_array(s->current_picture->linesize[0], 16 * 3);
-        if (!s->scratchbuf)
-            return AVERROR(ENOMEM);
-    }
 
     FFSWAP(AVFrame*, s->current_picture, s->last_picture);
 
