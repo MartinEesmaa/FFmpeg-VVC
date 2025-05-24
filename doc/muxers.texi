@@ -3879,4 +3879,25 @@ ffmpeg -f webm_dash_manifest -i video1.webm \
        manifest.xml
 @end example
 
+@section whip
+
+WebRTC-HTTP ingestion protocol (WHIP) muxer.
+
+This muxer allows sending audio and video streams to a remote media server
+using the WebRTC-HTTP ingestion protocol (WHIP) as defined in
+@url{https://datatracker.ietf.org/doc/draft-ietf-wish-whip/}.
+
+This muxer supports the following options:
+@table @option
+@item bearer_token
+Optional bearer token for authentication and authorization to the HTTP server.
+Default is @code{NULL}.
+@item connection_timeout
+Timeout for establishing a connection to the media server.
+Default is 10 seconds.
+@item rw_timeout
+Timeout for receiving/writing data from/to the media server.
+Default is 1 second.
+@end table
+
 @c man end MUXERS

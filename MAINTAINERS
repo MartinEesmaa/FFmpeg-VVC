@@ -475,6 +475,7 @@ Muxers/Demuxers:
   wav.c                                 Michael Niedermayer
   wc3movie.c                            Mike Melanson
   webm dash (matroskaenc.c)             Vignesh Venkatasubramanian
+  webrtc*                               Michael Riedl
   webvtt*                               Matthew J Heaney
   westwood.c                            Mike Melanson
   wtv.c                                 Peter Ross

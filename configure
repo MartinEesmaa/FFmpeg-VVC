@@ -223,6 +223,7 @@ External library support:
   --enable-libcelt         enable CELT decoding via libcelt [no]
   --enable-libcdio         enable audio CD grabbing with libcdio [no]
   --enable-libcodec2       enable codec2 en/decoding using libcodec2 [no]
+  --enable-libdatachannel  enable WHIP muxing and WHEP demuxing via libdatachannel [no]
   --enable-libdav1d        enable AV1 decoding via libdav1d [no]
   --enable-libdavs2        enable AVS2 decoding via libdavs2 [no]
   --enable-libdc1394       enable IIDC-1394 grabbing using libdc1394
@@ -1937,6 +1938,7 @@ EXTERNAL_LIBRARY_LIST="
     libcaca
     libcelt
     libcodec2
+    libdatachannel
     libdav1d
     libdc1394
     libflite
@@ -3767,6 +3769,10 @@ wav_demuxer_select="riffdec"
 wav_muxer_select="riffenc"
 webm_chunk_muxer_select="webm_muxer"
 webm_dash_manifest_demuxer_select="matroska_demuxer"
+whip_muxer_deps="libdatachannel rtp_muxer"
+whip_muxer_select="http_protocol rtpenc_chain"
+whep_demuxer_deps="libdatachannel sdp_demuxer"
+whep_demuxer_select="http_protocol"
 wtv_demuxer_select="mpegts_demuxer riffdec"
 wtv_muxer_select="mpegts_muxer riffenc"
 xmv_demuxer_select="riffdec"
@@ -6976,6 +6982,7 @@ enabled libcelt           && require libcelt celt/celt.h celt_decode -lcelt0 &&
 enabled libcaca           && require_pkg_config libcaca caca caca.h caca_create_canvas
 enabled libcodec2         && require libcodec2 codec2/codec2.h codec2_create -lcodec2
 enabled libdav1d          && require_pkg_config libdav1d "dav1d >= 0.5.0" "dav1d/dav1d.h" dav1d_version
+enabled libdatachannel    && require libdatachannel rtc/rtc.h rtcPreload -ldatachannel
 enabled libdavs2          && require_pkg_config libdavs2 "davs2 >= 1.6.0" davs2.h davs2_decoder_open
 enabled libdc1394         && require_pkg_config libdc1394 libdc1394-2 dc1394/dc1394.h dc1394_new
 enabled libdrm            && check_pkg_config libdrm libdrm xf86drm.h drmGetVersion

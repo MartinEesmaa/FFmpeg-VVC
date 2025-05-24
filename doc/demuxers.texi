@@ -1139,6 +1139,28 @@ which in turn, acts as a ceiling for the size of scripts that can be read.
 Default is 1 MiB.
 @end table
 
+@section whep
+
+WebRTC-HTTP egress protocol (WHEP) demuxer.
+
+This demuxers allows reading media from a remote media server using the
+WebRTC-HTTP egress protocol (WHEP) as defined in
+@url{https://datatracker.ietf.org/doc/draft-murillo-whep/02}. Currently, only a
+single video (H.264) and a single audio stream (OPUS) are supported.
+
+This demuxer accepts the following options:
+@table @option
+@item bearer_token
+Optional bearer token for authentication and authorization to the HTTP server.
+Default is @code{NULL}.
+@item connection_timeout
+Timeout for establishing a connection to the media server.
+Default is 10 seconds.
+@item rw_timeout
+Timeout for receiving/writing data from/to the media server.
+Default is 1 second.
+@end table
+
 @section w64
 
 Sony Wave64 Audio demuxer.
