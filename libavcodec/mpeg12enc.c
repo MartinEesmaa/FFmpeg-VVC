@@ -49,6 +49,7 @@
 #include "mpegvideo.h"
 #include "mpegvideoenc.h"
 #include "profiles.h"
+#include "put_bits.h"
 #include "rl.h"
 
 #if CONFIG_MPEG1VIDEO_ENCODER || CONFIG_MPEG2VIDEO_ENCODER
@@ -154,6 +155,8 @@ static void mpeg1_encode_sequence_header(MPEG12EncContext *mpeg12)
     int64_t best_aspect_error = INT64_MAX;
     AVRational aspect_ratio = s->c.avctx->sample_aspect_ratio;
     int aspect_ratio_info;
+
+    put_bits_assume_flushed(&s->pb);
 
     if (!(s->c.cur_pic.ptr->f->flags & AV_FRAME_FLAG_KEY))
         return;
@@ -339,6 +342,8 @@ static int mpeg1_encode_picture_header(MPVMainEncContext *const m)
     MPVEncContext *const s = &m->s;
     const AVFrameSideData *side_data;
 
+    put_bits_assume_flushed(&s->pb);
+
     mpeg1_encode_sequence_header(mpeg12);
 
     /* MPEG-1 picture header */
@@ -454,8 +459,7 @@ static int mpeg1_encode_picture_header(MPVMainEncContext *const m)
 
             put_bits(&s->pb, 1, 1);     // reserved_bit
             put_bits(&s->pb, 7, fpa_type); // S3D_video_format_type
-            put_bits(&s->pb, 8, 0x04);  // reserved_data[0]
-            put_bits(&s->pb, 8, 0xFF);  // reserved_data[1]
+            put_bits(&s->pb, 16, 0x04FF);  // reserved_data
         }
     }
 

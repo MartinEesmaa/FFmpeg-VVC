@@ -27,6 +27,7 @@
  * SpeedHQ encoder.
  */
 
+#include "libavutil/avassert.h"
 #include "libavutil/thread.h"
 
 #include "avcodec.h"
@@ -36,6 +37,7 @@
 #include "mpegvideo.h"
 #include "mpegvideodata.h"
 #include "mpegvideoenc.h"
+#include "put_bits.h"
 #include "rl.h"
 #include "speedhq.h"
 #include "speedhqenc.h"
@@ -99,6 +101,8 @@ static int speedhq_encode_picture_header(MPVMainEncContext *const m)
 {
     SpeedHQEncContext *const ctx = (SpeedHQEncContext*)m;
     MPVEncContext *const s = &m->s;
+
+    put_bits_assume_flushed(&s->pb);
 
     put_bits_le(&s->pb, 8, 100 - s->c.qscale * 2);  /* FIXME why doubled */
     put_bits_le(&s->pb, 24, 4);  /* no second field */
@@ -259,7 +263,7 @@ static av_cold int speedhq_encode_init(AVCodecContext *avctx)
         avctx->codec_tag = MKTAG('S','H','Q','4');
         break;
     default:
-        av_assert0(0);
+        av_unreachable("Already checked via CODEC_PIXFMTS");
     }
 
     m->encode_picture_header = speedhq_encode_picture_header;

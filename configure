@@ -5314,7 +5314,7 @@ case "$arch" in
     arm*|iPad*|iPhone*)
         arch="arm"
     ;;
-    loongarch*)
+    loongarch*|loong64)
         arch="loongarch"
     ;;
     mips*|IP*)
