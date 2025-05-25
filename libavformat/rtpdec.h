@@ -74,7 +74,7 @@ void ff_rtp_send_punch_packets(URLContext* rtp_handle);
 int ff_rtp_check_and_send_back_rr(RTPDemuxContext *s, URLContext *fd,
                                   AVIOContext *avio, int count);
 int ff_rtp_send_rtcp_feedback(RTPDemuxContext *s, URLContext *fd,
-                              AVIOContext *avio);
+                              AVIOContext *avio, int disable_pli);
 
 // these statistics are used for rtcp receiver reports...
 typedef struct RTPStatistics {

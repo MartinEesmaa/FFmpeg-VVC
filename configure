@@ -223,7 +223,7 @@ External library support:
   --enable-libcelt         enable CELT decoding via libcelt [no]
   --enable-libcdio         enable audio CD grabbing with libcdio [no]
   --enable-libcodec2       enable codec2 en/decoding using libcodec2 [no]
-  --enable-libdatachannel  enable WHIP muxing and WHEP demuxing via libdatachannel [no]
+  --enable-libdatachannel  enable WHIP/WHEP muxing/demuxing via libdatachannel [no]
   --enable-libdav1d        enable AV1 decoding via libdav1d [no]
   --enable-libdavs2        enable AVS2 decoding via libdavs2 [no]
   --enable-libdc1394       enable IIDC-1394 grabbing using libdc1394
@@ -3769,10 +3769,8 @@ wav_demuxer_select="riffdec"
 wav_muxer_select="riffenc"
 webm_chunk_muxer_select="webm_muxer"
 webm_dash_manifest_demuxer_select="matroska_demuxer"
-whip_muxer_deps="libdatachannel rtp_muxer"
-whip_muxer_select="http_protocol rtpenc_chain"
-whep_demuxer_deps="libdatachannel sdp_demuxer"
-whep_demuxer_select="http_protocol"
+whip_muxer_deps="libdatachannel"
+whep_demuxer_deps="libdatachannel"
 wtv_demuxer_select="mpegts_demuxer riffdec"
 wtv_muxer_select="mpegts_muxer riffenc"
 xmv_demuxer_select="riffdec"

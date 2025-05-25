@@ -52,6 +52,9 @@ struct PayloadContext {
 #ifdef DEBUG
     int packet_types_received[32];
 #endif
+    int got_sps;
+    int got_pps;
+    int got_idr;
 };
 
 #ifdef DEBUG
@@ -177,6 +180,10 @@ static int sdp_parse_fmtp_config_h264(AVFormatContext *s,
                                                  &par->extradata_size, value);
         av_log(s, AV_LOG_DEBUG, "Extradata set to %p (size: %d)\n",
                par->extradata, par->extradata_size);
+        if (ret == 0) {
+            h264_data->got_sps = 1;
+            h264_data->got_pps = 1;
+        }
         return ret;
     }
     return 0;
@@ -202,6 +209,20 @@ void ff_h264_parse_framesize(AVCodecParameters *par, const char *p)
     // set our parameters
     par->width   = atoi(buf1);
     par->height  = atoi(p + 1); // skip the -
+}
+
+static void update_sps_pps_idr_info(PayloadContext *data, uint8_t nal_type) {
+    switch (nal_type) {
+    case 5:
+        data->got_idr = 1;
+        break;
+    case 7:
+        data->got_sps = 1;
+        break;
+    case 8:
+        data->got_pps = 1;
+        break;
+    }
 }
 
 int ff_h264_handle_aggregated_packet(AVFormatContext *ctx, PayloadContext *data, AVPacket *pkt,
@@ -237,6 +258,7 @@ int ff_h264_handle_aggregated_packet(AVFormatContext *ctx, PayloadContext *data,
                     memcpy(dst, src, nal_size);
                     if (nal_counters)
                         nal_counters[(*src) & nal_mask]++;
+                        update_sps_pps_idr_info(data, (*src) & nal_mask);
                     dst += nal_size;
                 }
             } else {
@@ -304,8 +326,11 @@ static int h264_handle_packet_fu_a(AVFormatContext *ctx, PayloadContext *data, A
     buf += 2;
     len -= 2;
 
-    if (start_bit && nal_counters)
-        nal_counters[nal_type & nal_mask]++;
+    if (start_bit) {
+        if (nal_counters)
+            nal_counters[nal_type & nal_mask]++;
+        update_sps_pps_idr_info(data, nal_type & nal_mask);
+    }
     return ff_h264_handle_frag_packet(pkt, buf, len, start_bit, &nal, 1);
 }
 
@@ -338,6 +363,7 @@ static int h264_handle_packet(AVFormatContext *ctx, PayloadContext *data,
         memcpy(pkt->data, start_sequence, sizeof(start_sequence));
         memcpy(pkt->data + sizeof(start_sequence), buf, len);
         COUNT_NAL_TYPE(data, nal);
+        update_sps_pps_idr_info(data, nal & 0x1f);
         break;
 
     case 24:                   // STAP-A (one packet, multiple nals)
@@ -409,6 +435,10 @@ static int parse_h264_sdp_line(AVFormatContext *s, int st_index,
     return 0;
 }
 
+static int h264_need_keyframe(PayloadContext *h264) {
+    return !(h264->got_sps && h264->got_pps && h264->got_idr);
+}
+
 const RTPDynamicProtocolHandler ff_h264_dynamic_handler = {
     .enc_name         = "H264",
     .codec_type       = AVMEDIA_TYPE_VIDEO,
@@ -418,4 +448,5 @@ const RTPDynamicProtocolHandler ff_h264_dynamic_handler = {
     .parse_sdp_a_line = parse_h264_sdp_line,
     .close            = h264_close_context,
     .parse_packet     = h264_handle_packet,
+    .need_keyframe    = h264_need_keyframe,
 };

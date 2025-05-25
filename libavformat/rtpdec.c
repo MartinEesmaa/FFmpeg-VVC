@@ -462,7 +462,7 @@ static int find_missing_packets(RTPDemuxContext *s, uint16_t *first_missing,
 }
 
 int ff_rtp_send_rtcp_feedback(RTPDemuxContext *s, URLContext *fd,
-                              AVIOContext *avio)
+                              AVIOContext *avio, int disable_pli)
 {
     int len, need_keyframe, missing_packets;
     AVIOContext *pb;
@@ -473,7 +473,7 @@ int ff_rtp_send_rtcp_feedback(RTPDemuxContext *s, URLContext *fd,
     if (!fd && !avio)
         return -1;
 
-    need_keyframe = s->handler && s->handler->need_keyframe &&
+    need_keyframe = !disable_pli && s->handler && s->handler->need_keyframe &&
                     s->handler->need_keyframe(s->dynamic_protocol_context);
     missing_packets = find_missing_packets(s, &first_missing, &missing_mask);
 

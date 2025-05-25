@@ -1,5 +1,5 @@
 /*
- * RTP parser for VP9 payload format (draft version 02) - experimental
+ * RTP parser for VP9 payload format (RFC 9628) - experimental
  * Copyright (c) 2015 Thomas Volkert <thomas@homer-conferencing.com>
  *
  * This file is part of FFmpeg.
@@ -47,8 +47,7 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
 {
     int has_pic_id, has_layer_idc, has_ref_idc, has_ss_data;
     av_unused int pic_id = 0, non_key_frame = 0, inter_picture_layer_frame;
-    av_unused int layer_temporal = -1, layer_spatial = -1, layer_quality = -1;
-    int ref_fields = 0, has_ref_field_ext_pic_id = 0;
+    av_unused int layer_temporal = -1, layer_spatial = -1;
     int first_fragment, last_fragment;
     int rtp_m;
     int res = 0;
@@ -68,16 +67,17 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
      *
      *      0 1 2 3 4 5 6 7
      *     +-+-+-+-+-+-+-+-+
-     *     |I|P|L|F|B|E|V|-| (REQUIRED)
+     *     |I|P|L|F|B|E|V|Z| (REQUIRED)
      *     +-+-+-+-+-+-+-+-+
      *
-     *     I: PictureID present
-     *     P: Inter-picture predicted layer frame
+     *     I: Picture ID (PID) present
+     *     P: Inter-picture predicted frame
      *     L: Layer indices present
      *     F: Flexible mode
-     *     B: Start of VP9 frame
-     *     E: End of picture
-     *     V: Scalability Structure (SS) present
+     *     B: Start of Frame
+     *     E: End of Frame
+     *     V: Scalability Structure (SS) data present
+     *     Z: Not a reference frame for upper spatial layers
      */
     has_pic_id     = !!(buf[0] & 0x80);
     inter_picture_layer_frame = !!(buf[0] & 0x40);
@@ -89,7 +89,7 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
 
     rtp_m = !!(flags & RTP_FLAG_MARKER);
 
-    /* sanity check for markers: B should always be equal to the RTP M marker */
+    /* sanity check for markers: E should always be equal to the RTP M marker */
     if (last_fragment != rtp_m) {
         av_log(ctx, AV_LOG_ERROR, "Invalid combination of B and M marker (%d != %d)\n", last_fragment, rtp_m);
         return AVERROR_INVALIDDATA;
@@ -134,72 +134,70 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
      *
      *          0 1 2 3 4 5 6 7
      *         +-+-+-+-+-+-+-+-+
-     *   L:    | T | S | Q | R | (CONDITIONALLY RECOMMENDED)
+     *   L:    | TID |U| SID |D| (Conditionally RECOMMENDED)
+     *         +-+-+-+-+-+-+-+-+
+     *         |   TL0PICIDX   | (Conditionally REQUIRED)
      *         +-+-+-+-+-+-+-+-+
      *
-     *   T, S and Q are 2-bit indices for temporal, spatial, and quality layers.
-     *   If "F" is set in the initial octet, R is 2 bits representing the number
-     *   of reference fields this frame refers to.
+     *   TID: Temporal layer ID (3 bits)
+     *   U: Switching up point (1 bit)
+     *   SID: Spatial layer ID (3 bits)
+     *   D: Inter-layer dependency used (1 bit)
+     *   TL0PICIDX: Temporal Layer 0 Picture Index (8 bits, non-flexible mode only)
      */
     if (has_layer_idc) {
         if (len < 1) {
             av_log(ctx, AV_LOG_ERROR, "Too short RTP/VP9 packet\n");
             return AVERROR_INVALIDDATA;
         }
-        layer_temporal = buf[0] & 0xC0;
-        layer_spatial  = buf[0] & 0x30;
-        layer_quality  = buf[0] & 0x0C;
-        if (has_ref_idc) {
-            ref_fields = buf[0] & 0x03;
-            if (ref_fields)
-                non_key_frame = 1;
-        }
+        layer_temporal = buf[0] >> 5;
+        layer_spatial  = (buf[0] >> 1) & 0x07;
         buf++;
         len--;
+
+        if (!has_ref_idc) {
+            if (len < 1) {
+                av_log(ctx, AV_LOG_ERROR, "Too short RTP/VP9 packet\n");
+                return AVERROR_INVALIDDATA;
+            }
+            /* ignore TL0PICIDX */
+            buf++;
+            len--;
+        }
     }
 
     /*
-     *         decode the reference fields
+     *         decode reference indices
      *
      *          0 1 2 3 4 5 6 7
-     *         +-+-+-+-+-+-+-+-+              -\
-     *   F:    | PID |X| RS| RQ| (OPTIONAL)    .
-     *         +-+-+-+-+-+-+-+-+               . - R times
-     *   X:    | EXTENDED PID  | (OPTIONAL)    .
-     *         +-+-+-+-+-+-+-+-+              -/
+     *         +-+-+-+-+-+-+-+-+                             -\
+     *   P,F:  | P_DIFF      |N| (Conditionally REQUIRED)    - up to 3 times
+     *         +-+-+-+-+-+-+-+-+                             -/
      *
-     *   PID:  The relative Picture ID referred to by this frame.
-     *   RS and RQ:  The spatial and quality layer IDs.
-     *   X: 1 if this layer index has an extended relative Picture ID.
+     *   P_DIFF: Relative Picture ID (7 bits)
+     *   N: 1 if another P_DIFF follows
      */
-    if (has_ref_idc) {
-        while (ref_fields) {
+    if (has_ref_idc && inter_picture_layer_frame) {
+        int i, p_diff, has_more;
+        for (i = 0; i < 3; i++) {
             if (len < 1) {
                 av_log(ctx, AV_LOG_ERROR, "Too short RTP/VP9 packet\n");
                 return AVERROR_INVALIDDATA;
             }
 
-            has_ref_field_ext_pic_id = buf[0] & 0x10;
+            p_diff = buf[0] >> 1;
+            has_more = buf[0] & 0x01;
 
-            /* pass ref. field */
-            if (has_ref_field_ext_pic_id) {
-                if (len < 2) {
-                    av_log(ctx, AV_LOG_ERROR, "Too short RTP/VP9 packet\n");
-                    return AVERROR_INVALIDDATA;
-                }
-
-                /* ignore ref. data */
-
-                buf += 2;
-                len -= 2;
-            } else {
-
-                /* ignore ref. data */
-
-                buf++;
-                len--;
+            if (!p_diff) {
+                av_log(ctx, AV_LOG_ERROR, "Invalid P_DIFF value 0\n");
+                return AVERROR_INVALIDDATA;
             }
-            ref_fields--;
+
+            buf++;
+            len--;
+
+            if (!has_more)
+                break;
         }
     }
 
@@ -208,18 +206,30 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
      *
      *          0 1 2 3 4 5 6 7
      *         +-+-+-+-+-+-+-+-+
-     *   V:    | PATTERN LENGTH|
-     *         +-+-+-+-+-+-+-+-+                           -\
-     *         | T | S | Q | R | (OPTIONAL)                 .
-     *         +-+-+-+-+-+-+-+-+              -\            .
-     *         | PID |X| RS| RQ| (OPTIONAL)    .            . - PAT. LEN. times
-     *         +-+-+-+-+-+-+-+-+               . - R times  .
-     *   X:    | EXTENDED PID  | (OPTIONAL)    .            .
-     *         +-+-+-+-+-+-+-+-+              -/           -/
+     *   V:    | N_S |Y|G|-|-|-|
+     *         +-+-+-+-+-+-+-+-+              -\
+     *   Y:    |     WIDTH     | (OPTIONAL)    .
+     *         +               +               .
+     *         |               | (OPTIONAL)    .
+     *         +-+-+-+-+-+-+-+-+               . - N_S + 1 times
+     *         |     HEIGHT    | (OPTIONAL)    .
+     *         +               +               .
+     *         |               | (OPTIONAL)    .
+     *         +-+-+-+-+-+-+-+-+              -/
+     *   G:    |      N_G      | (OPTIONAL)
+     *         +-+-+-+-+-+-+-+-+                            -\
+     *   N_G:  | TID |U| R |-|-| (OPTIONAL)                 .
+     *         +-+-+-+-+-+-+-+-+              -\            . - N_G times
+     *         |    P_DIFF     | (OPTIONAL)    . - R times  .
+     *         +-+-+-+-+-+-+-+-+              -/            -/
      *
-     *   PID:  The relative Picture ID referred to by this frame.
-     *   RS and RQ:  The spatial and quality layer IDs.
-     *   X: 1 if this layer index has an extended relative Picture ID.
+     *   N_S: Number of spatial layers minus 1
+     *   Y: Each spatial layer's resolution present
+     *   G: Picture Group description present
+     *   N_G: Number of pictures in Picture Group
+     *   TID: Temporal layer ID
+     *   U: Switching up point
+     *   R: Number of P_DIFF fields
      */
     if (has_ss_data) {
         int n_s, y, g, i;
@@ -281,13 +291,6 @@ static int vp9_handle_packet(AVFormatContext *ctx, PayloadContext *rtp_vp9_ctx,
             }
         }
     }
-
-    /*
-     * decode the VP9 payload header
-     *
-     *  spec. is tbd
-     */
-    //XXX: implement when specified
 
     /* sanity check: 1 byte payload as minimum */
     if (len < 1) {

@@ -2812,6 +2812,7 @@ static int is_realtime(AVFormatContext *s)
     if(   !strcmp(s->iformat->name, "rtp")
        || !strcmp(s->iformat->name, "rtsp")
        || !strcmp(s->iformat->name, "sdp")
+       || !strcmp(s->iformat->name, "whep")
     )
         return 1;
 

@@ -2290,7 +2290,7 @@ redo:
             AVIOContext *pb = NULL;
             if (rt->lower_transport == RTSP_LOWER_TRANSPORT_CUSTOM)
                 pb = s->pb;
-            ff_rtp_send_rtcp_feedback(rtsp_st->transport_priv, rtsp_st->rtp_handle, pb);
+            ff_rtp_send_rtcp_feedback(rtsp_st->transport_priv, rtsp_st->rtp_handle, pb, 0);
         }
         if (ret < 0) {
             /* Either bad packet, or a RTCP packet. Check if the
