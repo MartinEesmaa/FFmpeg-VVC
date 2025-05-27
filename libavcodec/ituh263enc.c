@@ -233,7 +233,7 @@ static int h263_encode_picture_header(MPVMainEncContext *const m)
 
     put_bits_assume_flushed(&s->pb);
 
-    if(s->c.h263_plus){
+    if (s->c.codec_id == AV_CODEC_ID_H263P) {
         for(i=0; i<2; i++){
             int div, error;
             div= (s->c.avctx->time_base.num*1800000LL + 500LL*s->c.avctx->time_base.den) / ((1000LL+i)*s->c.avctx->time_base.den);
@@ -262,7 +262,7 @@ static int h263_encode_picture_header(MPVMainEncContext *const m)
     put_bits(&s->pb, 1, 0);     /* freeze picture release off */
 
     format = ff_match_2uint16(ff_h263_format, FF_ARRAY_ELEMS(ff_h263_format), s->c.width, s->c.height);
-    if (!s->c.h263_plus) {
+    if (s->c.codec_id != AV_CODEC_ID_H263P) {
         /* H.263v1 */
         put_bits(&s->pb, 3, format);
         put_bits(&s->pb, 1, (s->c.pict_type == AV_PICTURE_TYPE_P));
@@ -841,6 +841,9 @@ av_cold void ff_h263_encode_init(MPVMainEncContext *const m)
 
     if (s->c.modified_quant)
         s->c.chroma_qscale_table = ff_h263_chroma_qscale_table;
+
+    // Only used for H.263 and H.263+
+    s->c.gob_index = H263_GOB_HEIGHT(s->c.height);
 
     // use fcodes >1 only for MPEG-4 & H.263 & H.263+ FIXME
     switch(s->c.codec_id){

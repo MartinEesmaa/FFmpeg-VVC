@@ -238,11 +238,10 @@ static inline int decide_ac_pred(MPVEncContext *const s, int16_t block[6][64],
  */
 void ff_clean_mpeg4_qscales(MPVEncContext *const s)
 {
-    int8_t *const qscale_table = s->c.cur_pic.qscale_table;
-
     ff_clean_h263_qscales(s);
 
     if (s->c.pict_type == AV_PICTURE_TYPE_B) {
+        int8_t *const qscale_table = s->c.cur_pic.qscale_table;
         int odd = 0;
         /* ok, come on, this isn't funny anymore, there's more code for
          * handling this MPEG-4 mess than for the actual adaptive quantization */
@@ -292,46 +291,19 @@ static inline void mpeg4_encode_dc(PutBitContext *s, int level, int n)
     }
 }
 
-static inline int mpeg4_get_dc_length(int level, int n)
-{
-    if (n < 4)
-        return uni_DCtab_lum_len[level + 256];
-    else
-        return uni_DCtab_chrom_len[level + 256];
-}
-
 /**
- * Encode an 8x8 block.
- * @param n block index (0-3 are luma, 4-5 are chroma)
+ * Encode the AC coefficients of an 8x8 block.
  */
-static inline void mpeg4_encode_block(const MPVEncContext *const s,
-                                      const int16_t *block, int n, int intra_dc,
-                                      const uint8_t *scan_table, PutBitContext *dc_pb,
-                                      PutBitContext *ac_pb)
+static inline void mpeg4_encode_ac_coeffs(const int16_t block[64],
+                                          const int last_index, int i,
+                                          const uint8_t *const scan_table,
+                                          PutBitContext *const ac_pb,
+                                          const uint32_t *const bits_tab,
+                                          const uint8_t *const len_tab)
 {
-    int i, last_non_zero;
-    const uint32_t *bits_tab;
-    const uint8_t *len_tab;
-    const int last_index = s->c.block_last_index[n];
-
-    if (s->c.mb_intra) {  // Note gcc (3.2.1 at least) will optimize this away
-        /* MPEG-4 based DC predictor */
-        mpeg4_encode_dc(dc_pb, intra_dc, n);
-        if (last_index < 1)
-            return;
-        i = 1;
-        bits_tab = uni_mpeg4_intra_rl_bits;
-        len_tab  = uni_mpeg4_intra_rl_len;
-    } else {
-        if (last_index < 0)
-            return;
-        i = 0;
-        bits_tab = uni_mpeg4_inter_rl_bits;
-        len_tab  = uni_mpeg4_inter_rl_len;
-    }
+    int last_non_zero = i - 1;
 
     /* AC coefs */
-    last_non_zero = i - 1;
     for (; i < last_index; i++) {
         int level = block[scan_table[i]];
         if (level) {
@@ -365,93 +337,40 @@ static inline void mpeg4_encode_block(const MPVEncContext *const s,
     }
 }
 
-static int mpeg4_get_block_length(MPVEncContext *const s,
-                                  const int16_t *block, int n,
-                                  int intra_dc, const uint8_t *scan_table)
+static void mpeg4_encode_blocks_inter(MPVEncContext *const s,
+                                      const int16_t block[6][64],
+                                      PutBitContext *ac_pb)
 {
-    int i, last_non_zero;
-    const uint8_t *len_tab;
-    const int last_index = s->c.block_last_index[n];
-    int len = 0;
-
-    if (s->c.mb_intra) {  // Note gcc (3.2.1 at least) will optimize this away
-        /* MPEG-4 based DC predictor */
-        len += mpeg4_get_dc_length(intra_dc, n);
-        if (last_index < 1)
-            return len;
-        i = 1;
-        len_tab = uni_mpeg4_intra_rl_len;
-    } else {
+    /* encode each block */
+    for (int n = 0; n < 6; ++n) {
+        const int last_index = s->c.block_last_index[n];
         if (last_index < 0)
-            return 0;
-        i = 0;
-        len_tab = uni_mpeg4_inter_rl_len;
-    }
+            continue;
 
-    /* AC coefs */
-    last_non_zero = i - 1;
-    for (; i < last_index; i++) {
-        int level = block[scan_table[i]];
-        if (level) {
-            int run = i - last_non_zero - 1;
-            level += 64;
-            if ((level & (~127)) == 0) {
-                const int index = UNI_MPEG4_ENC_INDEX(0, run, level);
-                len += len_tab[index];
-            } else {  // ESC3
-                len += 7 + 2 + 1 + 6 + 1 + 12 + 1;
-            }
-            last_non_zero = i;
-        }
+        mpeg4_encode_ac_coeffs(block[n], last_index, 0,
+                               s->c.intra_scantable.permutated, ac_pb,
+                               uni_mpeg4_inter_rl_bits, uni_mpeg4_inter_rl_len);
     }
-    /* if (i <= last_index) */ {
-        int level = block[scan_table[i]];
-        int run   = i - last_non_zero - 1;
-        level += 64;
-        if ((level & (~127)) == 0) {
-            const int index = UNI_MPEG4_ENC_INDEX(1, run, level);
-            len += len_tab[index];
-        } else {  // ESC3
-            len += 7 + 2 + 1 + 6 + 1 + 12 + 1;
-        }
-    }
-
-    return len;
 }
 
-static inline void mpeg4_encode_blocks(MPVEncContext *const s,
-                                       const int16_t block[6][64],
-                                       const int intra_dc[6],
-                                       const uint8_t * const *scan_table,
-                                       PutBitContext *dc_pb,
-                                       PutBitContext *ac_pb)
+static void mpeg4_encode_blocks_intra(MPVEncContext *const s,
+                                      const int16_t block[6][64],
+                                      const int intra_dc[6],
+                                      const uint8_t * const *scan_table,
+                                      PutBitContext *dc_pb,
+                                      PutBitContext *ac_pb)
 {
-    int i;
+    /* encode each block */
+    for (int n = 0; n < 6; ++n) {
+        mpeg4_encode_dc(dc_pb, intra_dc[n], n);
 
-    if (scan_table) {
-        if (s->c.avctx->flags2 & AV_CODEC_FLAG2_NO_OUTPUT) {
-            for (i = 0; i < 6; i++)
-                skip_put_bits(&s->pb,
-                              mpeg4_get_block_length(s, block[i], i,
-                                                     intra_dc[i], scan_table[i]));
-        } else {
-            /* encode each block */
-            for (i = 0; i < 6; i++)
-                mpeg4_encode_block(s, block[i], i,
-                                   intra_dc[i], scan_table[i], dc_pb, ac_pb);
-        }
-    } else {
-        if (s->c.avctx->flags2 & AV_CODEC_FLAG2_NO_OUTPUT) {
-            for (i = 0; i < 6; i++)
-                skip_put_bits(&s->pb,
-                              mpeg4_get_block_length(s, block[i], i, 0,
-                                                     s->c.intra_scantable.permutated));
-        } else {
-            /* encode each block */
-            for (i = 0; i < 6; i++)
-                mpeg4_encode_block(s, block[i], i, 0,
-                                   s->c.intra_scantable.permutated, dc_pb, ac_pb);
-        }
+        const int last_index = s->c.block_last_index[n];
+        if (last_index <= 0)
+            continue;
+
+        mpeg4_encode_ac_coeffs(block[n], last_index, 1,
+                               scan_table[n], ac_pb,
+                               uni_mpeg4_intra_rl_bits, uni_mpeg4_intra_rl_len);
     }
 }
 
@@ -641,7 +560,7 @@ static void mpeg4_encode_mb(MPVEncContext *const s, int16_t block[][64],
             if (interleaved_stats)
                 s->mv_bits += get_bits_diff(s);
 
-            mpeg4_encode_blocks(s, block, NULL, NULL, NULL, &s->pb);
+            mpeg4_encode_blocks_inter(s, block, &s->pb);
 
             if (interleaved_stats)
                 s->p_tex_bits += get_bits_diff(s);
@@ -804,7 +723,7 @@ static void mpeg4_encode_mb(MPVEncContext *const s, int16_t block[][64],
             if (interleaved_stats)
                 s->mv_bits += get_bits_diff(s);
 
-            mpeg4_encode_blocks(s, block, NULL, NULL, NULL, tex_pb);
+            mpeg4_encode_blocks_inter(s, block, tex_pb);
 
             if (interleaved_stats)
                 s->p_tex_bits += get_bits_diff(s);
@@ -866,7 +785,7 @@ static void mpeg4_encode_mb(MPVEncContext *const s, int16_t block[][64],
         if (interleaved_stats)
             s->misc_bits += get_bits_diff(s);
 
-        mpeg4_encode_blocks(s, block, dc_diff, scan_table, dc_pb, tex_pb);
+        mpeg4_encode_blocks_intra(s, block, dc_diff, scan_table, dc_pb, tex_pb);
 
         if (interleaved_stats)
             s->i_tex_bits += get_bits_diff(s);
@@ -1033,9 +952,9 @@ static void mpeg4_encode_vol_header(Mpeg4EncContext *const m4,
         put_bits(&s->pb, 2, 0);       /* sprite enable */
 
     put_bits(&s->pb, 1, 0);             /* not 8 bit == false */
-    put_bits(&s->pb, 1, s->c.mpeg_quant); /* quant type = (0 = H.263 style) */
+    put_bits(&s->pb, 1, s->mpeg_quant); /* quant type = (0 = H.263 style) */
 
-    if (s->c.mpeg_quant) {
+    if (s->mpeg_quant) {
         ff_write_quant_matrix(&s->pb, s->c.avctx->intra_matrix);
         ff_write_quant_matrix(&s->pb, s->c.avctx->inter_matrix);
     }
@@ -1184,103 +1103,84 @@ static av_cold void init_uni_dc_tab(void)
 static av_cold void init_uni_mpeg4_rl_tab(RLTable *rl, uint32_t *bits_tab,
                                           uint8_t *len_tab)
 {
-    int slevel, run, last;
+    // Type 3 escape method. The escape code is the same for both VLCs
+    // (0x3, seven bits), so it is hardcoded.
+    memset(len_tab, 30, 2 * 2 * 64 * 64);
+    len_tab  += 64;
+    bits_tab += 64;
+    for (int run = 0; run < 64; ++run) {
+        for (int level = 1;; ++level) {
+                       //  Escape code   type 3     not last    run (6 bits)   marker   marker
+            unsigned code = (3 << 23) | (3 << 21) | (0 << 20) | (run << 14) | (1 << 13) | 1;
+            // first the negative levels
+            bits_tab[UNI_MPEG4_ENC_INDEX(0, run, -level)] = code | (-level & 0xfff) << 1;
+            bits_tab[UNI_MPEG4_ENC_INDEX(1, run, -level)] =
+                bits_tab[UNI_MPEG4_ENC_INDEX(0, run, -level)] | (1 << 20) /* last */;
 
-    av_assert0(MAX_LEVEL >= 64);
-    av_assert0(MAX_RUN >= 63);
-
-    for (slevel = -64; slevel < 64; slevel++) {
-        if (slevel == 0)
-            continue;
-        for (run = 0; run < 64; run++) {
-            for (last = 0; last <= 1; last++) {
-                const int index = UNI_MPEG4_ENC_INDEX(last, run, slevel + 64);
-                int level       = slevel < 0 ? -slevel : slevel;
-                int sign        = slevel < 0 ? 1 : 0;
-                int bits, len, code;
-                int level1, run1;
-
-                len_tab[index] = 100;
-
-                /* ESC0 */
-                code = get_rl_index(rl, last, run, level);
-                bits = rl->table_vlc[code][0];
-                len  = rl->table_vlc[code][1];
-                bits = bits * 2 + sign;
-                len++;
-
-                if (code != rl->n && len < len_tab[index]) {
-                    bits_tab[index] = bits;
-                    len_tab[index]  = len;
-                }
-                /* ESC1 */
-                bits = rl->table_vlc[rl->n][0];
-                len  = rl->table_vlc[rl->n][1];
-                bits = bits * 2;
-                len++;                 // esc1
-                level1 = level - rl->max_level[last][run];
-                if (level1 > 0) {
-                    code   = get_rl_index(rl, last, run, level1);
-                    bits <<= rl->table_vlc[code][1];
-                    len   += rl->table_vlc[code][1];
-                    bits  += rl->table_vlc[code][0];
-                    bits   = bits * 2 + sign;
-                    len++;
-
-                    if (code != rl->n && len < len_tab[index]) {
-                        bits_tab[index] = bits;
-                        len_tab[index]  = len;
-                    }
-                }
-                /* ESC2 */
-                bits = rl->table_vlc[rl->n][0];
-                len  = rl->table_vlc[rl->n][1];
-                bits = bits * 4 + 2;
-                len += 2;                 // esc2
-                run1 = run - rl->max_run[last][level] - 1;
-                if (run1 >= 0) {
-                    code   = get_rl_index(rl, last, run1, level);
-                    bits <<= rl->table_vlc[code][1];
-                    len   += rl->table_vlc[code][1];
-                    bits  += rl->table_vlc[code][0];
-                    bits   = bits * 2 + sign;
-                    len++;
-
-                    if (code != rl->n && len < len_tab[index]) {
-                        bits_tab[index] = bits;
-                        len_tab[index]  = len;
-                    }
-                }
-                /* ESC3 */
-                bits = rl->table_vlc[rl->n][0];
-                len  = rl->table_vlc[rl->n][1];
-                bits = bits * 4 + 3;
-                len += 2;                 // esc3
-                bits = bits * 2 + last;
-                len++;
-                bits = bits * 64 + run;
-                len += 6;
-                bits = bits * 2 + 1;
-                len++;                    // marker
-                bits = bits * 4096 + (slevel & 0xfff);
-                len += 12;
-                bits = bits * 2 + 1;
-                len++;                    // marker
-
-                if (len < len_tab[index]) {
-                    bits_tab[index] = bits;
-                    len_tab[index]  = len;
-                }
-            }
+            if (level == 64) // positive levels have a range of 1..63
+                break;
+            bits_tab[UNI_MPEG4_ENC_INDEX(0, run, level)] = code | level << 1;
+            bits_tab[UNI_MPEG4_ENC_INDEX(1, run, level)] =
+                bits_tab[UNI_MPEG4_ENC_INDEX(0, run, level)] | (1 << 20) /* last */;
         }
+        // Is this needed at all?
+        len_tab[UNI_MPEG4_ENC_INDEX(0, run, 0)] =
+        len_tab[UNI_MPEG4_ENC_INDEX(1, run, 0)] = 0;
+    }
+
+    uint8_t max_run[2][32] = { 0 };
+
+#define VLC_NUM_CODES 102 // excluding the escape
+    av_assert2(rl->n == VLC_NUM_CODES);
+    for (int i = VLC_NUM_CODES - 1, max_level, cur_run = 0; i >= 0; --i) {
+        int run = rl->table_run[i], level = rl->table_level[i];
+        int last = i >= rl->last;
+        unsigned code = rl->table_vlc[i][0] << 1;
+        int len = rl->table_vlc[i][1] + 1;
+
+        bits_tab[UNI_MPEG4_ENC_INDEX(last, run,  level)] = code;
+        len_tab [UNI_MPEG4_ENC_INDEX(last, run,  level)] = len;
+        bits_tab[UNI_MPEG4_ENC_INDEX(last, run, -level)] = code | 1;
+        len_tab [UNI_MPEG4_ENC_INDEX(last, run, -level)] = len;
+
+        if (!max_run[last][level])
+            max_run[last][level] = run + 1;
+        av_assert2(run + 1 <= max_run[last][level]);
+
+        int run3 = run + max_run[last][level];
+        int len3 = len + 7 + 2;
+
+        if (run3 < 64 && len3 < len_tab[UNI_MPEG4_ENC_INDEX(last, run3, level)]) {
+            unsigned code3 = code | (0x3 << 2 | 0x2) << len;
+            bits_tab[UNI_MPEG4_ENC_INDEX(last, run3,  level)] = code3;
+            len_tab [UNI_MPEG4_ENC_INDEX(last, run3,  level)] = len3;
+            bits_tab[UNI_MPEG4_ENC_INDEX(last, run3, -level)] = code3 | 1;
+            len_tab [UNI_MPEG4_ENC_INDEX(last, run3, -level)] = len3;
+        }
+        // table_run and table_level are ordered so that all the entries
+        // with the same last and run are consecutive and level is ascending
+        // among these entries. By traversing downwards we therefore automatically
+        // encounter max_level of a given run first, needed for escape method 1.
+        if (run != cur_run) {
+            max_level = level;
+            cur_run   = run;
+        } else
+            av_assert2(max_level > level);
+
+        code  |= 0x3 << (len + 1);
+        len   += 7 + 1;
+        level += max_level;
+        av_assert2(len_tab [UNI_MPEG4_ENC_INDEX(last, run,  level)] >= len);
+        bits_tab[UNI_MPEG4_ENC_INDEX(last, run,  level)] = code;
+        len_tab [UNI_MPEG4_ENC_INDEX(last, run,  level)] = len;
+        bits_tab[UNI_MPEG4_ENC_INDEX(last, run, -level)] = code | 1;
+        len_tab [UNI_MPEG4_ENC_INDEX(last, run, -level)] = len;
     }
 }
 
 static av_cold void mpeg4_encode_init_static(void)
 {
     init_uni_dc_tab();
-
-    ff_mpeg4_init_rl_intra();
 
     init_uni_mpeg4_rl_tab(&ff_mpeg4_rl_intra, uni_mpeg4_intra_rl_bits, uni_mpeg4_intra_rl_len);
     init_uni_mpeg4_rl_tab(&ff_h263_rl_inter,  uni_mpeg4_inter_rl_bits, uni_mpeg4_inter_rl_len);
@@ -1404,11 +1304,11 @@ void ff_mpeg4_encode_video_packet_header(MPVEncContext *const s)
     put_bits(&s->pb, 1, 0); /* no HEC */
 }
 
-#define OFFSET(x) offsetof(MPVEncContext, c.x)
+#define OFFSET(x) offsetof(MPVEncContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
 static const AVOption options[] = {
-    { "data_partitioning", "Use data partitioning.",      OFFSET(data_partitioning), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
-    { "alternate_scan",    "Enable alternate scantable.", OFFSET(alternate_scan),    AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+    { "data_partitioning", "Use data partitioning.",      OFFSET(c.data_partitioning), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
+    { "alternate_scan",    "Enable alternate scantable.", OFFSET(c.alternate_scan),    AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VE },
     { "mpeg_quant",        "Use MPEG quantizers instead of H.263",
       OFFSET(mpeg_quant), AV_OPT_TYPE_INT, {.i64 = 0 }, 0, 1, VE },
     FF_MPV_COMMON_BFRAME_OPTS
