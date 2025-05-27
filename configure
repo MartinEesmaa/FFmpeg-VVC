@@ -6976,8 +6976,8 @@ enabled libiec61883       && require libiec61883 libiec61883/iec61883.h iec61883
 enabled libass            && require_pkg_config libass "libass >= 0.11.0" ass/ass.h ass_library_init
 enabled libbluray         && require_pkg_config libbluray libbluray libbluray/bluray.h bd_open
 enabled libbs2b           && require_pkg_config libbs2b libbs2b bs2b.h bs2b_open
-enabled libcelt           && require libcelt celt/celt.h celt_decode -lcelt0 &&
-                             { check_lib libcelt celt/celt.h celt_decoder_create_custom -lcelt0 ||
+enabled libcelt           && require libcelt celt/celt.h old_celt_decode -lcelt0 &&
+                             { check_lib libcelt celt/celt.h old_celt_decoder_create_custom -lcelt0 ||
                                die "ERROR: libcelt must be installed and version must be >= 0.11.0."; }
 enabled libcaca           && require_pkg_config libcaca caca caca.h caca_create_canvas
 enabled libcodec2         && require libcodec2 codec2/codec2.h codec2_create -lcodec2

@@ -68,7 +68,7 @@ static av_cold int libcelt_dec_init(AVCodecContext *c)
     celt->mode = celt_mode_create(c->sample_rate, c->frame_size, &err);
     if (!celt->mode)
         return ff_celt_error_to_averror(err);
-    celt->dec = celt_decoder_create_custom(celt->mode, c->ch_layout.nb_channels, &err);
+    celt->dec = old_celt_decoder_create_custom(celt->mode, c->ch_layout.nb_channels, &err);
     if (!celt->dec) {
         celt_mode_destroy(celt->mode);
         return ff_celt_error_to_averror(err);
@@ -114,7 +114,7 @@ static int libcelt_dec_decode(AVCodecContext *c, AVFrame *frame,
     if ((err = ff_get_buffer(c, frame, 0)) < 0)
         return err;
     pcm = (int16_t *)frame->data[0];
-    err = celt_decode(celt->dec, pkt->data, pkt->size, pcm, c->frame_size);
+    err = old_celt_decode(celt->dec, pkt->data, pkt->size, pcm, c->frame_size);
     if (err < 0)
         return ff_celt_error_to_averror(err);
     if (celt->discard) {
