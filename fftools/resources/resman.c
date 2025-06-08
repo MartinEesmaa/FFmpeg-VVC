@@ -32,7 +32,6 @@
 #endif
 
 #include "resman.h"
-#include "fftools/ffmpeg_filter.h"
 #include "libavutil/avassert.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/dict.h"
@@ -61,7 +60,7 @@ typedef struct ResourceManagerContext {
 
 static AVMutex mutex = AV_MUTEX_INITIALIZER;
 
-ResourceManagerContext *resman_ctx = NULL;
+static ResourceManagerContext resman_ctx = { .class = &resman_class };
 
 
 #if CONFIG_RESOURCE_COMPRESSION
@@ -118,39 +117,11 @@ static int decompress_gzip(ResourceManagerContext *ctx, uint8_t *in, unsigned in
 }
 #endif
 
-static ResourceManagerContext *get_resman_context(void)
-{
-    ResourceManagerContext *res = resman_ctx;
-
-    ff_mutex_lock(&mutex);
-
-    if (res)
-        goto end;
-
-    res = av_mallocz(sizeof(ResourceManagerContext));
-    if (!res) {
-        av_log(NULL, AV_LOG_ERROR, "Failed to allocate resource manager context\n");
-        goto end;
-    }
-
-    res->class = &resman_class;
-    resman_ctx = res;
-
-end:
-    ff_mutex_unlock(&mutex);
-    return res;
-}
-
-
 void ff_resman_uninit(void)
 {
     ff_mutex_lock(&mutex);
 
-    if (resman_ctx) {
-        if (resman_ctx->resource_dic)
-            av_dict_free(&resman_ctx->resource_dic);
-        av_freep(&resman_ctx);
-    }
+    av_dict_free(&resman_ctx.resource_dic);
 
     ff_mutex_unlock(&mutex);
 }
@@ -158,13 +129,10 @@ void ff_resman_uninit(void)
 
 char *ff_resman_get_string(FFResourceId resource_id)
 {
-    ResourceManagerContext *ctx               = get_resman_context();
+    ResourceManagerContext *ctx = &resman_ctx;
     FFResourceDefinition resource_definition = { 0 };
     AVDictionaryEntry *dic_entry;
     char *res = NULL;
-
-    if (!ctx)
-        return NULL;
 
     for (unsigned i = 0; i < FF_ARRAY_ELEMS(resource_definitions); ++i) {
         FFResourceDefinition def = resource_definitions[i];
@@ -174,10 +142,7 @@ char *ff_resman_get_string(FFResourceId resource_id)
         }
     }
 
-    if (!resource_definition.name) {
-        av_log(ctx, AV_LOG_ERROR, "Unable to find resource with ID %d\n", resource_id);
-        return NULL;
-    }
+    av_assert1(resource_definition.name);
 
     ff_mutex_lock(&mutex);
 
@@ -194,13 +159,13 @@ char *ff_resman_get_string(FFResourceId resource_id)
         int ret = decompress_gzip(ctx, (uint8_t *)resource_definition.data, *resource_definition.data_len, &out, &out_len);
 
         if (ret) {
-            av_log(NULL, AV_LOG_ERROR, "Unable to decompress the resource with ID %d\n", resource_id);
+            av_log(ctx, AV_LOG_ERROR, "Unable to decompress the resource with ID %d\n", resource_id);
             goto end;
         }
 
         dict_ret = av_dict_set(&ctx->resource_dic, resource_definition.name, out, 0);
         if (dict_ret < 0) {
-            av_log(NULL, AV_LOG_ERROR, "Failed to store decompressed resource in dictionary: %d\n", dict_ret);
+            av_log(ctx, AV_LOG_ERROR, "Failed to store decompressed resource in dictionary: %d\n", dict_ret);
             av_freep(&out);
             goto end;
         }
@@ -210,7 +175,7 @@ char *ff_resman_get_string(FFResourceId resource_id)
 
         dict_ret = av_dict_set(&ctx->resource_dic, resource_definition.name, (const char *)resource_definition.data, 0);
         if (dict_ret < 0) {
-            av_log(NULL, AV_LOG_ERROR, "Failed to store resource in dictionary: %d\n", dict_ret);
+            av_log(ctx, AV_LOG_ERROR, "Failed to store resource in dictionary: %d\n", dict_ret);
             goto end;
         }
 
@@ -218,7 +183,7 @@ char *ff_resman_get_string(FFResourceId resource_id)
         dic_entry = av_dict_get(ctx->resource_dic, resource_definition.name, NULL, 0);
 
         if (!dic_entry) {
-            av_log(NULL, AV_LOG_ERROR, "Failed to retrieve resource from dictionary after storing it\n");
+            av_log(ctx, AV_LOG_ERROR, "Failed to retrieve resource from dictionary after storing it\n");
             goto end;
         }
     }

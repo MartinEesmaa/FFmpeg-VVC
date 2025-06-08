@@ -42,8 +42,8 @@ struct ogg_codec {
      * Attempt to process a packet as a data packet
      * @return < 0 (AVERROR) code or -1 on error
      *         == 0 if the packet was a regular data packet.
-     *         == 0 or 1 if the packet was a header from a chained bitstream.
-     *           (1 will cause the packet to be skiped in calling code (ogg_packet())
+     *         == 1 if the packet was a header from a chained bitstream.
+     *            This will cause the packet to be skiped in calling code (ogg_packet()
      */
     int (*packet)(AVFormatContext *, int);
     /**
@@ -94,6 +94,8 @@ struct ogg_stream {
     int end_trimming; ///< set the number of packets to drop from the end
     uint8_t *new_metadata;
     size_t new_metadata_size;
+    uint8_t *new_extradata;
+    size_t new_extradata_size;
     void *private;
 };
 

@@ -39,6 +39,7 @@
 #include "libavfilter/avfilter.h"
 
 #include "libavutil/avutil.h"
+#include "libavutil/bprint.h"
 #include "libavutil/dict.h"
 #include "libavutil/eval.h"
 #include "libavutil/fifo.h"
@@ -352,6 +353,18 @@ typedef struct OutputFilterOptions {
 typedef struct InputFilter {
     struct FilterGraph *graph;
     uint8_t            *name;
+    int                 index;
+
+    // filter data type
+    enum AVMediaType    type;
+
+    AVFilterContext    *filter;
+
+    char               *input_name;
+
+    /* for filters that are not yet bound to an input stream,
+     * this stores the input linklabel, if any */
+    uint8_t            *linklabel;
 } InputFilter;
 
 typedef struct OutputFilter {
@@ -359,6 +372,11 @@ typedef struct OutputFilter {
 
     struct FilterGraph  *graph;
     uint8_t             *name;
+    int                  index;
+
+    AVFilterContext     *filter;
+
+    char                *output_name;
 
     /* for filters that are not yet bound to an output stream,
      * this stores the output linklabel, if any */
@@ -381,6 +399,9 @@ typedef struct FilterGraph {
     int          nb_inputs;
     OutputFilter **outputs;
     int         nb_outputs;
+
+    const char      *graph_desc;
+    struct AVBPrint graph_print_buf;
 } FilterGraph;
 
 enum DecoderFlags {

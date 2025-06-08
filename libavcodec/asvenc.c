@@ -301,9 +301,10 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     if (ret < 0)
         return ret;
 
-    if ((uintptr_t)pict->data[0] & 7 || pict->linesize[0] & 7 ||
-        (uintptr_t)pict->data[1] & 7 || pict->linesize[1] & 7 ||
-        (uintptr_t)pict->data[2] & 7 || pict->linesize[2] & 7)
+    if (!PIXBLOCKDSP_8BPP_GET_PIXELS_SUPPORTS_UNALIGNED &&
+        ((uintptr_t)pict->data[0] & 7 || pict->linesize[0] & 7 ||
+         (uintptr_t)pict->data[1] & 7 || pict->linesize[1] & 7 ||
+         (uintptr_t)pict->data[2] & 7 || pict->linesize[2] & 7))
         a->get_pixels = a->pdsp.get_pixels_unaligned;
     else
         a->get_pixels = a->pdsp.get_pixels;
@@ -378,7 +379,7 @@ static av_cold int encode_init(AVCodecContext *avctx)
 
     ff_asv_common_init(avctx);
     ff_fdctdsp_init(&a->fdsp, avctx);
-    ff_pixblockdsp_init(&a->pdsp, avctx);
+    ff_pixblockdsp_init(&a->pdsp, 8);
 
     if (avctx->global_quality <= 0)
         avctx->global_quality = 4 * FF_QUALITY_SCALE;

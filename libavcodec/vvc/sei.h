@@ -1,4 +1,8 @@
 /*
+ * VVC Supplementary Enhancement Information messages
+ *
+ * copyright (c) 2024 Wu Jianhua <toqsxw@outlook.com>
+ *
  * This file is part of FFmpeg.
  *
  * FFmpeg is free software; you can redistribute it and/or
@@ -16,29 +20,29 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#ifndef AVCODEC_VVC_SEI_H
+#define AVCODEC_VVC_SEI_H
+
 #include <stdint.h>
 
-#include "libavutil/attributes.h"
-#include "libavutil/cpu.h"
-#include "libavutil/aarch64/cpu.h"
-#include "libavcodec/pixblockdsp.h"
+#include "libavcodec/get_bits.h"
+#include "libavcodec/cbs.h"
+#include "libavcodec/cbs_h266.h"
+#include "libavcodec/h2645_sei.h"
+#include "libavcodec/sei.h"
+#include "libavcodec/vvc.h"
+#include "libavcodec/h274.h"
 
-void ff_get_pixels_neon(int16_t *block, const uint8_t *pixels,
-                        ptrdiff_t stride);
-void ff_diff_pixels_neon(int16_t *block, const uint8_t *s1,
-                         const uint8_t *s2, ptrdiff_t stride);
+typedef struct VVCSEI {
+    H2645SEI common;
+    H274SEIPictureHash picture_hash;
+    H274SEIFrameFieldInfo frame_field_info;
+} VVCSEI;
 
-av_cold void ff_pixblockdsp_init_aarch64(PixblockDSPContext *c,
-                                         unsigned high_bit_depth)
-{
-    int cpu_flags = av_get_cpu_flags();
+struct VVCFrameContext;
 
-    if (have_neon(cpu_flags)) {
-        if (!high_bit_depth) {
-            c->get_pixels_unaligned =
-            c->get_pixels = ff_get_pixels_neon;
-        }
-        c->diff_pixels_unaligned =
-        c->diff_pixels = ff_diff_pixels_neon;
-    }
-}
+int ff_vvc_sei_decode(VVCSEI *s, const H266RawSEI *sei, const struct VVCFrameContext *fc);
+int ff_vvc_sei_replace(VVCSEI *dst, const VVCSEI *src);
+void ff_vvc_sei_reset(VVCSEI *s);
+
+#endif /* AVCODEC_VVC_SEI_H */

@@ -457,6 +457,43 @@ static inline int show_tags(AVTextFormatContext *tfc, AVDictionary *tags, int se
     return ret;
 }
 
+static void print_displaymatrix(AVTextFormatContext *tfc, const int32_t matrix[9])
+{
+    double rotation = av_display_rotation_get(matrix);
+    if (isnan(rotation))
+        rotation = 0;
+    avtext_print_integers(tfc, "displaymatrix", (void*)matrix, 9, " %11d", 3, 4, 1);
+    print_int("rotation", rotation);
+}
+
+static void print_mastering_display_metadata(AVTextFormatContext *tfc,
+                                             const AVMasteringDisplayMetadata *metadata)
+{
+    if (metadata->has_primaries) {
+        print_q("red_x",   metadata->display_primaries[0][0], '/');
+        print_q("red_y",   metadata->display_primaries[0][1], '/');
+        print_q("green_x", metadata->display_primaries[1][0], '/');
+        print_q("green_y", metadata->display_primaries[1][1], '/');
+        print_q("blue_x",  metadata->display_primaries[2][0], '/');
+        print_q("blue_y",  metadata->display_primaries[2][1], '/');
+
+        print_q("white_point_x", metadata->white_point[0], '/');
+        print_q("white_point_y", metadata->white_point[1], '/');
+    }
+
+    if (metadata->has_luminance) {
+        print_q("min_luminance", metadata->min_luminance, '/');
+        print_q("max_luminance", metadata->max_luminance, '/');
+    }
+}
+
+static void print_context_light_level(AVTextFormatContext *tfc,
+                                      const AVContentLightMetadata *metadata)
+{
+    print_int("max_content", metadata->MaxCLL);
+    print_int("max_average", metadata->MaxFALL);
+}
+
 static void print_dovi_metadata(AVTextFormatContext *tfc, const AVDOVIMetadata *dovi)
 {
     if (!dovi)
@@ -929,121 +966,98 @@ static void print_pkt_side_data(AVTextFormatContext *tfc,
                                 const AVPacketSideData *sd,
                                 SectionID id_data)
 {
-        const char *name = av_packet_side_data_name(sd->type);
+    const char *name = av_packet_side_data_name(sd->type);
 
-        avtext_print_section_header(tfc, sd, id_data);
-        print_str("side_data_type", name ? name : "unknown");
-        if (sd->type == AV_PKT_DATA_DISPLAYMATRIX && sd->size >= 9*4) {
-            double rotation = av_display_rotation_get((int32_t *)sd->data);
-            if (isnan(rotation))
-                rotation = 0;
-            avtext_print_integers(tfc, "displaymatrix", sd->data, 9, " %11d", 3, 4, 1);
-            print_int("rotation", rotation);
-        } else if (sd->type == AV_PKT_DATA_STEREO3D) {
-            const AVStereo3D *stereo = (AVStereo3D *)sd->data;
-            print_str("type", av_stereo3d_type_name(stereo->type));
-            print_int("inverted", !!(stereo->flags & AV_STEREO3D_FLAG_INVERT));
-            print_str("view", av_stereo3d_view_name(stereo->view));
-            print_str("primary_eye", av_stereo3d_primary_eye_name(stereo->primary_eye));
-            print_int("baseline", stereo->baseline);
-            print_q("horizontal_disparity_adjustment", stereo->horizontal_disparity_adjustment, '/');
-            print_q("horizontal_field_of_view", stereo->horizontal_field_of_view, '/');
-        } else if (sd->type == AV_PKT_DATA_SPHERICAL) {
-            const AVSphericalMapping *spherical = (AVSphericalMapping *)sd->data;
-            print_str("projection", av_spherical_projection_name(spherical->projection));
-            if (spherical->projection == AV_SPHERICAL_CUBEMAP) {
-                print_int("padding", spherical->padding);
-            } else if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR_TILE) {
-                size_t l, t, r, b;
-                av_spherical_tile_bounds(spherical, par->width, par->height,
-                                         &l, &t, &r, &b);
-                print_int("bound_left", l);
-                print_int("bound_top", t);
-                print_int("bound_right", r);
-                print_int("bound_bottom", b);
-            }
-
-            print_int("yaw", (double) spherical->yaw / (1 << 16));
-            print_int("pitch", (double) spherical->pitch / (1 << 16));
-            print_int("roll", (double) spherical->roll / (1 << 16));
-        } else if (sd->type == AV_PKT_DATA_SKIP_SAMPLES && sd->size == 10) {
-            print_int("skip_samples",    AV_RL32(sd->data));
-            print_int("discard_padding", AV_RL32(sd->data + 4));
-            print_int("skip_reason",     AV_RL8(sd->data + 8));
-            print_int("discard_reason",  AV_RL8(sd->data + 9));
-        } else if (sd->type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA) {
-            AVMasteringDisplayMetadata *metadata = (AVMasteringDisplayMetadata *)sd->data;
-
-            if (metadata->has_primaries) {
-                print_q("red_x", metadata->display_primaries[0][0], '/');
-                print_q("red_y", metadata->display_primaries[0][1], '/');
-                print_q("green_x", metadata->display_primaries[1][0], '/');
-                print_q("green_y", metadata->display_primaries[1][1], '/');
-                print_q("blue_x", metadata->display_primaries[2][0], '/');
-                print_q("blue_y", metadata->display_primaries[2][1], '/');
-
-                print_q("white_point_x", metadata->white_point[0], '/');
-                print_q("white_point_y", metadata->white_point[1], '/');
-            }
-
-            if (metadata->has_luminance) {
-                print_q("min_luminance", metadata->min_luminance, '/');
-                print_q("max_luminance", metadata->max_luminance, '/');
-            }
-        } else if (sd->type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) {
-            AVContentLightMetadata *metadata = (AVContentLightMetadata *)sd->data;
-            print_int("max_content", metadata->MaxCLL);
-            print_int("max_average", metadata->MaxFALL);
-        } else if (sd->type == AV_PKT_DATA_AMBIENT_VIEWING_ENVIRONMENT) {
-            print_ambient_viewing_environment(
-                tfc, (const AVAmbientViewingEnvironment *)sd->data);
-        } else if (sd->type == AV_PKT_DATA_DYNAMIC_HDR10_PLUS) {
-            AVDynamicHDRPlus *metadata = (AVDynamicHDRPlus *)sd->data;
-            print_dynamic_hdr10_plus(tfc, metadata);
-        } else if (sd->type == AV_PKT_DATA_DOVI_CONF) {
-            AVDOVIDecoderConfigurationRecord *dovi = (AVDOVIDecoderConfigurationRecord *)sd->data;
-            const char *comp = "unknown";
-            print_int("dv_version_major", dovi->dv_version_major);
-            print_int("dv_version_minor", dovi->dv_version_minor);
-            print_int("dv_profile", dovi->dv_profile);
-            print_int("dv_level", dovi->dv_level);
-            print_int("rpu_present_flag", dovi->rpu_present_flag);
-            print_int("el_present_flag", dovi->el_present_flag);
-            print_int("bl_present_flag", dovi->bl_present_flag);
-            print_int("dv_bl_signal_compatibility_id", dovi->dv_bl_signal_compatibility_id);
-            switch (dovi->dv_md_compression)
-            {
-                case AV_DOVI_COMPRESSION_NONE:     comp = "none";     break;
-                case AV_DOVI_COMPRESSION_LIMITED:  comp = "limited";  break;
-                case AV_DOVI_COMPRESSION_RESERVED: comp = "reserved"; break;
-                case AV_DOVI_COMPRESSION_EXTENDED: comp = "extended"; break;
-            }
-            print_str("dv_md_compression", comp);
-        } else if (sd->type == AV_PKT_DATA_AUDIO_SERVICE_TYPE) {
-            enum AVAudioServiceType *t = (enum AVAudioServiceType *)sd->data;
-            print_int("service_type", *t);
-        } else if (sd->type == AV_PKT_DATA_MPEGTS_STREAM_ID) {
-            print_int("id", *sd->data);
-        } else if (sd->type == AV_PKT_DATA_CPB_PROPERTIES) {
-            const AVCPBProperties *prop = (AVCPBProperties *)sd->data;
-            print_int("max_bitrate", prop->max_bitrate);
-            print_int("min_bitrate", prop->min_bitrate);
-            print_int("avg_bitrate", prop->avg_bitrate);
-            print_int("buffer_size", prop->buffer_size);
-            print_int("vbv_delay",   prop->vbv_delay);
-        } else if (sd->type == AV_PKT_DATA_WEBVTT_IDENTIFIER ||
-                   sd->type == AV_PKT_DATA_WEBVTT_SETTINGS) {
-            if (do_show_data)
-                avtext_print_data(tfc, "data", sd->data, sd->size);
-            avtext_print_data_hash(tfc, "data_hash", sd->data, sd->size);
-        } else if (sd->type == AV_PKT_DATA_FRAME_CROPPING && sd->size >= sizeof(uint32_t) * 4) {
-            print_int("crop_top",    AV_RL32(sd->data));
-            print_int("crop_bottom", AV_RL32(sd->data + 4));
-            print_int("crop_left",   AV_RL32(sd->data + 8));
-            print_int("crop_right",  AV_RL32(sd->data + 12));
-        } else if (sd->type == AV_PKT_DATA_AFD && sd->size > 0) {
-            print_int("active_format", *sd->data);
+    avtext_print_section_header(tfc, sd, id_data);
+    print_str("side_data_type", name ? name : "unknown");
+    if (sd->type == AV_PKT_DATA_DISPLAYMATRIX && sd->size >= 9*4) {
+        print_displaymatrix(tfc, (const int32_t*)sd->data);
+    } else if (sd->type == AV_PKT_DATA_STEREO3D) {
+        const AVStereo3D *stereo = (AVStereo3D *)sd->data;
+        print_str("type", av_stereo3d_type_name(stereo->type));
+        print_int("inverted", !!(stereo->flags & AV_STEREO3D_FLAG_INVERT));
+        print_str("view", av_stereo3d_view_name(stereo->view));
+        print_str("primary_eye", av_stereo3d_primary_eye_name(stereo->primary_eye));
+        print_int("baseline", stereo->baseline);
+        print_q("horizontal_disparity_adjustment", stereo->horizontal_disparity_adjustment, '/');
+        print_q("horizontal_field_of_view", stereo->horizontal_field_of_view, '/');
+    } else if (sd->type == AV_PKT_DATA_SPHERICAL) {
+        const AVSphericalMapping *spherical = (AVSphericalMapping *)sd->data;
+        print_str("projection", av_spherical_projection_name(spherical->projection));
+        if (spherical->projection == AV_SPHERICAL_CUBEMAP) {
+            print_int("padding", spherical->padding);
+        } else if (spherical->projection == AV_SPHERICAL_EQUIRECTANGULAR_TILE) {
+            size_t l, t, r, b;
+            av_spherical_tile_bounds(spherical, par->width, par->height,
+                                     &l, &t, &r, &b);
+            print_int("bound_left", l);
+            print_int("bound_top", t);
+            print_int("bound_right", r);
+            print_int("bound_bottom", b);
         }
+
+        print_int("yaw", (double) spherical->yaw / (1 << 16));
+        print_int("pitch", (double) spherical->pitch / (1 << 16));
+        print_int("roll", (double) spherical->roll / (1 << 16));
+    } else if (sd->type == AV_PKT_DATA_SKIP_SAMPLES && sd->size == 10) {
+        print_int("skip_samples",    AV_RL32(sd->data));
+        print_int("discard_padding", AV_RL32(sd->data + 4));
+        print_int("skip_reason",     AV_RL8(sd->data + 8));
+        print_int("discard_reason",  AV_RL8(sd->data + 9));
+    } else if (sd->type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA) {
+        print_mastering_display_metadata(tfc, (AVMasteringDisplayMetadata *)sd->data);
+    } else if (sd->type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) {
+        print_context_light_level(tfc, (AVContentLightMetadata *)sd->data);
+    } else if (sd->type == AV_PKT_DATA_AMBIENT_VIEWING_ENVIRONMENT) {
+        print_ambient_viewing_environment(
+            tfc, (const AVAmbientViewingEnvironment *)sd->data);
+    } else if (sd->type == AV_PKT_DATA_DYNAMIC_HDR10_PLUS) {
+        AVDynamicHDRPlus *metadata = (AVDynamicHDRPlus *)sd->data;
+        print_dynamic_hdr10_plus(tfc, metadata);
+    } else if (sd->type == AV_PKT_DATA_DOVI_CONF) {
+        AVDOVIDecoderConfigurationRecord *dovi = (AVDOVIDecoderConfigurationRecord *)sd->data;
+        const char *comp = "unknown";
+        print_int("dv_version_major", dovi->dv_version_major);
+        print_int("dv_version_minor", dovi->dv_version_minor);
+        print_int("dv_profile", dovi->dv_profile);
+        print_int("dv_level", dovi->dv_level);
+        print_int("rpu_present_flag", dovi->rpu_present_flag);
+        print_int("el_present_flag", dovi->el_present_flag);
+        print_int("bl_present_flag", dovi->bl_present_flag);
+        print_int("dv_bl_signal_compatibility_id", dovi->dv_bl_signal_compatibility_id);
+        switch (dovi->dv_md_compression)
+        {
+            case AV_DOVI_COMPRESSION_NONE:     comp = "none";     break;
+            case AV_DOVI_COMPRESSION_LIMITED:  comp = "limited";  break;
+            case AV_DOVI_COMPRESSION_RESERVED: comp = "reserved"; break;
+            case AV_DOVI_COMPRESSION_EXTENDED: comp = "extended"; break;
+        }
+        print_str("dv_md_compression", comp);
+    } else if (sd->type == AV_PKT_DATA_AUDIO_SERVICE_TYPE) {
+        enum AVAudioServiceType *t = (enum AVAudioServiceType *)sd->data;
+        print_int("service_type", *t);
+    } else if (sd->type == AV_PKT_DATA_MPEGTS_STREAM_ID) {
+        print_int("id", *sd->data);
+    } else if (sd->type == AV_PKT_DATA_CPB_PROPERTIES) {
+        const AVCPBProperties *prop = (AVCPBProperties *)sd->data;
+        print_int("max_bitrate", prop->max_bitrate);
+        print_int("min_bitrate", prop->min_bitrate);
+        print_int("avg_bitrate", prop->avg_bitrate);
+        print_int("buffer_size", prop->buffer_size);
+        print_int("vbv_delay",   prop->vbv_delay);
+    } else if (sd->type == AV_PKT_DATA_WEBVTT_IDENTIFIER ||
+               sd->type == AV_PKT_DATA_WEBVTT_SETTINGS) {
+        if (do_show_data)
+            avtext_print_data(tfc, "data", sd->data, sd->size);
+        avtext_print_data_hash(tfc, "data_hash", sd->data, sd->size);
+    } else if (sd->type == AV_PKT_DATA_FRAME_CROPPING && sd->size >= sizeof(uint32_t) * 4) {
+        print_int("crop_top",    AV_RL32(sd->data));
+        print_int("crop_bottom", AV_RL32(sd->data + 4));
+        print_int("crop_left",   AV_RL32(sd->data + 8));
+        print_int("crop_right",  AV_RL32(sd->data + 12));
+    } else if (sd->type == AV_PKT_DATA_AFD && sd->size > 0) {
+        print_int("active_format", *sd->data);
+    }
 }
 
 static void print_private_data(AVTextFormatContext *tfc, void *priv_data)
@@ -1279,11 +1293,7 @@ static void print_frame_side_data(AVTextFormatContext *tfc,
         name = av_frame_side_data_name(sd->type);
         print_str("side_data_type", name ? name : "unknown");
         if (sd->type == AV_FRAME_DATA_DISPLAYMATRIX && sd->size >= 9*4) {
-            double rotation = av_display_rotation_get((int32_t *)sd->data);
-            if (isnan(rotation))
-                rotation = 0;
-            avtext_print_integers(tfc, "displaymatrix", sd->data, 9, " %11d", 3, 4, 1);
-            print_int("rotation", rotation);
+            print_displaymatrix(tfc, (const int32_t*)sd->data);
         } else if (sd->type == AV_FRAME_DATA_AFD && sd->size > 0) {
             print_int("active_format", *sd->data);
         } else if (sd->type == AV_FRAME_DATA_GOP_TIMECODE && sd->size >= 8) {
@@ -1303,31 +1313,12 @@ static void print_frame_side_data(AVTextFormatContext *tfc,
             }
             avtext_print_section_footer(tfc);
         } else if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA) {
-            AVMasteringDisplayMetadata *metadata = (AVMasteringDisplayMetadata *)sd->data;
-
-            if (metadata->has_primaries) {
-                print_q("red_x", metadata->display_primaries[0][0], '/');
-                print_q("red_y", metadata->display_primaries[0][1], '/');
-                print_q("green_x", metadata->display_primaries[1][0], '/');
-                print_q("green_y", metadata->display_primaries[1][1], '/');
-                print_q("blue_x", metadata->display_primaries[2][0], '/');
-                print_q("blue_y", metadata->display_primaries[2][1], '/');
-
-                print_q("white_point_x", metadata->white_point[0], '/');
-                print_q("white_point_y", metadata->white_point[1], '/');
-            }
-
-            if (metadata->has_luminance) {
-                print_q("min_luminance", metadata->min_luminance, '/');
-                print_q("max_luminance", metadata->max_luminance, '/');
-            }
+            print_mastering_display_metadata(tfc, (AVMasteringDisplayMetadata *)sd->data);
         } else if (sd->type == AV_FRAME_DATA_DYNAMIC_HDR_PLUS) {
             AVDynamicHDRPlus *metadata = (AVDynamicHDRPlus *)sd->data;
             print_dynamic_hdr10_plus(tfc, metadata);
         } else if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL) {
-            AVContentLightMetadata *metadata = (AVContentLightMetadata *)sd->data;
-            print_int("max_content", metadata->MaxCLL);
-            print_int("max_average", metadata->MaxFALL);
+            print_context_light_level(tfc, (AVContentLightMetadata *)sd->data);
         } else if (sd->type == AV_FRAME_DATA_ICC_PROFILE) {
             const AVDictionaryEntry *tag = av_dict_get(sd->metadata, "name", NULL, AV_DICT_MATCH_CASE);
             if (tag)

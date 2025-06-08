@@ -43,8 +43,8 @@
 static const struct {
     double bin_val;
     double dec_val;
-    const char *bin_str;
-    const char *dec_str;
+    char bin_str[4];
+    char dec_str[4];
 } si_prefixes[] = {
     { 1.0, 1.0, "", "" },
     { 1.024e3, 1e3, "Ki", "K" },
@@ -681,34 +681,28 @@ fail:
     return ret;
 }
 
-static const AVTextFormatter *registered_formatters[9 + 1];
-
-static void formatters_register_all(void)
+static const AVTextFormatter *const registered_formatters[] =
 {
-    static int initialized;
-
-    if (initialized)
-        return;
-    initialized = 1;
-
-    registered_formatters[0] = &avtextformatter_default;
-    registered_formatters[1] = &avtextformatter_compact;
-    registered_formatters[2] = &avtextformatter_csv;
-    registered_formatters[3] = &avtextformatter_flat;
-    registered_formatters[4] = &avtextformatter_ini;
-    registered_formatters[5] = &avtextformatter_json;
-    registered_formatters[6] = &avtextformatter_xml;
-    registered_formatters[7] = &avtextformatter_mermaid;
-    registered_formatters[8] = &avtextformatter_mermaidhtml;
-}
+    &avtextformatter_default,
+    &avtextformatter_compact,
+    &avtextformatter_csv,
+    &avtextformatter_flat,
+    &avtextformatter_ini,
+    &avtextformatter_json,
+    &avtextformatter_xml,
+    &avtextformatter_mermaid,
+    &avtextformatter_mermaidhtml,
+    NULL
+};
 
 const AVTextFormatter *avtext_get_formatter_by_name(const char *name)
 {
-    formatters_register_all();
-
-    for (int i = 0; registered_formatters[i]; i++)
-        if (!strcmp(registered_formatters[i]->name, name))
+    for (int i = 0; registered_formatters[i]; i++) {
+        const char *end;
+        if (av_strstart(name, registered_formatters[i]->name, &end) &&
+            (*end == '\0' || *end == '='))
             return registered_formatters[i];
+    }
 
     return NULL;
 }
