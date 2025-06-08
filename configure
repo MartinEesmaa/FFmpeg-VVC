@@ -248,6 +248,7 @@ External library support:
   --enable-liblc3          enable LC3 de/encoding via liblc3 [no]
   --enable-liblcevc_dec    enable LCEVC decoding via liblcevc_dec [no]
   --enable-liblensfun      enable lensfun lens correction [no]
+  --enable-libmad          enable MP3 decoding via libmad [no]
   --enable-libmodplug      enable ModPlug via libmodplug [no]
   --enable-libmp3lame      enable MP3 encoding via libmp3lame [no]
   --enable-liboapv         enable APV encoding via liboapv [no]
@@ -1889,6 +1890,7 @@ EXTERNAL_LIBRARY_GPL_LIST="
     libdavs2
     libdvdnav
     libdvdread
+    libmad
     librubberband
     libvidstab
     libx264
@@ -3605,6 +3607,7 @@ liblc3_decoder_deps="liblc3"
 liblc3_encoder_deps="liblc3"
 liblc3_encoder_select="audio_frame_queue"
 libmodplug_demuxer_deps="libmodplug"
+libmad_decoder_deps="libmad"
 libmp3lame_encoder_deps="libmp3lame"
 libmp3lame_encoder_select="audio_frame_queue mpegaudioheader"
 liboapv_encoder_deps="liboapv"
@@ -7059,6 +7062,7 @@ if enabled libmfx; then
 fi
 
 enabled libmodplug        && require_pkg_config libmodplug libmodplug libmodplug/modplug.h ModPlug_Load
+enabled libmad            && require libmad "mad.h" mad_decoder_init -lmad
 enabled libmp3lame        && require "libmp3lame >= 3.98.3" lame/lame.h lame_set_VBR_quality -lmp3lame $libm_extralibs
 enabled libmysofa         && { check_pkg_config libmysofa libmysofa mysofa.h mysofa_neighborhood_init_withstepdefine ||
                                require libmysofa mysofa.h mysofa_neighborhood_init_withstepdefine -lmysofa $zlib_extralibs; }
