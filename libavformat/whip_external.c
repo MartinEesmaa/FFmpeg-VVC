@@ -292,7 +292,7 @@ static const AVClass whip_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const FFOutputFormat ff_whip_muxer = {
+const FFOutputFormat ff_whip_emuxer = {
     .p.name         = "whip",
     .p.long_name    = NULL_IF_CONFIG_SMALL("WHIP (WebRTC-HTTP Ingestion Protocol)"),
     .p.audio_codec  = AV_CODEC_ID_OPUS,

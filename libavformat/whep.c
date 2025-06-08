@@ -534,7 +534,7 @@ static const AVClass whep_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const FFInputFormat ff_whep_demuxer = {
+const FFInputFormat ff_whep_edemuxer = {
     .p.name         = "whep",
     .p.long_name    = NULL_IF_CONFIG_SMALL("WHEP (WebRTC-HTTP Egress Protocol)"),
     .p.flags        = AVFMT_NOFILE,
