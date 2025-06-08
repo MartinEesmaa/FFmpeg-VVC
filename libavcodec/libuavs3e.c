@@ -123,12 +123,8 @@ static int uavs3e_init(AVCodecContext *avctx)
         ec->avs3_cfg.bit_depth_input    = 8;
         ec->avs3_cfg.bit_depth_internal = 8;
     } else if (avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE){
-#if (BIT_DEPTH == 10)
         ec->avs3_cfg.bit_depth_input    = 10;
         ec->avs3_cfg.bit_depth_internal = 10;
-#else
-        return -1;
-#endif
     } else {
         return -1;
     }
@@ -229,10 +225,7 @@ static int uavs3e_close(AVCodecContext *avctx)
 
 static const enum AVPixelFormat pix_fmts_uavs3e[] = {
     AV_PIX_FMT_YUV420P,
-#if (BIT_DEPTH == 10)
     AV_PIX_FMT_YUV420P10,
-else
-#endif
     AV_PIX_FMT_NONE
 };
 
