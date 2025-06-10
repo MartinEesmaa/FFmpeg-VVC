@@ -81,10 +81,9 @@ static av_cold int libmad_decode_close(AVCodecContext *avc)
     return 0;
 }
 
-static int libmad_decode_frame(AVCodecContext *avc, void *data,
+static int libmad_decode_frame(AVCodecContext *avc, AVFrame *frame,
                                int *got_frame_ptr, AVPacket *pkt)
 {
-    AVFrame *frame = data;
     libmad_context *mad = avc->priv_data;
     struct mad_pcm *pcm;
     mad_fixed_t const *left_ch;
