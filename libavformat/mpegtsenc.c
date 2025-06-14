@@ -1799,21 +1799,6 @@ int ff_check_h264_startcode(AVFormatContext *s, const AVStream *st, const AVPack
     return check_h26x_startcode(s, st, pkt, "h264");
 }
 
-static int check_vvc_startcode(AVFormatContext *s, const AVStream *st, const AVPacket *pkt)
-{
-    if (pkt->size < 5 || AV_RB32(pkt->data) != 0x0000001 && AV_RB24(pkt->data) != 0x000001) {
-        if (!st->nb_frames) {
-            av_log(s, AV_LOG_ERROR, "VVC bitstream malformed, no startcode found\n");
-            return AVERROR_PATCHWELCOME;
-        }
-        av_log(s, AV_LOG_WARNING, "VVC bitstream error, startcode missing, size %d", pkt->size);
-        if (pkt->size)
-            av_log(s, AV_LOG_WARNING, " data %08"PRIX32, AV_RB32(pkt->data));
-        av_log(s, AV_LOG_WARNING, "\n");
-    }
-    return 0;
-}
-
 /* Based on GStreamer's gst-plugins-base/ext/ogg/gstoggstream.c
  * Released under the LGPL v2.1+, written by
  * Vincent Penquerc'h <vincent.penquerch@collabora.co.uk>
