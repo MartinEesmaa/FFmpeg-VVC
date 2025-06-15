@@ -5800,6 +5800,15 @@ static int ac4_decode_frame(AVCodecContext *avctx, AVFrame *frame,
     presentation = FFMIN(s->target_presentation, FFMAX(0, s->nb_presentations - 1));
     ssinfo = s->version == 2 ? &s->ssgroup[0].ssinfo : &s->pinfo[presentation].ssinfo;
     avctx->sample_rate = s->fs_index ? 48000 : 44100;
+    int container_channels = avctx->ch_layout.nb_channels;
+
+    // If the AC-4 bitstream claims 7 channels but the original channel is stereo,
+    // then force stereo decoding to correct the incorrect bitstream channel value.
+    if (container_channels == 2 && ff_ac4_ch_layouts[ssinfo->channel_mode].nb_channels == 7) {
+        ssinfo->channel_mode = 1; // 1 = stereo in AC-4 spec
+    }
+
+    av_channel_layout_uninit(&avctx->ch_layout);
     avctx->ch_layout = ff_ac4_ch_layouts[ssinfo->channel_mode];
     //    avctx->sample_rate = av_rescale(s->frame_len_base,
     //				    s->resampling_ratio.num,
