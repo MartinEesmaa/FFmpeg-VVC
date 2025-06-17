@@ -20,59 +20,58 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "config_components.h"
-
 #include <vvdec/vvdec.h>
+#include <vvdec/version.h>
 
-#include "libavutil/common.h"
 #include "libavutil/avutil.h"
-#include "libavutil/pixdesc.h"
-#include "libavutil/opt.h"
-#include "libavutil/mem.h"
-#include "libavutil/imgutils.h"
+#include "libavutil/common.h"
 #include "libavutil/frame.h"
-#include "libavutil/mastering_display_metadata.h"
+#include "libavutil/imgutils.h"
 #include "libavutil/log.h"
+#include "libavutil/mastering_display_metadata.h"
+#include "libavutil/opt.h"
+#include "libavutil/pixdesc.h"
 
 #include "avcodec.h"
+#include "cbs_h266.h"
 #include "codec_internal.h"
 #include "decode.h"
 #include "internal.h"
 #include "profiles.h"
 
-#include "vvc_paramset.h"
-#include "vvc_parse_extradata.h"
+#define VVDEC_VERSION_INT  AV_VERSION_INT(VVDEC_VERSION_MAJOR, \
+                                          VVDEC_VERSION_MINOR, \
+                                          VVDEC_VERSION_PATCH)
 
 typedef struct VVdeCContext {
     AVClass      *av_class;
-    vvdecDecoder *vvdecDec;
-    vvdecParams  vvdecParams;
-    H266ParamSets ps;
-    int          is_nalff;
-    int          nal_length_size;
-    bool         bFlush;
+    vvdecDecoder *decoder;
+    vvdecParams   params;
+    bool          flush;
     AVBufferPool *pools[3];     /** Pools for each data plane. */
-    int          pool_size[3];
+    int           pool_size[3];
+    CodedBitstreamContext *cbc;
+    CodedBitstreamFragment current_frame;
+#if VVDEC_VERSION_INT > AV_VERSION_INT(2,3,0)
+    bool          filmgrain;
+#endif
 } VVdeCContext;
 
 
-static void ff_vvdec_log_callback(void *avctx, int level, const char *fmt,
-                                  va_list args)
+static void vvdec_log_callback(void *avctx, int level, const char *fmt,
+                               va_list args)
 {
     vfprintf(level == 1 ? stderr : stdout, fmt, args);
 }
 
-static void *ff_vvdec_buffer_allocator(void *ctx, vvdecComponentType comp,
-                                       uint32_t size, uint32_t alignment,
-                                       void **allocator)
+static void *vvdec_buffer_allocator(void *ctx, vvdecComponentType comp,
+                                    uint32_t size, uint32_t alignment,
+                                    void **allocator)
 {
     AVBufferRef *buf;
-    VVdeCContext *s;
-    int plane;
-
+    VVdeCContext *s = ctx;
+    int plane = (int)comp;
     uint32_t alignedsize = FFALIGN(size, alignment);
-    s = (VVdeCContext *) ctx;
-    plane = (int) comp;
 
     if (plane < 0 || plane > 3)
         return NULL;
@@ -95,20 +94,19 @@ static void *ff_vvdec_buffer_allocator(void *ctx, vvdecComponentType comp,
     return buf->data;
 }
 
-static void ff_vvdec_buffer_unref(void *ctx, void *allocator)
+static void vvdec_buffer_unref(void *ctx, void *allocator)
 {
-    AVBufferRef *buf = (AVBufferRef *) allocator;
+    AVBufferRef *buf = allocator;
     av_buffer_unref(&buf);
 }
 
-static void ff_vvdec_printParameterInfo(AVCodecContext *avctx,
-                                        vvdecParams *params)
+static void vvdec_printParameterInfo(AVCodecContext *avctx, vvdecParams *params)
 {
     av_log(avctx, AV_LOG_DEBUG, "Version info: vvdec %s ( threads %d)\n",
            vvdec_get_version(), params->threads);
 }
 
-static int ff_vvdec_set_pix_fmt(AVCodecContext *avctx, vvdecFrame *frame)
+static int vvdec_set_pix_fmt(AVCodecContext *avctx, vvdecFrame *frame)
 {
     if (NULL != frame->picAttributes && NULL != frame->picAttributes->vui &&
         frame->picAttributes->vui->colourDescriptionPresentFlag) {
@@ -133,13 +131,11 @@ static int ff_vvdec_set_pix_fmt(AVCodecContext *avctx, vvdecFrame *frame)
     case VVDEC_CF_YUV420_PLANAR:
     case VVDEC_CF_YUV400_PLANAR:
         if (frame->bitDepth == 8) {
-            avctx->pix_fmt = frame->numPlanes == 1 ?
-                             AV_PIX_FMT_GRAY8 : AV_PIX_FMT_YUV420P;
+            avctx->pix_fmt = frame->numPlanes == 1 ? AV_PIX_FMT_GRAY8 : AV_PIX_FMT_YUV420P;
             avctx->profile = AV_PROFILE_VVC_MAIN_10;
             return 0;
         } else if (frame->bitDepth == 10) {
-            avctx->pix_fmt = frame->numPlanes == 1 ?
-                AV_PIX_FMT_GRAY10 : AV_PIX_FMT_YUV420P10;
+            avctx->pix_fmt = frame->numPlanes == 1 ? AV_PIX_FMT_GRAY10 : AV_PIX_FMT_YUV420P10;
             avctx->profile = AV_PROFILE_VVC_MAIN_10;
             return 0;
         } else {
@@ -171,12 +167,11 @@ static int set_side_data(AVCodecContext *avctx, AVFrame *avframe,
                          vvdecFrame *frame)
 {
     vvdecSEI *sei;
-    VVdeCContext *s = (VVdeCContext *) avctx->priv_data;
+    VVdeCContext *s = avctx->priv_data;
 
-    sei = vvdec_find_frame_sei(s->vvdecDec,
-                               VVDEC_MASTERING_DISPLAY_COLOUR_VOLUME, frame);
+    sei = vvdec_find_frame_sei(s->decoder, VVDEC_MASTERING_DISPLAY_COLOUR_VOLUME, frame);
     if (sei) {
-        // VVC uses a g,b,r ordering, which we convert to a more natural r,g,b
+        /* VVC uses a g,b,r ordering, which we convert to a more natural r,g,b */
         const int mapping[3] = { 2, 0, 1 };
         const int chroma_den = 50000;
         const int luma_den = 10000;
@@ -223,12 +218,11 @@ static int set_side_data(AVCodecContext *avctx, AVFrame *avframe,
         return 0;
     }
 
-    sei = vvdec_find_frame_sei(s->vvdecDec, VVDEC_CONTENT_LIGHT_LEVEL_INFO,
+    sei = vvdec_find_frame_sei(s->decoder, VVDEC_CONTENT_LIGHT_LEVEL_INFO,
                                frame);
     if (sei) {
         vvdecSEIContentLightLevelInfo *p = NULL;
-        AVContentLightMetadata *light =
-            av_content_light_metadata_create_side_data(avframe);
+        AVContentLightMetadata *light = av_content_light_metadata_create_side_data(avframe);
         p = (vvdecSEIContentLightLevelInfo *) (sei->payload);
         if (p && light) {
             light->MaxCLL  = p->maxContentLightLevel;
@@ -236,35 +230,97 @@ static int set_side_data(AVCodecContext *avctx, AVFrame *avframe,
         }
 
         av_log(avctx, AV_LOG_DEBUG, "Content Light Level Metadata:\n");
-        av_log(avctx, AV_LOG_DEBUG, "MaxCLL=%d, MaxFALL=%d\n",
-               light->MaxCLL, light->MaxFALL);
+        av_log(avctx, AV_LOG_DEBUG, "MaxCLL=%d, MaxFALL=%d\n", light->MaxCLL, light->MaxFALL);
     }
 
     return 0;
 }
 
-static void export_stream_params(AVCodecContext *avctx, const H266SPS *sps)
+static int set_pixel_format(AVCodecContext *avctx, const H266RawSPS *sps)
 {
-    avctx->coded_width  = sps->pic_width_max_in_luma_samples;
-    avctx->coded_height = sps->pic_height_max_in_luma_samples;
-    avctx->width        = sps->pic_width_max_in_luma_samples -
-                          sps->conf_win_left_offset -
-                          sps->conf_win_right_offset;
-    avctx->height       = sps->pic_height_max_in_luma_samples -
-                          sps->conf_win_top_offset -
-                          sps->conf_win_bottom_offset;
-    avctx->has_b_frames = sps->max_sublayers;
+    enum AVPixelFormat pix_fmt = AV_PIX_FMT_NONE;
+    const AVPixFmtDescriptor *desc;
+    switch (sps->sps_bitdepth_minus8 + 8) {
+    case 8:
+        if (sps->sps_chroma_format_idc == 0)
+            pix_fmt = AV_PIX_FMT_GRAY8;
+        if (sps->sps_chroma_format_idc == 1)
+            pix_fmt = AV_PIX_FMT_YUV420P;
+        if (sps->sps_chroma_format_idc == 2)
+            pix_fmt = AV_PIX_FMT_YUV422P;
+        if (sps->sps_chroma_format_idc == 3)
+            pix_fmt = AV_PIX_FMT_YUV444P;
+        break;
+    case 9:
+        if (sps->sps_chroma_format_idc == 0)
+            pix_fmt = AV_PIX_FMT_GRAY9;
+        if (sps->sps_chroma_format_idc == 1)
+            pix_fmt = AV_PIX_FMT_YUV420P9;
+        if (sps->sps_chroma_format_idc == 2)
+            pix_fmt = AV_PIX_FMT_YUV422P9;
+        if (sps->sps_chroma_format_idc == 3)
+            pix_fmt = AV_PIX_FMT_YUV444P9;
+        break;
+    case 10:
+        if (sps->sps_chroma_format_idc == 0)
+            pix_fmt = AV_PIX_FMT_GRAY10;
+        if (sps->sps_chroma_format_idc == 1)
+            pix_fmt = AV_PIX_FMT_YUV420P10;
+        if (sps->sps_chroma_format_idc == 2)
+            pix_fmt = AV_PIX_FMT_YUV422P10;
+        if (sps->sps_chroma_format_idc == 3)
+            pix_fmt = AV_PIX_FMT_YUV444P10;
+        break;
+    case 12:
+        if (sps->sps_chroma_format_idc == 0)
+            pix_fmt = AV_PIX_FMT_GRAY12;
+        if (sps->sps_chroma_format_idc == 1)
+            pix_fmt = AV_PIX_FMT_YUV420P12;
+        if (sps->sps_chroma_format_idc == 2)
+            pix_fmt = AV_PIX_FMT_YUV422P12;
+        if (sps->sps_chroma_format_idc == 3)
+            pix_fmt = AV_PIX_FMT_YUV444P12;
+        break;
+    default:
+        av_log(avctx, AV_LOG_ERROR,
+               "The following bit-depths are currently specified: 8, 9, 10 and 12 bits, "
+               "sps_chroma_format_idc is %d, depth is %d\n",
+               sps->sps_chroma_format_idc, sps->sps_bitdepth_minus8 + 8);
+        return AVERROR_INVALIDDATA;
+    }
+
+    desc = av_pix_fmt_desc_get(pix_fmt);
+    if (!desc)
+        return AVERROR(EINVAL);
+
+    avctx->pix_fmt = pix_fmt;
+
+    return 0;
+}
+
+static void export_stream_params(AVCodecContext *avctx, const H266RawSPS *sps)
+{
+    avctx->coded_width  = sps->sps_pic_width_max_in_luma_samples;
+    avctx->coded_height = sps->sps_pic_height_max_in_luma_samples;
+    avctx->width        = sps->sps_pic_width_max_in_luma_samples -
+                          sps->sps_conf_win_left_offset -
+                          sps->sps_conf_win_right_offset;
+    avctx->height       = sps->sps_pic_height_max_in_luma_samples -
+                          sps->sps_conf_win_top_offset -
+                          sps->sps_conf_win_bottom_offset;
+    avctx->has_b_frames = sps->sps_max_sublayers_minus1 + 1;
     avctx->profile      = sps->profile_tier_level.general_profile_idc;
     avctx->level        = sps->profile_tier_level.general_level_idc;
-    avctx->pix_fmt      = sps->pix_fmt;
 
-    avctx->color_range = sps->vui.full_range_flag ? AVCOL_RANGE_JPEG :
-                                                    AVCOL_RANGE_MPEG;
+    set_pixel_format( avctx, sps);
 
-    if (sps->vui.colour_description_present_flag) {
-        avctx->color_primaries = sps->vui.colour_primaries;
-        avctx->color_trc       = sps->vui.transfer_characteristics;
-        avctx->colorspace      = sps->vui.matrix_coeffs;
+    avctx->color_range = sps->vui.vui_full_range_flag ? AVCOL_RANGE_JPEG :
+                         AVCOL_RANGE_MPEG;
+
+    if (sps->vui.vui_colour_description_present_flag) {
+        avctx->color_primaries = sps->vui.vui_colour_primaries;
+        avctx->color_trc       = sps->vui.vui_transfer_characteristics;
+        avctx->colorspace      = sps->vui.vui_matrix_coeffs;
     } else {
         avctx->color_primaries = AVCOL_PRI_UNSPECIFIED;
         avctx->color_trc       = AVCOL_TRC_UNSPECIFIED;
@@ -272,123 +328,112 @@ static void export_stream_params(AVCodecContext *avctx, const H266SPS *sps)
     }
 
     avctx->chroma_sample_location = AVCHROMA_LOC_UNSPECIFIED;
-    if (sps->chroma_format_idc == 1) {
-        if (sps->vui.chroma_loc_info_present_flag) {
-            if (sps->vui.chroma_sample_loc_type_top_field <= 5)
+    if (sps->sps_chroma_format_idc == 1) {
+        if (sps->vui.vui_chroma_loc_info_present_flag) {
+            if (sps->vui.vui_chroma_sample_loc_type_top_field <= 5)
                 avctx->chroma_sample_location =
-                    sps->vui.chroma_sample_loc_type_top_field + 1;
+                    sps->vui.vui_chroma_sample_loc_type_top_field + 1;
         } else
             avctx->chroma_sample_location = AVCHROMA_LOC_LEFT;
     }
 
-    if (sps->timing_hrd_params_present_flag &&
-        sps->general_timing_hrd_parameters.num_units_in_tick &&
-        sps->general_timing_hrd_parameters.time_scale) {
+    if (sps->sps_timing_hrd_params_present_flag &&
+        sps->sps_general_timing_hrd_parameters.num_units_in_tick &&
+        sps->sps_general_timing_hrd_parameters.time_scale) {
         av_reduce(&avctx->framerate.den, &avctx->framerate.num,
-                  sps->general_timing_hrd_parameters.num_units_in_tick,
-                  sps->general_timing_hrd_parameters.time_scale, INT_MAX);
+                  sps->sps_general_timing_hrd_parameters.num_units_in_tick,
+                  sps->sps_general_timing_hrd_parameters.time_scale, INT_MAX);
     }
 }
 
-static int h266_decode_extradata(AVCodecContext *avctx, uint8_t *buf,
-                                int length, int first)
+static av_cold int vvdec_dec_init(AVCodecContext *avctx)
 {
-    VVdeCContext *s = (VVdeCContext *) avctx->priv_data;
-    int ret;
+    int i, loglevel, ret;
+    VVdeCContext *s = avctx->priv_data;
 
-    ret = ff_h266_decode_extradata(buf, length, &s->ps, &s->is_nalff,
-                                  &s->nal_length_size, avctx->err_recognition,
-                                  false, avctx);
-    if (ret < 0)
-        return ret;
+    vvdec_params_default(&s->params);
+    s->params.logLevel = VVDEC_DETAILS;
 
-    if (s->ps.sps != NULL)
-        export_stream_params(avctx, s->ps.sps);
-
-    return 0;
-}
-
-static av_cold int ff_vvdec_decode_init(AVCodecContext *avctx)
-{
-    int i;
-    VVdeCContext *s = (VVdeCContext *) avctx->priv_data;
-
-    vvdec_params_default(&s->vvdecParams);
-    s->vvdecParams.logLevel = VVDEC_DETAILS;
-
-    if (av_log_get_level() >= AV_LOG_DEBUG)
-        s->vvdecParams.logLevel = VVDEC_DETAILS;
-    else if (av_log_get_level() >= AV_LOG_VERBOSE)
-        s->vvdecParams.logLevel = VVDEC_INFO;     // VVDEC_INFO will output per picture info
-    else if (av_log_get_level() >= AV_LOG_INFO)
-        s->vvdecParams.logLevel = VVDEC_WARNING;  // AV_LOG_INFO is ffmpeg default
+    loglevel = av_log_get_level();
+    if (loglevel >= AV_LOG_DEBUG)
+        s->params.logLevel = VVDEC_DETAILS;
+    else if (loglevel >= AV_LOG_VERBOSE)
+        s->params.logLevel = VVDEC_INFO;
+    else if (loglevel >= AV_LOG_INFO)
+        s->params.logLevel = VVDEC_WARNING;
     else
-        s->vvdecParams.logLevel = VVDEC_SILENT;
+        s->params.logLevel = VVDEC_SILENT;
 
     if (avctx->thread_count > 0)
-        s->vvdecParams.threads = avctx->thread_count;   // number of worker threads (should not exceed the number of physical cpu's)
+        s->params.threads = avctx->thread_count;
     else
-        s->vvdecParams.threads = -1;    // get max cpus
+        s->params.threads = -1; /* get max cpus */
 
-    ff_vvdec_printParameterInfo(avctx, &s->vvdecParams);
+#if VVDEC_VERSION_INT > AV_VERSION_INT(2,3,0)
+    s->params.filmGrainSynthesis = s->filmgrain;
+#endif
 
-    // using buffer allocation by using AVBufferPool
-    s->vvdecParams.opaque = avctx->priv_data;
-    s->vvdecDec = vvdec_decoder_open_with_allocator(&s->vvdecParams,
-                                                    ff_vvdec_buffer_allocator,
-                                                    ff_vvdec_buffer_unref);
+    vvdec_printParameterInfo(avctx, &s->params);
 
-
-    if (!s->vvdecDec) {
-        av_log(avctx, AV_LOG_ERROR, "cannot init vvc decoder\n");
-        return -1;
+    /* using buffer allocation by using AVBufferPool */
+    s->params.opaque = avctx->priv_data;
+    s->decoder = vvdec_decoder_open_with_allocator(&s->params, vvdec_buffer_allocator, vvdec_buffer_unref);
+    if (!s->decoder) {
+        av_log(avctx, AV_LOG_ERROR, "cannot init vvdec decoder\n");
+        return AVERROR_EXTERNAL;
     }
 
-    vvdec_set_logging_callback(s->vvdecDec, ff_vvdec_log_callback);
+    vvdec_set_logging_callback(s->decoder, vvdec_log_callback);
 
-    s->bFlush = false;
-    s->is_nalff = 0;
-    s->nal_length_size = 0;
+    s->flush = false;
 
     for (i = 0; i < FF_ARRAY_ELEMS(s->pools); i++) {
         s->pools[i] = NULL;
         s->pool_size[i] = 0;
     }
 
+    ret = ff_cbs_init(&s->cbc, AV_CODEC_ID_VVC, avctx);
+    if (ret)
+        return ret;
+
     if (!avctx->internal->is_copy) {
         if (avctx->extradata_size > 0 && avctx->extradata) {
-            int ret = h266_decode_extradata(avctx, avctx->extradata,
-                                           avctx->extradata_size, 1);
-            if (ret < 0) {
+            const CodedBitstreamH266Context *h266 = s->cbc->priv_data;
+            ff_cbs_fragment_reset(&s->current_frame);
+            ret = ff_cbs_read_extradata_from_codec(s->cbc, &s->current_frame, avctx);
+            if (ret < 0)
                 return ret;
-            }
+
+            if (h266->sps[0] != NULL)
+                export_stream_params(avctx, h266->sps[0]);
         }
     }
 
     return 0;
 }
 
-static av_cold int ff_vvdec_decode_close(AVCodecContext *avctx)
+static av_cold int vvdec_dec_close(AVCodecContext *avctx)
 {
-    VVdeCContext *s = (VVdeCContext *) avctx->priv_data;
+    VVdeCContext *s = avctx->priv_data;
 
     for (int i = 0; i < FF_ARRAY_ELEMS(s->pools); i++) {
         av_buffer_pool_uninit(&s->pools[i]);
         s->pool_size[i] = 0;
     }
 
-    if (0 != vvdec_decoder_close(s->vvdecDec)) {
-        av_log(avctx, AV_LOG_ERROR, "cannot close vvdec\n");
-        return -1;
-    }
+    ff_cbs_fragment_free(&s->current_frame);
+    ff_cbs_close(&s->cbc);
 
-    ff_h266_ps_uninit(&s->ps);
-    s->bFlush = false;
+    s->flush = false;
+
+    if (0 != vvdec_decoder_close(s->decoder))
+        return AVERROR_EXTERNAL;
+
     return 0;
 }
 
-static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
-                                         int *got_frame, AVPacket *avpkt)
+static av_cold int vvdec_dec_frame(AVCodecContext *avctx, AVFrame *data,
+                                   int *got_frame, AVPacket *avpkt)
 {
     VVdeCContext *s = avctx->priv_data;
     AVFrame *avframe = data;
@@ -397,11 +442,11 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
     vvdecFrame *frame = NULL;
 
     if (avframe) {
-        if (!avpkt->size && !s->bFlush)
-            s->bFlush = true;
+        if (!avpkt->size && !s->flush)
+            s->flush = true;
 
-        if (s->bFlush)
-            ret = vvdec_flush(s->vvdecDec, &frame);
+        if (s->flush)
+            ret = vvdec_flush(s->decoder, &frame);
         else {
             vvdecAccessUnit accessUnit;
             vvdec_accessUnit_default(&accessUnit);
@@ -414,30 +459,30 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
             accessUnit.dts = avpkt->dts;
             accessUnit.dtsValid = true;
 
-            ret = vvdec_decode(s->vvdecDec, &accessUnit, &frame);
+            ret = vvdec_decode(s->decoder, &accessUnit, &frame);
         }
 
         if (ret < 0) {
             if (ret == VVDEC_EOF)
-                s->bFlush = true;
+                s->flush = true;
             else if (ret != VVDEC_TRY_AGAIN) {
-                av_log(avctx, AV_LOG_ERROR,
-                       "error in vvdec::decode - ret:%d - %s %s\n", ret,
-                       vvdec_get_last_error(s->vvdecDec), vvdec_get_last_additional_error( s->vvdecDec));
-                ret=AVERROR_EXTERNAL;
+                av_log(avctx, AV_LOG_ERROR, "error in vvdec_decode - ret:%d - %s %s\n", ret,
+                       vvdec_get_last_error(s->decoder), vvdec_get_last_additional_error( s->decoder));
+                ret = AVERROR_EXTERNAL;
                 goto fail;
             }
         } else if (NULL != frame) {
             const uint8_t *src_data[4] = { frame->planes[0].ptr,
                                            frame->planes[1].ptr,
-                                           frame->planes[2].ptr, NULL };
+                                           frame->planes[2].ptr, NULL
+                                         };
             const int src_linesizes[4] = { (int) frame->planes[0].stride,
                                            (int) frame->planes[1].stride,
-                                           (int) frame->planes[2].stride, 0 };
+                                           (int) frame->planes[2].stride, 0
+                                         };
 
-            if ((ret = ff_vvdec_set_pix_fmt(avctx, frame)) < 0) {
-                av_log(avctx, AV_LOG_ERROR,
-                       "Unsupported output colorspace (%d) / bit_depth (%d)\n",
+            if ((ret = vvdec_set_pix_fmt(avctx, frame)) < 0) {
+                av_log(avctx, AV_LOG_ERROR, "Unsupported output colorspace (%d) / bit_depth (%d)\n",
                        frame->colorFormat, frame->bitDepth);
                 goto fail;
             }
@@ -477,9 +522,8 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
                 else
                     avframe->flags &= ~AV_FRAME_FLAG_KEY;
 
-                avframe->pict_type = (frame->picAttributes->sliceType !=
-                    VVDEC_SLICETYPE_UNKNOWN) ?
-                    frame->picAttributes->sliceType + 1 : AV_PICTURE_TYPE_NONE;
+                avframe->pict_type = (frame->picAttributes->sliceType != VVDEC_SLICETYPE_UNKNOWN) ?
+                                     frame->picAttributes->sliceType + 1 : AV_PICTURE_TYPE_NONE;
             }
 
             if (frame->ctsValid)
@@ -489,7 +533,7 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
             if (ret < 0)
                 goto fail;
 
-            if (0 != vvdec_frame_unref(s->vvdecDec, frame))
+            if (0 != vvdec_frame_unref(s->decoder, frame))
                 av_log(avctx, AV_LOG_ERROR, "cannot free picture memory\n");
 
             *got_frame = 1;
@@ -498,7 +542,7 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
 
     return avpkt->size;
 
-  fail:
+fail:
     if (frame) {
         if (frame->planes[0].allocator)
             av_buffer_unref((AVBufferRef **) &frame->planes[0].allocator);
@@ -507,27 +551,25 @@ static av_cold int ff_vvdec_decode_frame(AVCodecContext *avctx, AVFrame *data,
         if (frame->planes[2].allocator)
             av_buffer_unref((AVBufferRef **) &frame->planes[2].allocator);
 
-        vvdec_frame_unref(s->vvdecDec, frame);
+        vvdec_frame_unref(s->decoder, frame);
     }
     return ret;
 }
 
-static av_cold void ff_vvdec_decode_flush(AVCodecContext *avctx)
+static av_cold void vvdec_dec_flush(AVCodecContext *avctx)
 {
-    VVdeCContext *s = (VVdeCContext *) avctx->priv_data;
+    VVdeCContext *s = avctx->priv_data;
 
-    if (0 != vvdec_decoder_close(s->vvdecDec))
-        av_log(avctx, AV_LOG_ERROR, "cannot close vvdec during flush\n");
+    if (0 != vvdec_decoder_close(s->decoder))
+        av_log(avctx, AV_LOG_ERROR, "cannot close during flush\n");
 
-    s->vvdecDec = vvdec_decoder_open_with_allocator(&s->vvdecParams,
-                                                    ff_vvdec_buffer_allocator,
-                                                    ff_vvdec_buffer_unref);
-    if (!s->vvdecDec)
-        av_log(avctx, AV_LOG_ERROR, "cannot reinit vvdec during flush\n");
+    s->decoder = vvdec_decoder_open_with_allocator(&s->params, vvdec_buffer_allocator, vvdec_buffer_unref);
+    if (!s->decoder)
+        av_log(avctx, AV_LOG_ERROR, "cannot reinit during flush\n");
 
-    vvdec_set_logging_callback(s->vvdecDec, ff_vvdec_log_callback);
+    vvdec_set_logging_callback(s->decoder, vvdec_log_callback);
 
-    s->bFlush = false;
+    s->flush = false;
 }
 
 static const enum AVPixelFormat pix_fmts_vvdec[] = {
@@ -536,33 +578,47 @@ static const enum AVPixelFormat pix_fmts_vvdec[] = {
     AV_PIX_FMT_YUV420P,
     AV_PIX_FMT_YUV422P,
     AV_PIX_FMT_YUV444P,
-    AV_PIX_FMT_YUV420P10LE,
-    AV_PIX_FMT_YUV422P10LE,
-    AV_PIX_FMT_YUV444P10LE,
+    AV_PIX_FMT_YUV420P10,
+    AV_PIX_FMT_YUV422P10,
+    AV_PIX_FMT_YUV444P10,
     AV_PIX_FMT_NONE
 };
 
-static const AVClass class_libvvdec = {
-    .class_name = "libvvdec-vvc decoder",
+#if VVDEC_VERSION_INT > AV_VERSION_INT(2,3,0)
+
+#define OFFSET(x) offsetof(VVdeCContext, x)
+#define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
+static const AVOption options[] = {
+    { "filmgrain",    "set usage of filemgrain SEI", OFFSET(filmgrain), AV_OPT_TYPE_BOOL, {.i64 = 1},  0, 1, VE},
+    {NULL}
+};
+
+#endif
+
+static const AVClass class = {
+    .class_name = "libvvdec",
     .item_name  = av_default_item_name,
+#if VVDEC_VERSION_INT > AV_VERSION_INT(2,3,0)
+    .option     = options,
+#endif
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-FFCodec ff_libvvdec_decoder = {
+const FFCodec ff_libvvdec_decoder = {
     .p.name         = "libvvdec",
-    CODEC_LONG_NAME("H.266 / VVC Decoder VVdeC"),
+    CODEC_LONG_NAME("libvvdec H.266 / VVC"),
     .p.type         = AVMEDIA_TYPE_VIDEO,
     .p.id           = AV_CODEC_ID_VVC,
     .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_OTHER_THREADS,
     .p.profiles     = NULL_IF_CONFIG_SMALL(ff_vvc_profiles),
-    .p.priv_class   = &class_libvvdec,
+    .p.priv_class   = &class,
     .p.wrapper_name = "libvvdec",
     .priv_data_size = sizeof(VVdeCContext),
     .p.pix_fmts     = pix_fmts_vvdec,
-    .init           = ff_vvdec_decode_init,
-    FF_CODEC_DECODE_CB(ff_vvdec_decode_frame),
-    .close          = ff_vvdec_decode_close,
-    .flush          = ff_vvdec_decode_flush,
+    .init           = vvdec_dec_init,
+    FF_CODEC_DECODE_CB(vvdec_dec_frame),
+    .close          = vvdec_dec_close,
+    .flush          = vvdec_dec_flush,
     .bsfs           = "vvc_mp4toannexb",
     .caps_internal  = FF_CODEC_CAP_AUTO_THREADS,
 };
