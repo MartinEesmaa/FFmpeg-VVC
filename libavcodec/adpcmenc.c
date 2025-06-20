@@ -209,6 +209,10 @@ static av_cold int adpcm_encode_init(AVCodecContext *avctx)
         avctx->frame_size = s->block_size * 2 / channels;
         avctx->block_align = s->block_size;
         ) /* End of CASE */
+    CASE(ADPCM_IMA_SMJPEG,
+        avctx->frame_size  = s->block_size * 2 / channels;
+        avctx->block_align = s->block_size;
+        ) /* End of CASE */
     default:
         return AVERROR(EINVAL);
     }
@@ -597,6 +601,57 @@ static int64_t adpcm_argo_compress_block(ADPCMChannelStatus *cs, PutBitContext *
 }
 #endif
 
+static inline uint8_t adpcm_ima_smjpeg_compress_sample(ADPCMChannelStatus *c, int16_t sample)
+{
+    int valpred = c->prev_sample;
+    int index = c->step_index;
+    int step = ff_adpcm_step_table[index];
+    int diff = sample - valpred;
+    int sign = 0;
+    int delta = 0;
+    int vpdiff = step >> 3;
+
+    if (diff < 0) {
+        sign = 8;
+        diff = -diff;
+    }
+
+    if (diff >= step) {
+        delta = 4;
+        diff -= step;
+        vpdiff += step;
+    }
+    step >>= 1;
+    if (diff >= step) {
+        delta |= 2;
+        diff -= step;
+        vpdiff += step;
+    }
+    step >>= 1;
+    if (diff >= step) {
+        delta |= 1;
+        vpdiff += step;
+    }
+
+    if (sign)
+        valpred -= vpdiff;
+    else
+        valpred += vpdiff;
+
+    valpred = av_clip_int16(valpred);
+
+    delta |= sign;
+
+    index += ff_adpcm_index_table[delta];
+    if (index < 0) index = 0;
+    if (index > 88) index = 88;
+
+    c->prev_sample = valpred;
+    c->step_index = index;
+
+    return delta & 0x0F;
+}
+
 static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
                               const AVFrame *frame, int *got_packet_ptr)
 {
@@ -614,10 +669,13 @@ static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
     if (avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_SSI ||
         avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_ALP ||
         avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_APM ||
-        avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_WS)
+        avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_WS) {
         pkt_size = (frame->nb_samples * channels + 1) / 2;
-    else
+    } else if (avctx->codec_id == AV_CODEC_ID_ADPCM_IMA_SMJPEG) {
+        pkt_size = 4 * channels + ((frame->nb_samples - channels) * channels + 1) / 2;
+    } else {
         pkt_size = avctx->block_align;
+    }
     if ((ret = ff_get_encode_buffer(avctx, avpkt, pkt_size, 0)) < 0)
         return ret;
     dst = avpkt->data;
@@ -952,6 +1010,33 @@ static int adpcm_encode_frame(AVCodecContext *avctx, AVPacket *avpkt,
         }
         flush_put_bits(&pb);
         ) /* End of CASE */
+    CASE(ADPCM_IMA_SMJPEG,
+        PutBitContext pb;
+        init_put_bits(&pb, dst, pkt_size);
+
+        av_assert0(avctx->trellis == 0);
+
+        // Write header: predictor (2 bytes BE), step_index (1 byte), pad (1 byte) per channel
+        for (int ch = 0; ch < channels; ch++) {
+            c->status[ch].step_index = 0;
+            c->status[ch].prev_sample = samples[ch];
+            put_bits(&pb, 16, c->status[ch].prev_sample & 0xFFFF);
+            put_bits(&pb, 8, c->status[ch].step_index);
+            put_bits(&pb, 8, 0); // pad byte
+        }
+
+        samples += channels;
+
+        for (int n = (frame->nb_samples - channels) / 2; n > 0; n--) {
+            for (int ch = 0; ch < channels; ch++) {
+                put_bits(&pb, 4, adpcm_ima_smjpeg_compress_sample(c->status + ch, *samples++));
+                put_bits(&pb, 4, adpcm_ima_smjpeg_compress_sample(c->status + ch, samples[st]));
+            }
+            samples += channels;
+        }
+
+        flush_put_bits(&pb);
+        ) /* End of CASE */
     default:
         return AVERROR(EINVAL);
     }
@@ -1032,3 +1117,4 @@ ADPCM_ENCODER(ADPCM_IMA_WS,  adpcm_ima_ws,  sample_fmts,   AV_CODEC_CAP_SMALL_LA
 ADPCM_ENCODER(ADPCM_MS,      adpcm_ms,      sample_fmts,   0,                             "ADPCM Microsoft")
 ADPCM_ENCODER(ADPCM_SWF,     adpcm_swf,     sample_fmts,   0,                             "ADPCM Shockwave Flash")
 ADPCM_ENCODER(ADPCM_YAMAHA,  adpcm_yamaha,  sample_fmts,   0,                             "ADPCM Yamaha")
+ADPCM_ENCODER(ADPCM_IMA_SMJPEG, adpcm_ima_smjpeg, sample_fmts, 0,                         "ADPCM IMA Loki SDL SMJPEG")

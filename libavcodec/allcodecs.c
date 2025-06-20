@@ -685,6 +685,7 @@ extern const FFCodec ff_adpcm_ima_rad_decoder;
 extern const FFCodec ff_adpcm_ima_ssi_decoder;
 extern const FFCodec ff_adpcm_ima_ssi_encoder;
 extern const FFCodec ff_adpcm_ima_smjpeg_decoder;
+extern const FFCodec ff_adpcm_ima_smjpeg_encoder;
 extern const FFCodec ff_adpcm_ima_wav_encoder;
 extern const FFCodec ff_adpcm_ima_wav_decoder;
 extern const FFCodec ff_adpcm_ima_ws_encoder;
