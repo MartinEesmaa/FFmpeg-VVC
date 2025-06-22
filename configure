@@ -2646,6 +2646,7 @@ CONFIG_EXTRA="
     mpegvideo
     mpegvideodec
     mpegvideoenc
+    mpegvideoencdsp
     msmpeg4dec
     msmpeg4enc
     mss34dsp
@@ -2885,6 +2886,7 @@ w32threads_deps="atomics_native"
 threads_if_any="$THREADS_LIST"
 
 # subsystems
+cbs_apv_select="cbs"
 cbs_av1_select="cbs"
 cbs_h264_select="cbs"
 cbs_h265_select="cbs"
@@ -2923,7 +2925,7 @@ mpeg_er_select="error_resilience"
 mpegaudio_select="mpegaudiodsp mpegaudioheader"
 mpegvideo_select="blockdsp hpeldsp idctdsp videodsp"
 mpegvideodec_select="h264chroma mpegvideo mpeg_er"
-mpegvideoenc_select="aandcttables fdctdsp me_cmp mpegvideo pixblockdsp"
+mpegvideoenc_select="aandcttables fdctdsp me_cmp mpegvideo mpegvideoencdsp pixblockdsp"
 msmpeg4dec_select="h263_decoder"
 msmpeg4enc_select="h263_encoder"
 vc1dsp_select="h264chroma qpeldsp startcode"
@@ -2975,7 +2977,7 @@ cook_decoder_select="audiodsp sinewin"
 cri_decoder_select="mjpeg_decoder"
 cscd_decoder_suggest="zlib"
 dds_decoder_select="texturedsp"
-dirac_decoder_select="dirac_parse dwt golomb mpegvideoenc qpeldsp videodsp"
+dirac_decoder_select="dirac_parse dwt golomb mpegvideoencdsp qpeldsp videodsp"
 dnxhd_decoder_select="blockdsp idctdsp"
 dnxhd_encoder_select="blockdsp fdctdsp idctdsp mpegvideoenc pixblockdsp videodsp"
 dvvideo_decoder_select="dvprofile idctdsp"
@@ -3122,7 +3124,7 @@ shorten_decoder_select="bswapdsp"
 sipr_decoder_select="lsp celp_math"
 smvjpeg_decoder_select="mjpeg_decoder"
 snow_decoder_select="dwt h264qpel rangecoder videodsp"
-snow_encoder_select="dwt h264qpel hpeldsp me_cmp mpegvideoenc rangecoder videodsp"
+snow_encoder_select="dwt h264qpel hpeldsp me_cmp mpegvideoencdsp rangecoder videodsp"
 sonic_decoder_select="golomb rangecoder"
 sonic_encoder_select="golomb rangecoder"
 sonic_ls_encoder_select="golomb rangecoder"
@@ -3131,7 +3133,7 @@ speedhq_decoder_select="blockdsp idctdsp"
 speedhq_encoder_select="mpegvideoenc"
 srgc_decoder_select="inflate_wrapper"
 svq1_decoder_select="hpeldsp"
-svq1_encoder_select="hpeldsp me_cmp mpegvideoenc"
+svq1_encoder_select="hpeldsp me_cmp mpegvideoencdsp"
 svq3_decoder_select="golomb h264dsp h264parse h264pred hpeldsp tpeldsp videodsp"
 svq3_decoder_suggest="zlib"
 tak_decoder_select="audiodsp"
@@ -3426,7 +3428,7 @@ h264_qsv_encoder_select="atsc_a53 qsvenc"
 h264_rkmpp_decoder_deps="rkmpp"
 h264_rkmpp_decoder_select="h264_mp4toannexb_bsf"
 h264_vaapi_encoder_select="atsc_a53 cbs_h264 vaapi_encode"
-h264_vulkan_encoder_select="cbs_h264 vulkan_encode"
+h264_vulkan_encoder_select="atsc_a53 cbs_h264 vulkan_encode"
 h264_v4l2m2m_decoder_deps="v4l2_m2m h264_v4l2_m2m"
 h264_v4l2m2m_decoder_select="h264_mp4toannexb_bsf"
 h264_v4l2m2m_encoder_deps="v4l2_m2m h264_v4l2_m2m"
@@ -5157,10 +5159,9 @@ probe_cc(){
     elif $_cc -nologo- 2>&1 | grep -q ^Microsoft || { $_cc -v 2>&1 | grep -q clang && $_cc -? > /dev/null 2>&1; }; then
         _type=msvc
         if $_cc -nologo- 2>&1 | grep -q ^Microsoft; then
-            # The version number is printed on the first line on stderr, stdout
-            # gets the usage instructions. Only include stderr, to avoid
-            # potential ordering race conditions.
-            _ident=$($_cc 2>&1 >/dev/null | head -n1 | tr -d '\r')
+            # Depending on the tool (cl.exe or link.exe), the version number
+            # is printed on the first line of stderr or stdout
+            _ident=$($_cc 2>&1 | grep ^Microsoft | head -n1 | tr -d '\r')
         else
             _ident=$($_cc --version 2>/dev/null | head -n1 | tr -d '\r')
         fi

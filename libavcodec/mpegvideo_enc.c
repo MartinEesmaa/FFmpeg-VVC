@@ -444,7 +444,65 @@ static av_cold int init_matrices(MPVMainEncContext *const m, AVCodecContext *avc
     return 0;
 }
 
-static av_cold int init_buffers(MPVMainEncContext *const m, AVCodecContext *avctx)
+static av_cold int init_buffers(MPVMainEncContext *const m)
+{
+    MPVEncContext *const s = &m->s;
+    int has_b_frames = !!m->max_b_frames;
+    int16_t (*mv_table)[2];
+
+    /* Allocate MB type table */
+    unsigned mb_array_size = s->c.mb_stride * s->c.mb_height;
+    s->mb_type = av_calloc(mb_array_size, 3 * sizeof(*s->mb_type) + sizeof(*s->mb_mean));
+    if (!s->mb_type)
+        return AVERROR(ENOMEM);
+    s->mc_mb_var = s->mb_type   + mb_array_size;
+    s->mb_var    = s->mc_mb_var + mb_array_size;
+    s->mb_mean   = (uint8_t*)(s->mb_var + mb_array_size);
+
+    if (!FF_ALLOCZ_TYPED_ARRAY(s->lambda_table, mb_array_size))
+        return AVERROR(ENOMEM);
+
+    unsigned mv_table_size = (s->c.mb_height + 2) * s->c.mb_stride + 1;
+    unsigned nb_mv_tables = 1 + 5 * has_b_frames;
+    if (s->c.codec_id == AV_CODEC_ID_MPEG4 ||
+        (s->c.avctx->flags & AV_CODEC_FLAG_INTERLACED_ME)) {
+        nb_mv_tables += 8 * has_b_frames;
+        s->p_field_select_table[0] = av_calloc(mv_table_size, 2 * (2 + 4 * has_b_frames));
+        if (!s->p_field_select_table[0])
+            return AVERROR(ENOMEM);
+        s->p_field_select_table[1] = s->p_field_select_table[0] + 2 * mv_table_size;
+    }
+
+    mv_table = av_calloc(mv_table_size, nb_mv_tables * sizeof(*mv_table));
+    if (!mv_table)
+        return AVERROR(ENOMEM);
+    m->mv_table_base = mv_table;
+    mv_table += s->c.mb_stride + 1;
+
+    s->p_mv_table = mv_table;
+    if (has_b_frames) {
+        s->b_forw_mv_table       = mv_table += mv_table_size;
+        s->b_back_mv_table       = mv_table += mv_table_size;
+        s->b_bidir_forw_mv_table = mv_table += mv_table_size;
+        s->b_bidir_back_mv_table = mv_table += mv_table_size;
+        s->b_direct_mv_table     = mv_table += mv_table_size;
+
+        if (s->p_field_select_table[1]) { // MPEG-4 or INTERLACED_ME above
+            uint8_t *field_select = s->p_field_select_table[1];
+            for (int j = 0; j < 2; j++) {
+                for (int k = 0; k < 2; k++) {
+                    for (int l = 0; l < 2; l++)
+                        s->b_field_mv_table[j][k][l] = mv_table += mv_table_size;
+                    s->b_field_select_table[j][k] = field_select += 2 * mv_table_size;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
+static av_cold int init_slice_buffers(MPVMainEncContext *const m)
 {
     MPVEncContext *const s = &m->s;
     // Align the following per-thread buffers to avoid false sharing.
@@ -459,10 +517,8 @@ static av_cold int init_buffers(MPVMainEncContext *const m, AVCodecContext *avct
     };
     static_assert(DCT_ERROR_SIZE * MAX_THREADS + ALIGN - 1 <= SIZE_MAX,
                   "Need checks for potential overflow.");
-    unsigned nb_slices = s->c.slice_context_count, mv_table_size, mb_array_size;
+    unsigned nb_slices = s->c.slice_context_count;
     char *dct_error = NULL;
-    int has_b_frames = !!m->max_b_frames, nb_mv_tables = 1 + 5 * has_b_frames;
-    int16_t (*mv_table)[2];
 
     if (m->noise_reduction) {
         if (!FF_ALLOCZ_TYPED_ARRAY(s->dct_offset, 2))
@@ -474,31 +530,13 @@ static av_cold int init_buffers(MPVMainEncContext *const m, AVCodecContext *avct
         dct_error += FFALIGN((uintptr_t)dct_error, ALIGN) - (uintptr_t)dct_error;
     }
 
-    /* Allocate MB type table */
-    mb_array_size = s->c.mb_stride * s->c.mb_height;
-    s->mb_type = av_calloc(mb_array_size, 3 * sizeof(*s->mb_type) + sizeof(*s->mb_mean));
-    if (!s->mb_type)
-        return AVERROR(ENOMEM);
-    if (!FF_ALLOCZ_TYPED_ARRAY(s->lambda_table, mb_array_size))
-        return AVERROR(ENOMEM);
-
-    mv_table_size = (s->c.mb_height + 2) * s->c.mb_stride + 1;
-    if (s->c.codec_id == AV_CODEC_ID_MPEG4 ||
-        (s->c.avctx->flags & AV_CODEC_FLAG_INTERLACED_ME)) {
-        nb_mv_tables += 8 * has_b_frames;
-        if (!ALLOCZ_ARRAYS(s->p_field_select_table[0], 2 * (2 + 4 * has_b_frames), mv_table_size))
-            return AVERROR(ENOMEM);
-    }
-
-    mv_table = av_calloc(mv_table_size, nb_mv_tables * sizeof(*mv_table));
-    if (!mv_table)
-        return AVERROR(ENOMEM);
-    m->mv_table_base = mv_table;
-    mv_table += s->c.mb_stride + 1;
+    const int y_size  = s->c.b8_stride * (2 * s->c.mb_height + 1);
+    const int c_size  = s->c.mb_stride * (s->c.mb_height + 1);
+    const int yc_size = y_size + 2 * c_size;
+    ptrdiff_t offset = 0;
 
     for (unsigned i = 0; i < nb_slices; ++i) {
         MPVEncContext *const s2 = s->c.enc_contexts[i];
-        int16_t (*tmp_mv_table)[2] = mv_table;
 
         if (dct_error) {
             s2->dct_offset    = s->dct_offset;
@@ -506,38 +544,12 @@ static av_cold int init_buffers(MPVMainEncContext *const m, AVCodecContext *avct
             dct_error        += DCT_ERROR_SIZE;
         }
 
-        s2->mb_type      = s->mb_type;
-        s2->mc_mb_var    = s2->mb_type   + mb_array_size;
-        s2->mb_var       = s2->mc_mb_var + mb_array_size;
-        s2->mb_mean      = (uint8_t*)(s2->mb_var + mb_array_size);
-        s2->lambda_table = s->lambda_table;
-
-        s2->p_mv_table            = tmp_mv_table;
-        if (has_b_frames) {
-            s2->b_forw_mv_table       = tmp_mv_table += mv_table_size;
-            s2->b_back_mv_table       = tmp_mv_table += mv_table_size;
-            s2->b_bidir_forw_mv_table = tmp_mv_table += mv_table_size;
-            s2->b_bidir_back_mv_table = tmp_mv_table += mv_table_size;
-            s2->b_direct_mv_table     = tmp_mv_table += mv_table_size;
-        }
-
-        if (s->p_field_select_table[0]) { // MPEG-4 or INTERLACED_ME above
-            uint8_t *field_select = s->p_field_select_table[0];
-            s2->p_field_select_table[0] = field_select;
-            s2->p_field_select_table[1] = field_select += 2 * mv_table_size;
-
-            if (has_b_frames) {
-                for (int j = 0; j < 2; j++) {
-                    for (int k = 0; k < 2; k++) {
-                        for (int l = 0; l < 2; l++)
-                            s2->b_field_mv_table[j][k][l] = tmp_mv_table += mv_table_size;
-                        s2->b_field_select_table[j][k] = field_select += 2 * mv_table_size;
-                    }
-                }
-            }
+        if (s2->c.ac_val) {
+            s2->c.dc_val += offset + i;
+            s2->c.ac_val += offset;
+            offset       += yc_size;
         }
     }
-
     return 0;
 }
 
@@ -1023,9 +1035,9 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
         m->lmin = m->lmax;
     }
 
-    /* ff_mpv_common_init() will copy (memdup) the contents of the main slice
-     * to the slice contexts, so we initialize various fields of it
-     * before calling ff_mpv_common_init(). */
+    /* ff_mpv_init_duplicate_contexts() will copy (memdup) the contents of the
+     * main slice to the slice contexts, so we initialize various fields of it
+     * before calling ff_mpv_init_duplicate_contexts(). */
     s->parent = m;
     ff_mpv_idct_init(&s->c);
     init_unquantize(s, avctx);
@@ -1059,17 +1071,19 @@ av_cold int ff_mpv_encode_init(AVCodecContext *avctx)
     ret = ff_mpv_common_init(&s->c);
     if (ret < 0)
         return ret;
-
+    ret = init_buffers(m);
+    if (ret < 0)
+        return ret;
     if (s->c.slice_context_count > 1) {
-        for (int i = 0; i < s->c.slice_context_count; ++i) {
-            s->c.enc_contexts[i]->rtp_mode = 1;
-
-            if (avctx->codec_id == AV_CODEC_ID_H263P)
-                s->c.enc_contexts[i]->c.h263_slice_structured = 1;
-        }
+        s->rtp_mode = 1;
+        if (avctx->codec_id == AV_CODEC_ID_H263P)
+            s->c.h263_slice_structured = 1;
     }
+    ret = ff_mpv_init_duplicate_contexts(&s->c);
+    if (ret < 0)
+        return ret;
 
-    ret = init_buffers(m, avctx);
+    ret = init_slice_buffers(m);
     if (ret < 0)
         return ret;
 
@@ -1824,10 +1838,8 @@ static int select_input_picture(MPVMainEncContext *const m)
             ret = av_frame_ref(s->new_pic, m->reordered_input_picture[0]->f);
             if (ret < 0)
                 goto fail;
-            for (int i = 0; i < MPV_MAX_PLANES; i++) {
-                if (s->new_pic->data[i])
-                    s->new_pic->data[i] += INPLACE_OFFSET;
-            }
+            for (int i = 0; i < MPV_MAX_PLANES; i++)
+                s->new_pic->data[i] += INPLACE_OFFSET;
         }
         s->c.cur_pic.ptr = m->reordered_input_picture[0];
         m->reordered_input_picture[0] = NULL;
@@ -3128,6 +3140,7 @@ static int encode_thread(AVCodecContext *c, void *arg){
                         if (CONFIG_MPEG4_ENCODER) {
                             ff_mpeg4_encode_video_packet_header(s);
                             ff_mpeg4_clean_buffers(&s->c);
+                            ff_h263_mpeg4_reset_dc(s);
                         }
                     break;
                     case AV_CODEC_ID_MPEG1VIDEO:
@@ -3137,8 +3150,13 @@ static int encode_thread(AVCodecContext *c, void *arg){
                             ff_mpeg1_clean_buffers(&s->c);
                         }
                     break;
-                    case AV_CODEC_ID_H263:
+#if CONFIG_H263P_ENCODER
                     case AV_CODEC_ID_H263P:
+                        if (s->c.dc_val)
+                            ff_h263_mpeg4_reset_dc(s);
+                        // fallthrough
+#endif
+                    case AV_CODEC_ID_H263:
                         if (CONFIG_H263_ENCODER) {
                             update_mb_info(s, 1);
                             ff_h263_encode_gob_header(s, mb_y);
@@ -3305,7 +3323,7 @@ static int encode_thread(AVCodecContext *c, void *arg){
                         int16_t ac[6][16];
                         const int mvdir = (best_s.c.mv_dir & MV_DIR_BACKWARD) ? 1 : 0;
                         static const int dquant_tab[4]={-1,1,-2,2};
-                        int storecoefs = s->c.mb_intra && s->c.dc_val[0];
+                        int storecoefs = s->c.mb_intra && s->c.dc_val;
 
                         av_assert2(backup_s.dquant == 0);
 
@@ -3327,8 +3345,8 @@ static int encode_thread(AVCodecContext *c, void *arg){
                             backup_s.dquant= dquant;
                             if(storecoefs){
                                 for(i=0; i<6; i++){
-                                    dc[i] = s->c.dc_val[0][s->c.block_index[i]];
-                                    memcpy(ac[i], s->c.ac_val[0][s->c.block_index[i]], sizeof(int16_t)*16);
+                                    dc[i] = s->c.dc_val[s->c.block_index[i]];
+                                    memcpy(ac[i], s->c.ac_val[s->c.block_index[i]], sizeof(*s->c.ac_val));
                                 }
                             }
 
@@ -3337,8 +3355,8 @@ static int encode_thread(AVCodecContext *c, void *arg){
                             if (best_s.c.qscale != qp) {
                                 if(storecoefs){
                                     for(i=0; i<6; i++){
-                                        s->c.dc_val[0][s->c.block_index[i]] = dc[i];
-                                        memcpy(s->c.ac_val[0][s->c.block_index[i]], ac[i], sizeof(int16_t)*16);
+                                        s->c.dc_val[s->c.block_index[i]] = dc[i];
+                                        memcpy(s->c.ac_val[s->c.block_index[i]], ac[i], sizeof(*s->c.ac_val));
                                     }
                                 }
                             }
@@ -3560,8 +3578,11 @@ static int encode_thread(AVCodecContext *c, void *arg){
             if (s->c.mb_intra /* && I,P,S_TYPE */) {
                 s->p_mv_table[xy][0]=0;
                 s->p_mv_table[xy][1]=0;
-            } else if ((s->c.h263_pred || s->c.h263_aic) && s->c.mbintra_table[xy])
-                ff_clean_intra_table_entries(&s->c);
+#if CONFIG_H263_ENCODER
+            } else if (s->c.h263_pred || s->c.h263_aic) {
+                ff_h263_clean_intra_table_entries(&s->c, xy);
+#endif
+            }
 
             if (s->c.avctx->flags & AV_CODEC_FLAG_PSNR) {
                 int w= 16;

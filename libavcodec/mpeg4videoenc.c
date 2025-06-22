@@ -130,7 +130,7 @@ static inline void restore_ac_coeffs(MPVEncContext *const s, int16_t block[6][64
     memcpy(s->c.block_last_index, zigzag_last_index, sizeof(int) * 6);
 
     for (n = 0; n < 6; n++) {
-        int16_t *ac_val = &s->c.ac_val[0][0][0] + s->c.block_index[n] * 16;
+        int16_t *ac_val = &s->c.ac_val[0][0] + s->c.block_index[n] * 16;
 
         st[n] = s->c.intra_scantable.permutated;
         if (dir[n]) {
@@ -143,6 +143,36 @@ static inline void restore_ac_coeffs(MPVEncContext *const s, int16_t block[6][64
                 block[n][s->c.idsp.idct_permutation[i << 3]] = ac_val[i];
         }
     }
+}
+
+/**
+ * Predict the dc.
+ * @param n block index (0-3 are luma, 4-5 are chroma)
+ * @param dir_ptr pointer to an integer where the prediction direction will be stored
+ */
+static int mpeg4_pred_dc(MpegEncContext *s, int n, int *dir_ptr)
+{
+    const int16_t *const dc_val = s->dc_val + s->block_index[n];
+    const int wrap = s->block_wrap[n];
+
+    /* B C
+     * A X
+     */
+    const int a = dc_val[-1];
+    const int b = dc_val[-1 - wrap];
+    const int c = dc_val[-wrap];
+    int pred;
+
+    // There is no need for out-of-slice handling here, as all values are set
+    // appropriately when a new slice is opened.
+    if (abs(a - b) < abs(b - c)) {
+        pred     = c;
+        *dir_ptr = 1; /* top */
+    } else {
+        pred     = a;
+        *dir_ptr = 0; /* left */
+    }
+    return pred;
 }
 
 /**
@@ -169,13 +199,13 @@ static inline int decide_ac_pred(MPVEncContext *const s, int16_t block[6][64],
         score -= get_block_rate(s, block[n], s->c.block_last_index[n],
                                 s->c.intra_scantable.permutated);
 
-        ac_val  = &s->c.ac_val[0][0][0] + s->c.block_index[n] * 16;
+        ac_val  = &s->c.ac_val[0][0] + s->c.block_index[n] * 16;
         ac_val1 = ac_val;
         if (dir[n]) {
             const int xy = s->c.mb_x + s->c.mb_y * s->c.mb_stride - s->c.mb_stride;
             /* top prediction */
             ac_val -= s->c.block_wrap[n] * 16;
-            if (s->c.mb_y == 0 || s->c.qscale == qscale_table[xy] || n == 2 || n == 3) {
+            if (s->c.first_slice_line || s->c.qscale == qscale_table[xy] || n == 2 || n == 3) {
                 /* same qscale */
                 for (i = 1; i < 8; i++) {
                     const int level = block[n][s->c.idsp.idct_permutation[i]];
@@ -737,12 +767,12 @@ static void mpeg4_encode_mb(MPVEncContext *const s, int16_t block[][64],
         int i;
 
         for (int i = 0; i < 6; i++) {
-            int pred  = ff_mpeg4_pred_dc(&s->c, i, &dir[i]);
+            int pred  = mpeg4_pred_dc(&s->c, i, &dir[i]);
             int scale = i < 4 ? s->c.y_dc_scale : s->c.c_dc_scale;
 
             pred = FASTDIV((pred + (scale >> 1)), scale);
             dc_diff[i] = block[i][0] - pred;
-            s->c.dc_val[0][s->c.block_index[i]] = av_clip_uintp2(block[i][0] * scale, 11);
+            s->c.dc_val[s->c.block_index[i]] = av_clip_uintp2(block[i][0] * scale, 11);
         }
 
         if (s->c.avctx->flags & AV_CODEC_FLAG_AC_PRED) {

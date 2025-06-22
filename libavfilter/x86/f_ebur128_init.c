@@ -1,7 +1,5 @@
 /*
- * MPEG-4 encoder/decoder internal header.
- * Copyright (c) 2000,2001 Fabrice Bellard
- * Copyright (c) 2002-2010 Michael Niedermayer <michaelni@gmx.at>
+ * Copyright (c) 2018 Paul B Mahol
  *
  * This file is part of FFmpeg.
  *
@@ -20,21 +18,23 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_MPEG4VIDEO_H
-#define AVCODEC_MPEG4VIDEO_H
+#include "libavutil/attributes.h"
+#include "libavutil/cpu.h"
+#include "libavutil/x86/cpu.h"
+#include "libavfilter/f_ebur128.h"
 
-#include <stdint.h>
+void ff_ebur128_filter_channels_avx(const EBUR128DSPContext *, const double *,
+                                    double *, double *, double *, double *, int);
 
-#include "mpegvideo.h"
+double ff_ebur128_find_peak_2ch_avx(double *, int, const double *, int);
 
-void ff_mpeg4_clean_buffers(MpegEncContext *s);
-int ff_mpeg4_get_video_packet_prefix_length(enum AVPictureType pict_type,
-                                            int f_code, int b_code);
-void ff_mpeg4_init_direct_mv(MpegEncContext *s);
+av_cold void ff_ebur128_init_x86(EBUR128DSPContext *dsp, int nb_channels)
+{
+    int cpu_flags = av_get_cpu_flags();
 
-/**
- * @return the mb_type
- */
-int ff_mpeg4_set_direct_mv(MpegEncContext *s, int mx, int my);
-
-#endif /* AVCODEC_MPEG4VIDEO_H */
+    if (ARCH_X86_64 && EXTERNAL_AVX(cpu_flags)) {
+        dsp->filter_channels = ff_ebur128_filter_channels_avx;
+        if (nb_channels == 2)
+            dsp->find_peak = ff_ebur128_find_peak_2ch_avx;
+    }
+}

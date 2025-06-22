@@ -67,25 +67,6 @@ int ff_flv_encode_picture_header(MPVMainEncContext *const m)
     return 0;
 }
 
-void ff_flv2_encode_ac_esc(PutBitContext *pb, int slevel, int level,
-                           int run, int last)
-{
-    if (level < 64) { // 7-bit level
-        put_bits(pb, 1, 0);
-        put_bits(pb, 1, last);
-        put_bits(pb, 6, run);
-
-        put_sbits(pb, 7, slevel);
-    } else {
-        /* 11-bit level */
-        put_bits(pb, 1, 1);
-        put_bits(pb, 1, last);
-        put_bits(pb, 6, run);
-
-        put_sbits(pb, 11, slevel);
-    }
-}
-
 const FFCodec ff_flv_encoder = {
     .p.name         = "flv",
     CODEC_LONG_NAME("FLV / Sorenson Spark / Sorenson H.263 (Flash Video)"),

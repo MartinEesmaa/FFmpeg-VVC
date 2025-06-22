@@ -153,8 +153,8 @@ OBJS-$(CONFIG_MPEGVIDEO)               += mpegvideo.o rl.o \
                                           to_upper4.o
 OBJS-$(CONFIG_MPEGVIDEODEC)            += mpegvideo_dec.o mpegutils.o
 OBJS-$(CONFIG_MPEGVIDEOENC)            += mpegvideo_enc.o mpeg12data.o  \
-                                          motion_est.o ratecontrol.o    \
-                                          mpegvideoencdsp.o
+                                          motion_est.o ratecontrol.o
+OBJS-$(CONFIG_MPEGVIDEOENCDSP)         += mpegvideoencdsp.o
 OBJS-$(CONFIG_MSMPEG4DEC)              += msmpeg4dec.o msmpeg4.o msmpeg4data.o \
                                           msmpeg4_vc1_data.o
 OBJS-$(CONFIG_MSMPEG4ENC)              += msmpeg4enc.o msmpeg4.o msmpeg4data.o \
@@ -700,7 +700,8 @@ OBJS-$(CONFIG_SMC_DECODER)             += smc.o
 OBJS-$(CONFIG_SMC_ENCODER)             += smcenc.o
 OBJS-$(CONFIG_SNOW_DECODER)            += snowdec.o snow.o snow_dwt.o
 OBJS-$(CONFIG_SNOW_ENCODER)            += snowenc.o snow.o snow_dwt.o             \
-                                          h263.o h263data.o ituh263enc.o
+                                          h263data.o ituh263enc.o \
+                                          motion_est.o ratecontrol.o
 OBJS-$(CONFIG_SOL_DPCM_DECODER)        += dpcm.o
 OBJS-$(CONFIG_SONIC_DECODER)           += sonic.o
 OBJS-$(CONFIG_SONIC_ENCODER)           += sonic.o
@@ -724,7 +725,7 @@ OBJS-$(CONFIG_SBC_DECODER)             += sbcdec.o sbc.o
 OBJS-$(CONFIG_SBC_ENCODER)             += sbcenc.o sbc.o sbcdsp.o
 OBJS-$(CONFIG_SVQ1_DECODER)            += svq1dec.o svq1.o h263data.o
 OBJS-$(CONFIG_SVQ1_ENCODER)            += svq1enc.o svq1.o  h263data.o  \
-                                          h263.o ituh263enc.o
+                                          h263.o ituh263enc.o motion_est.o
 OBJS-$(CONFIG_SVQ3_DECODER)            += svq3.o mpegutils.o h264data.o
 OBJS-$(CONFIG_TEXT_DECODER)            += textdec.o ass.o
 OBJS-$(CONFIG_TEXT_ENCODER)            += srtenc.o ass_split.o

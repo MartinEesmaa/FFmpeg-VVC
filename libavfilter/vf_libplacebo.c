@@ -186,6 +186,7 @@ typedef struct LibplaceboContext {
     float corner_rounding;
     int force_original_aspect_ratio;
     int force_divisible_by;
+    int reset_sar;
     int normalize_sar;
     int apply_filmgrain;
     int apply_dovi;
@@ -929,6 +930,15 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
     if (s->apply_filmgrain)
         av_frame_remove_side_data(out, AV_FRAME_DATA_FILM_GRAIN_PARAMS);
 
+    if (s->reset_sar) {
+        out->sample_aspect_ratio = ref->sample_aspect_ratio;
+    } else {
+        const AVRational ar_ref  = { ref->width, ref->height };
+        const AVRational ar_out  = { out->width, out->height };
+        const AVRational stretch = av_div_q(ar_ref, ar_out);
+        out->sample_aspect_ratio = av_mul_q(ref->sample_aspect_ratio, stretch);
+    }
+
     /* Map, render and unmap output frame */
     if (outdesc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
         ok = pl_map_avframe_ex(s->gpu, &target, pl_avframe_params(
@@ -1168,8 +1178,17 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
     const AVPixFmtDescriptor *desc = NULL;
     AVFilterFormats *infmts = NULL, *outfmts = NULL;
 
+    /* List AV_PIX_FMT_VULKAN first to prefer it when possible */
+    if (s->have_hwdevice) {
+        RET(ff_add_format(&infmts, AV_PIX_FMT_VULKAN));
+        if (s->out_format == AV_PIX_FMT_NONE || av_vkfmt_from_pixfmt(s->out_format))
+            RET(ff_add_format(&outfmts, AV_PIX_FMT_VULKAN));
+    }
+
     while ((desc = av_pix_fmt_desc_next(desc))) {
         enum AVPixelFormat pixfmt = av_pix_fmt_desc_get_id(desc);
+        if (pixfmt == AV_PIX_FMT_VULKAN)
+            continue; /* Handled above */
 
 #if PL_API_VER < 232
         // Older libplacebo can't handle >64-bit pixel formats, so safe-guard
@@ -1177,9 +1196,6 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
         if (av_get_bits_per_pixel(desc) > 64)
             continue;
 #endif
-
-        if (pixfmt == AV_PIX_FMT_VULKAN && !s->have_hwdevice)
-            continue;
 
         if (!pl_test_pixfmt(s->gpu, pixfmt))
             continue;
@@ -1191,15 +1207,8 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
             continue; /* BE formats are not supported by pl_download_avframe */
 
         /* Mask based on user specified format */
-        if (s->out_format != AV_PIX_FMT_NONE) {
-            if (pixfmt == AV_PIX_FMT_VULKAN && av_vkfmt_from_pixfmt(s->out_format)) {
-                /* OK */
-            } else if (pixfmt == s->out_format) {
-                /* OK */
-            } else {
-                continue; /* Not OK */
-            }
-        }
+        if (pixfmt != s->out_format && s->out_format != AV_PIX_FMT_NONE)
+            continue;
 
 #if PL_API_VER >= 293
         if (!pl_test_pixfmt_caps(s->gpu, pixfmt, PL_FMT_CAP_RENDERABLE))
@@ -1289,19 +1298,28 @@ static int libplacebo_config_output(AVFilterLink *outlink)
     RET(ff_scale_eval_dimensions(s, s->w_expr, s->h_expr, inlink, outlink,
                                  &outlink->w, &outlink->h));
 
+    s->reset_sar |= s->normalize_sar || s->nb_inputs > 1;
+    double sar_in = inlink->sample_aspect_ratio.num ?
+                    av_q2d(inlink->sample_aspect_ratio) : 1.0;
+
     ff_scale_adjust_dimensions(inlink, &outlink->w, &outlink->h,
                                s->force_original_aspect_ratio,
-                               s->force_divisible_by, 1.f);
+                               s->force_divisible_by,
+                               s->reset_sar ? sar_in : 1.0);
 
-    if (s->normalize_sar || s->nb_inputs > 1) {
+    if (s->reset_sar) {
         /* SAR is normalized, or we have multiple inputs, set out to 1:1 */
         outlink->sample_aspect_ratio = (AVRational){ 1, 1 };
-    } else {
+    } else if (inlink->sample_aspect_ratio.num) {
         /* This is consistent with other scale_* filters, which only
          * set the outlink SAR to be equal to the scale SAR iff the input SAR
          * was set to something nonzero */
-        if (inlink->sample_aspect_ratio.num)
-            outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
+        const AVRational ar_in   = { inlink->w,  inlink->h };
+        const AVRational ar_out  = { outlink->w, outlink->h };
+        const AVRational stretch = av_div_q(ar_in, ar_out);
+        outlink->sample_aspect_ratio = av_mul_q(inlink->sample_aspect_ratio, stretch);
+    } else {
+        outlink->sample_aspect_ratio = inlink->sample_aspect_ratio;
     }
 
     /* Frame rate */
@@ -1383,7 +1401,8 @@ static const AVOption libplacebo_options[] = {
         { "decrease", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 1 }, 0, 0, STATIC, .unit = "force_oar" },
         { "increase", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = 2 }, 0, 0, STATIC, .unit = "force_oar" },
     { "force_divisible_by", "enforce that the output resolution is divisible by a defined integer when force_original_aspect_ratio is used", OFFSET(force_divisible_by), AV_OPT_TYPE_INT, { .i64 = 1 }, 1, 256, STATIC },
-    { "normalize_sar", "force SAR normalization to 1:1 by adjusting pos_x/y/w/h", OFFSET(normalize_sar), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, STATIC },
+    { "reset_sar", "force SAR normalization to 1:1 by adjusting pos_x/y/w/h", OFFSET(reset_sar), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, STATIC },
+    { "normalize_sar", "like reset_sar, but pad/crop instead of stretching the video", OFFSET(normalize_sar), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1, STATIC },
     { "pad_crop_ratio", "ratio between padding and cropping when normalizing SAR (0=pad, 1=crop)", OFFSET(pad_crop_ratio), AV_OPT_TYPE_FLOAT, {.dbl=0.0}, 0.0, 1.0, DYNAMIC },
     { "fillcolor", "Background fill color", OFFSET(fillcolor), AV_OPT_TYPE_COLOR, {.str = "black@0"}, .flags = DYNAMIC },
     { "corner_rounding", "Corner rounding radius", OFFSET(corner_rounding), AV_OPT_TYPE_FLOAT, {.dbl = 0.0}, 0.0, 1.0, .flags = DYNAMIC },
