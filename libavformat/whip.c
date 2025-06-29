@@ -732,9 +732,17 @@ static int exchange_sdp(AVFormatContext *s)
     URLContext *whip_uc = NULL;
     AVDictionary *opts = NULL;
     char *hex_data = NULL;
+    const char *proto_name = avio_find_protocol_name(s->url);
 
     /* To prevent a crash during cleanup, always initialize it. */
     av_bprint_init(&bp, 1, MAX_SDP_SIZE);
+
+    if (!av_strstart(proto_name, "http", NULL)) {
+        av_log(whip, AV_LOG_ERROR, "WHIP: Protocol %s is not supported by RTC, choose http, url is %s\n",
+            proto_name, s->url);
+        ret = AVERROR(EINVAL);
+        goto end;
+    }
 
     if (!whip->sdp_offer || !strlen(whip->sdp_offer)) {
         av_log(whip, AV_LOG_ERROR, "WHIP: No offer to exchange\n");
@@ -1660,8 +1668,6 @@ static int h264_annexb_insert_sps_pps(AVFormatContext *s, AVPacket *pkt)
     uint8_t unit_type, sps_seen = 0, pps_seen = 0, idr_seen = 0, *out;
     const uint8_t *buf, *buf_end, *r1;
 
-    if (!pkt || !pkt->data || pkt->size <= 0)
-        return ret;
     if (!par || !par->extradata || par->extradata_size <= 0)
         return ret;
 

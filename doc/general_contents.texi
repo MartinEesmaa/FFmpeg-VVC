@@ -646,6 +646,7 @@ library:
 @item raw E-AC-3                @tab X @tab X
 @item raw EVC                   @tab X @tab X
 @item raw FLAC                  @tab X @tab X
+@item raw G.728                 @tab   @tab X
 @item raw GSM                   @tab   @tab X
 @item raw H.261                 @tab X @tab X
 @item raw H.263                 @tab X @tab X
@@ -1325,6 +1326,7 @@ following image formats are supported:
 @item FLAC (Free Lossless Audio Codec)  @tab  X  @tab  IX
 @item FTR Voice              @tab     @tab  X
 @item G.723.1                @tab X   @tab  X
+@item G.728                  @tab     @tab  X
 @item G.729                  @tab     @tab  X
 @item GSM                    @tab  E  @tab  X
     @tab encoding supported through external library libgsm

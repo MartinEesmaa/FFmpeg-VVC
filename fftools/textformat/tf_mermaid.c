@@ -575,29 +575,22 @@ static void mermaid_print_value(AVTextFormatContext *tfc, const char *key,
     }
 
     if (section->linktype_key && !strcmp(section->linktype_key, key)) {
-        mmc->section_data[tfc->level].link_type = (AVTextFormatLinkType)num;;
+        mmc->section_data[tfc->level].link_type = (AVTextFormatLinkType)num;
         exit = 1;
     }
 
-    //if (exit)
-    //    return;
+    if (exit)
+        return;
 
     if ((section->flags & (AV_TEXTFORMAT_SECTION_FLAG_IS_SHAPE | AV_TEXTFORMAT_SECTION_PRINT_TAGS))
         || (section->flags & AV_TEXTFORMAT_SECTION_FLAG_IS_SUBGRAPH && sec_data.subgraph_start_incomplete)) {
-
-        if (exit)
-            return;
-
         switch (mmc->diagram_config->diagram_type) {
         case AV_DIAGRAMTYPE_GRAPH:
 
             if (is_int) {
                 writer_printf(tfc, "<span class=\"%s\">%s: %"PRId64"</span>", key, key, num);
             } else {
-                ////AVBPrint b;
-                ////av_bprint_init(&b, 0, AV_BPRINT_SIZE_UNLIMITED);
                 const char *tmp = av_strireplace(str, "\"", "'");
-                ////av_bprint_escape(&b, str, NULL, AV_ESCAPE_MODE_AUTO, AV_ESCAPE_FLAG_STRICT);
                 writer_printf(tfc, "<span class=\"%s\">%s</span>", key, tmp);
                 av_freep(&tmp);
             }
@@ -632,10 +625,6 @@ static void mermaid_print_value(AVTextFormatContext *tfc, const char *key,
         }
 
     } else if (section->flags & AV_TEXTFORMAT_SECTION_FLAG_HAS_LINKS) {
-
-        if (exit)
-            return;
-
         if (buf->len > 0)
             av_bprintf(buf, "%s", "<br>");
 
