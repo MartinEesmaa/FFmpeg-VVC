@@ -350,9 +350,8 @@ static int mpeg1_encode_picture_header(MPVMainEncContext *const m)
     put_header(s, PICTURE_START_CODE);
     /* temporal reference */
 
-    // RAL: s->c.picture_number instead of s->fake_picture_number
     put_bits(&s->pb, 10,
-             (s->c.picture_number - mpeg12->gop_picture_number) & 0x3ff);
+             (s->picture_number - mpeg12->gop_picture_number) & 0x3ff);
     put_bits(&s->pb, 3, s->c.pict_type);
 
     m->vbv_delay_pos = put_bytes_count(&s->pb, 0);
@@ -688,7 +687,7 @@ static av_always_inline void mpeg1_encode_mb_internal(MPVEncContext *const s,
            ((s->c.mv_dir & MV_DIR_BACKWARD)
             ? ((s->c.mv[1][0][0] - s->c.last_mv[1][0][0]) |
                (s->c.mv[1][0][1] - s->c.last_mv[1][0][1])) : 0)) == 0))) {
-        s->c.mb_skip_run++;
+        s->mb_skip_run++;
         s->c.qscale -= s->dquant;
         s->misc_bits++;
         s->last_bits++;
@@ -700,10 +699,10 @@ static av_always_inline void mpeg1_encode_mb_internal(MPVEncContext *const s,
         }
     } else {
         if (first_mb) {
-            av_assert0(s->c.mb_skip_run == 0);
+            av_assert0(s->mb_skip_run == 0);
             encode_mb_skip_run(s, s->c.mb_x);
         } else {
-            encode_mb_skip_run(s, s->c.mb_skip_run);
+            encode_mb_skip_run(s, s->mb_skip_run);
         }
 
         if (s->c.pict_type == AV_PICTURE_TYPE_I) {
@@ -925,7 +924,7 @@ static av_always_inline void mpeg1_encode_mb_internal(MPVEncContext *const s,
         for (i = 0; i < mb_block_count; i++)
             if (cbp & (1 << (mb_block_count - 1 - i)))
                 mpeg1_encode_block(s, block[i], i);
-        s->c.mb_skip_run = 0;
+        s->mb_skip_run = 0;
         if (s->c.mb_intra)
             s->i_tex_bits += get_bits_diff(s);
         else

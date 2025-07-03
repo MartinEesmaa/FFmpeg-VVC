@@ -243,8 +243,8 @@ static int msmpeg4_encode_picture_header(MPVMainEncContext *const m)
             s->c.inter_intra_pred, s->c.width, s->c.height);
 
     if (s->c.pict_type == AV_PICTURE_TYPE_I) {
-        s->c.slice_height = s->c.mb_height/1;
-        put_bits(&s->pb, 5, 0x16 + s->c.mb_height/s->c.slice_height);
+        s->slice_height = s->c.mb_height/1;
+        put_bits(&s->pb, 5, 0x16 + s->c.mb_height / s->slice_height);
 
         if (s->c.msmpeg4_version == MSMP4_WMV1) {
             ff_msmpeg4_encode_ext_header(s);
@@ -298,9 +298,9 @@ void ff_msmpeg4_encode_ext_header(MPVEncContext *const s)
     put_bits(&s->pb, 11, FFMIN(m->bit_rate / 1024, 2047));
 
     if (s->c.msmpeg4_version >= MSMP4_V3)
-        put_bits(&s->pb, 1, s->c.flipflop_rounding);
+        put_bits(&s->pb, 1, s->flipflop_rounding);
     else
-        av_assert0(!s->c.flipflop_rounding);
+        av_assert0(!s->flipflop_rounding);
 }
 
 void ff_msmpeg4_encode_motion(MSMPEG4EncContext *const ms,
@@ -332,7 +332,7 @@ void ff_msmpeg4_encode_motion(MSMPEG4EncContext *const ms,
 void ff_msmpeg4_handle_slices(MPVEncContext *const s)
 {
     if (s->c.mb_x == 0) {
-        if (s->c.slice_height && (s->c.mb_y % s->c.slice_height) == 0) {
+        if (s->slice_height && (s->c.mb_y % s->slice_height) == 0) {
             if (s->c.msmpeg4_version < MSMP4_WMV1)
                 ff_mpeg4_clean_buffers(&s->c);
             s->c.first_slice_line = 1;
