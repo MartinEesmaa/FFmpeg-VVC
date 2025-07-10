@@ -228,8 +228,8 @@ end:
     av_bprint_finalize(&key_bp, NULL);
     BIO_free(cert_b);
     av_bprint_finalize(&cert_bp, NULL);
-    if (key_tem) av_free(key_tem);
-    if (cert_tem) av_free(cert_tem);
+    av_free(key_tem);
+    av_free(cert_tem);
     return ret;
 }
 
@@ -261,11 +261,6 @@ static int openssl_gen_private_key(EVP_PKEY **pkey, EC_KEY **eckey)
         av_log(NULL, AV_LOG_ERROR, "TLS: Create EC group by curve=%d failed, %s", curve, ERR_error_string(ERR_get_error(), NULL));
         goto einval_end;
     }
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L // v1.1.x
-    /* For openssl 1.0, we must set the group parameters, so that cert is ok. */
-    EC_GROUP_set_asn1_flag(ecgroup, OPENSSL_EC_NAMED_CURVE);
-#endif
 
     if (EC_KEY_set_group(*eckey, ecgroup) != 1) {
         av_log(NULL, AV_LOG_ERROR, "TLS: Generate private key, EC_KEY_set_group failed, %s\n", ERR_error_string(ERR_get_error(), NULL));
@@ -374,7 +369,6 @@ einval_end:
     ret = AVERROR(EINVAL);
 end:
     X509_NAME_free(subject);
-    //av_bprint_finalize(&fingerprint, NULL);
     return ret;
 }
 
@@ -398,8 +392,8 @@ int ff_ssl_gen_key_cert(char *key_buf, size_t key_sz, char *cert_buf, size_t cer
     snprintf(key_buf,  key_sz,  "%s", key_tem);
     snprintf(cert_buf, cert_sz, "%s", cert_tem);
 
-    if (key_tem) av_free(key_tem);
-    if (cert_tem) av_free(cert_tem);
+    av_free(key_tem);
+    av_free(cert_tem);
 error:
     return ret;
 }
@@ -415,11 +409,7 @@ error:
  */
 static EVP_PKEY *pkey_from_pem_string(const char *pem_str, int is_priv)
 {
-#if OPENSSL_VERSION_NUMBER < 0x10002000L /* OpenSSL 1.0.2 */
-    BIO *mem = BIO_new_mem_buf((void *)pem_str, -1);
-#else
     BIO *mem = BIO_new_mem_buf(pem_str, -1);
-#endif
     if (!mem) {
         av_log(NULL, AV_LOG_ERROR, "BIO_new_mem_buf failed\n");
         return NULL;
@@ -449,11 +439,7 @@ static EVP_PKEY *pkey_from_pem_string(const char *pem_str, int is_priv)
  */
 static X509 *cert_from_pem_string(const char *pem_str)
 {
-#if OPENSSL_VERSION_NUMBER < 0x10002000L /* OpenSSL 1.0.2 */
-    BIO *mem = BIO_new_mem_buf((void *)pem_str, -1);
-#else
     BIO *mem = BIO_new_mem_buf(pem_str, -1);
-#endif
     if (!mem) {
         av_log(NULL, AV_LOG_ERROR, "BIO_new_mem_buf failed\n");
         return NULL;
@@ -476,9 +462,7 @@ typedef struct TLSContext {
     SSL_CTX *ctx;
     SSL *ssl;
     EVP_PKEY *pkey;
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
     BIO_METHOD* url_bio_method;
-#endif
     int io_err;
     char error_message[256];
 } TLSContext;
@@ -530,87 +514,6 @@ int ff_dtls_state(URLContext *h)
     return c->tls_shared.state;
 }
 
-/* OpenSSL 1.0.2 or below, then you would use SSL_library_init. If you are
- * using OpenSSL 1.1.0 or above, then the library will initialize
- * itself automatically.
- * https://wiki.openssl.org/index.php/Library_Initialization
- */
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-#include "libavutil/thread.h"
-
-static AVMutex openssl_mutex = AV_MUTEX_INITIALIZER;
-
-static int openssl_init;
-
-#if HAVE_THREADS
-#include <openssl/crypto.h>
-#include "libavutil/mem.h"
-
-pthread_mutex_t *openssl_mutexes;
-static void openssl_lock(int mode, int type, const char *file, int line)
-{
-    if (mode & CRYPTO_LOCK)
-        pthread_mutex_lock(&openssl_mutexes[type]);
-    else
-        pthread_mutex_unlock(&openssl_mutexes[type]);
-}
-#if !defined(WIN32) && OPENSSL_VERSION_NUMBER < 0x10000000
-static unsigned long openssl_thread_id(void)
-{
-    return (intptr_t) pthread_self();
-}
-#endif
-#endif
-
-int ff_openssl_init(void)
-{
-    ff_mutex_lock(&openssl_mutex);
-    if (!openssl_init) {
-        SSL_library_init();
-        SSL_load_error_strings();
-#if HAVE_THREADS
-        if (!CRYPTO_get_locking_callback()) {
-            int i;
-            openssl_mutexes = av_malloc_array(sizeof(pthread_mutex_t), CRYPTO_num_locks());
-            if (!openssl_mutexes) {
-                ff_mutex_unlock(&openssl_mutex);
-                return AVERROR(ENOMEM);
-            }
-
-            for (i = 0; i < CRYPTO_num_locks(); i++)
-                pthread_mutex_init(&openssl_mutexes[i], NULL);
-            CRYPTO_set_locking_callback(openssl_lock);
-#if !defined(WIN32) && OPENSSL_VERSION_NUMBER < 0x10000000
-            CRYPTO_set_id_callback(openssl_thread_id);
-#endif
-        }
-#endif
-    }
-    openssl_init++;
-    ff_mutex_unlock(&openssl_mutex);
-
-    return 0;
-}
-
-void ff_openssl_deinit(void)
-{
-    ff_mutex_lock(&openssl_mutex);
-    openssl_init--;
-    if (!openssl_init) {
-#if HAVE_THREADS
-        if (CRYPTO_get_locking_callback() == openssl_lock) {
-            int i;
-            CRYPTO_set_locking_callback(NULL);
-            for (i = 0; i < CRYPTO_num_locks(); i++)
-                pthread_mutex_destroy(&openssl_mutexes[i]);
-            av_free(openssl_mutexes);
-        }
-#endif
-    }
-    ff_mutex_unlock(&openssl_mutex);
-}
-#endif
-
 static int print_ssl_error(URLContext *h, int ret)
 {
     TLSContext *c = h->priv_data;
@@ -645,27 +548,16 @@ static int tls_close(URLContext *h)
     if (c->ctx)
         SSL_CTX_free(c->ctx);
     ffurl_closep(&c->tls_shared.tcp);
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
     if (c->url_bio_method)
         BIO_meth_free(c->url_bio_method);
-#endif
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    ff_openssl_deinit();
-#endif
     return 0;
 }
 
 static int url_bio_create(BIO *b)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
     BIO_set_init(b, 1);
     BIO_set_data(b, NULL);
     BIO_set_flags(b, 0);
-#else
-    b->init = 1;
-    b->ptr = NULL;
-    b->flags = 0;
-#endif
     return 1;
 }
 
@@ -674,15 +566,9 @@ static int url_bio_destroy(BIO *b)
     return 1;
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
-#define GET_BIO_DATA(x) BIO_get_data(x)
-#else
-#define GET_BIO_DATA(x) (x)->ptr
-#endif
-
 static int url_bio_bread(BIO *b, char *buf, int len)
 {
-    TLSContext *c = GET_BIO_DATA(b);
+    TLSContext *c = BIO_get_data(b);
     int ret = ffurl_read(c->tls_shared.is_dtls ? c->tls_shared.udp : c->tls_shared.tcp, buf, len);
     if (ret >= 0)
         return ret;
@@ -698,7 +584,7 @@ static int url_bio_bread(BIO *b, char *buf, int len)
 
 static int url_bio_bwrite(BIO *b, const char *buf, int len)
 {
-    TLSContext *c = GET_BIO_DATA(b);
+    TLSContext *c = BIO_get_data(b);
     int ret = ffurl_write(c->tls_shared.is_dtls ? c->tls_shared.udp : c->tls_shared.tcp, buf, len);
     if (ret >= 0)
         return ret;
@@ -726,26 +612,14 @@ static int url_bio_bputs(BIO *b, const char *str)
     return url_bio_bwrite(b, str, strlen(str));
 }
 
-#if OPENSSL_VERSION_NUMBER < 0x1010000fL
-static BIO_METHOD url_bio_method = {
-    .type = BIO_TYPE_SOURCE_SINK,
-    .name = "urlprotocol bio",
-    .bwrite = url_bio_bwrite,
-    .bread = url_bio_bread,
-    .bputs = url_bio_bputs,
-    .bgets = NULL,
-    .ctrl = url_bio_ctrl,
-    .create = url_bio_create,
-    .destroy = url_bio_destroy,
-};
-#endif
-
-static av_cold void init_bio_method(URLContext *h)
+static av_cold int init_bio_method(URLContext *h)
 {
     TLSContext *p = h->priv_data;
     BIO *bio;
-#if OPENSSL_VERSION_NUMBER >= 0x1010000fL
-    p->url_bio_method = BIO_meth_new(BIO_TYPE_SOURCE_SINK, "urlprotocol bio");
+    int bio_idx = BIO_get_new_index();
+    if (bio_idx == -1)
+        return AVERROR_EXTERNAL;
+    p->url_bio_method = BIO_meth_new(bio_idx | BIO_TYPE_SOURCE_SINK, "urlprotocol bio");
     BIO_meth_set_write(p->url_bio_method, url_bio_bwrite);
     BIO_meth_set_read(p->url_bio_method, url_bio_bread);
     BIO_meth_set_puts(p->url_bio_method, url_bio_bputs);
@@ -754,11 +628,9 @@ static av_cold void init_bio_method(URLContext *h)
     BIO_meth_set_destroy(p->url_bio_method, url_bio_destroy);
     bio = BIO_new(p->url_bio_method);
     BIO_set_data(bio, p);
-#else
-    bio = BIO_new(&url_bio_method);
-    bio->ptr = p;
-#endif
+
     SSL_set_bio(p->ssl, bio, bio);
+    return 0;
 }
 
 static void openssl_info_callback(const SSL *ssl, int where, int ret) {
@@ -885,32 +757,21 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     int ret = 0;
     c->is_dtls = 1;
     const char* ciphers = "ALL";
-#if OPENSSL_VERSION_NUMBER < 0x10002000L // v1.0.2
-    EC_KEY *ec_key = NULL;
-#endif
+
     /**
      * The profile for OpenSSL's SRTP is SRTP_AES128_CM_SHA1_80, see ssl/d1_srtp.c.
      * The profile for FFmpeg's SRTP is SRTP_AES128_CM_HMAC_SHA1_80, see libavformat/srtp.c.
      */
     const char* profiles = "SRTP_AES128_CM_SHA1_80";
     /* Refer to the test cases regarding these curves in the WebRTC code. */
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L /* OpenSSL 1.1.0 */
     const char* curves = "X25519:P-256:P-384:P-521";
-#elif OPENSSL_VERSION_NUMBER >= 0x10002000L /* OpenSSL 1.0.2 */
-    const char* curves = "P-256:P-384:P-521";
-#endif
 
-#if OPENSSL_VERSION_NUMBER < 0x10002000L /* OpenSSL v1.0.2 */
-    p->ctx = SSL_CTX_new(DTLSv1_method());
-#else
     p->ctx = SSL_CTX_new(DTLS_method());
-#endif
     if (!p->ctx) {
         ret = AVERROR(ENOMEM);
         goto fail;
     }
 
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L /* OpenSSL 1.0.2 */
     /* For ECDSA, we could set the curves list. */
     if (SSL_CTX_set1_curves_list(p->ctx, curves) != 1) {
         av_log(p, AV_LOG_ERROR, "TLS: Init SSL_CTX_set1_curves_list failed, curves=%s, %s\n",
@@ -918,7 +779,6 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
         ret = AVERROR(EINVAL);
         return ret;
     }
-#endif
 
     /**
      * We activate "ALL" cipher suites to align with the peer's capabilities,
@@ -932,17 +792,6 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     }
     ret = openssl_init_ca_key_cert(h);
     if (ret < 0) goto fail;
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L // v1.1.x
-#if OPENSSL_VERSION_NUMBER < 0x10002000L // v1.0.2
-    if (p->pkey)
-        ec_key = EVP_PKEY_get1_EC_KEY(p->pkey);
-    if (ec_key)
-        SSL_CTX_set_tmp_ecdh(p->ctx, ec_key);
-#else
-    SSL_CTX_set_ecdh_auto(p->ctx, 1);
-#endif
-#endif
 
     /* Server will send Certificate Request. */
     SSL_CTX_set_verify(p->ctx, SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE, openssl_dtls_verify_callback);
@@ -975,10 +824,10 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
      */
     SSL_set_options(p->ssl, SSL_OP_NO_QUERY_MTU);
     SSL_set_mtu(p->ssl, p->tls_shared.mtu);
-#if OPENSSL_VERSION_NUMBER >= 0x100010b0L /* OpenSSL 1.0.1k */
     DTLS_set_link_mtu(p->ssl, p->tls_shared.mtu);
-#endif
-    init_bio_method(h);
+    ret = init_bio_method(h);
+    if (ret < 0)
+        goto fail;
 
     if (p->tls_shared.use_external_udp != 1) {
         if ((ret = ff_tls_open_underlying(&p->tls_shared, h, url, options)) < 0) {
@@ -1014,9 +863,6 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
 
     ret = 0;
 fail:
-#if OPENSSL_VERSION_NUMBER < 0x10002000L // v1.0.2
-    EC_KEY_free(ec_key);
-#endif
     return ret;
 }
 
@@ -1040,25 +886,24 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
     TLSShared *c = &p->tls_shared;
     int ret;
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    if ((ret = ff_openssl_init()) < 0)
-        return ret;
-#endif
-
     if ((ret = ff_tls_open_underlying(c, h, uri, options)) < 0)
         goto fail;
 
     // We want to support all versions of TLS >= 1.0, but not the deprecated
-    // and insecure SSLv2 and SSLv3.  Despite the name, SSLv23_*_method()
+    // and insecure SSLv2 and SSLv3.  Despite the name, TLS_*_method()
     // enables support for all versions of SSL and TLS, and we then disable
     // support for the old protocols immediately after creating the context.
-    p->ctx = SSL_CTX_new(c->listen ? SSLv23_server_method() : SSLv23_client_method());
+    p->ctx = SSL_CTX_new(c->listen ? TLS_server_method() : TLS_client_method());
     if (!p->ctx) {
         av_log(h, AV_LOG_ERROR, "%s\n", openssl_get_error(p));
         ret = AVERROR(EIO);
         goto fail;
     }
-    SSL_CTX_set_options(p->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
+    if (!SSL_CTX_set_min_proto_version(p->ctx, TLS1_VERSION)) {
+        av_log(h, AV_LOG_ERROR, "Failed to set minimum TLS version to TLSv1\n");
+        ret = AVERROR_EXTERNAL;
+        goto fail;
+    }
     ret = openssl_init_ca_key_cert(h);
     if (ret < 0) goto fail;
     // Note, this doesn't check that the peer certificate actually matches
@@ -1073,7 +918,9 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
     }
     SSL_set_ex_data(p->ssl, 0, p);
     SSL_CTX_set_info_callback(p->ctx, openssl_info_callback);
-    init_bio_method(h);
+    ret = init_bio_method(h);
+    if (ret < 0)
+        goto fail;
     if (!c->listen && !c->numerichost)
         SSL_set_tlsext_host_name(p->ssl, c->host);
     ret = c->listen ? SSL_accept(p->ssl) : SSL_connect(p->ssl);

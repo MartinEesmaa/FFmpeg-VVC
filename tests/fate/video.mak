@@ -267,7 +267,7 @@ fate-mjpeg-ticket3229: CMD = framecrc -idct simple -fflags +bitexact -i $(TARGET
 FATE_VIDEO-$(call FRAMECRC, MVI, MOTIONPIXELS, SCALE_FILTER) += fate-motionpixels
 fate-motionpixels: CMD = framecrc -i $(TARGET_SAMPLES)/motion-pixels/INTRO-partial.MVI -an -pix_fmt rgb24 -frames:v 111 -vf scale
 
-FATE_VIDEO-$(call FRAMECRC, MPEGTS, MPEG2VIDEO) += fate-mpeg2-field-enc fate-mpeg2-ticket186
+FATE_VIDEO-$(call FRAMECRC, MPEGTS, MPEG2VIDEO, MPEGVIDEO_PARSER) += fate-mpeg2-field-enc fate-mpeg2-ticket186
 fate-mpeg2-field-enc: CMD = framecrc -flags +bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/mpeg2_field_encoding.ts -an -frames:v 30
 fate-mpeg2-ticket186: CMD = framecrc -flags +bitexact -idct simple -i $(TARGET_SAMPLES)/mpeg2/t.mpg -an
 
@@ -292,7 +292,7 @@ fate-nuv-rtjpeg: CMD = framecrc -idct simple -i $(TARGET_SAMPLES)/nuv/Today.nuv 
 FATE_NUV += fate-nuv-rtjpeg-fh
 fate-nuv-rtjpeg-fh: CMD = framecrc -idct simple -i $(TARGET_SAMPLES)/nuv/rtjpeg_frameheader.nuv -an
 
-FATE_VIDEO-$(call DEMDEC, NUV, NUV) += $(FATE_NUV)
+FATE_VIDEO-$(call FRAMECRC, NUV, NUV) += $(FATE_NUV)
 fate-nuv: $(FATE_NUV)
 
 FATE_VIDEO-$(call FRAMECRC, PAF, PAF_VIDEO, SCALE_FILTER) += fate-paf-video
