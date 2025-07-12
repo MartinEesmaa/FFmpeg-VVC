@@ -486,10 +486,16 @@ static const char* openssl_get_error(TLSContext *ctx)
     return ctx->error_message;
 }
 
-int ff_dtls_set_udp(URLContext *h, URLContext *udp)
+int ff_tls_set_external_socket(URLContext *h, URLContext *sock)
 {
     TLSContext *c = h->priv_data;
-    c->tls_shared.udp = udp;
+    TLSShared *s = &c->tls_shared;
+
+    if (s->is_dtls)
+        c->tls_shared.udp = sock;
+    else
+        c->tls_shared.tcp = sock;
+
     return 0;
 }
 
@@ -829,7 +835,7 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     if (ret < 0)
         goto fail;
 
-    if (p->tls_shared.use_external_udp != 1) {
+    if (p->tls_shared.external_sock != 1) {
         if ((ret = ff_tls_open_underlying(&p->tls_shared, h, url, options)) < 0) {
             av_log(p, AV_LOG_ERROR, "Failed to connect %s\n", url);
             return ret;
@@ -850,7 +856,7 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
      *
      * The SSL_do_handshake can't be called if DTLS hasn't prepare for udp.
      */
-    if (p->tls_shared.use_external_udp != 1) {
+    if (p->tls_shared.external_sock != 1) {
         ret = dtls_handshake(h);
         // Fatal SSL error, for example, no available suite when peer is DTLS 1.0 while we are DTLS 1.2.
         if (ret < 0) {
@@ -975,14 +981,16 @@ static int tls_write(URLContext *h, const uint8_t *buf, int size)
 
 static int tls_get_file_handle(URLContext *h)
 {
-    TLSContext *c = h->priv_data;
-    return ffurl_get_file_handle(c->tls_shared.tcp);
+    TLSContext *p = h->priv_data;
+    TLSShared *c = &p->tls_shared;
+    return ffurl_get_file_handle(c->is_dtls ? c->udp : c->tcp);
 }
 
 static int tls_get_short_seek(URLContext *h)
 {
-    TLSContext *s = h->priv_data;
-    return ffurl_get_short_seek(s->tls_shared.tcp);
+    TLSContext *p = h->priv_data;
+    TLSShared *c = &p->tls_shared;
+    return ffurl_get_short_seek(c->is_dtls ? c->udp : c->tcp);
 }
 
 static const AVOption options[] = {
@@ -1024,6 +1032,8 @@ const URLProtocol ff_dtls_protocol = {
     .url_close      = dtls_close,
     .url_read       = tls_read,
     .url_write      = tls_write,
+    .url_get_file_handle = tls_get_file_handle,
+    .url_get_short_seek  = tls_get_short_seek,
     .priv_data_size = sizeof(TLSContext),
     .flags          = URL_PROTOCOL_FLAG_NETWORK,
     .priv_data_class = &dtls_class,
