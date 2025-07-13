@@ -280,7 +280,7 @@ static uint8_t *ogg_write_vorbiscomment(int64_t offset, int bitexact,
                                         int *header_len, AVDictionary **m, int framing_bit,
                                         AVChapter **chapters, unsigned int nb_chapters)
 {
-    const char *vendor = bitexact ? "ffmpeg" : LIBAVFORMAT_IDENT;
+    const char *vendor = bitexact ? "" : LIBAVFORMAT_IDENT;
     FFIOContext pb;
     int64_t size;
     uint8_t *p;

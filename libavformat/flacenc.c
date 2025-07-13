@@ -63,7 +63,7 @@ static int flac_write_block_padding(AVIOContext *pb, unsigned int n_padding_byte
 static int flac_write_block_comment(AVIOContext *pb, AVDictionary **m,
                                     int last_block, int bitexact)
 {
-    const char *vendor = bitexact ? "ffmpeg" : LIBAVFORMAT_IDENT;
+    const char *vendor = bitexact ? "" : LIBAVFORMAT_IDENT;
     int64_t len;
 
     ff_metadata_conv(m, ff_vorbiscomment_metadata_conv, NULL);
