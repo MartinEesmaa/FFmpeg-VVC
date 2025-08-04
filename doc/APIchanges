@@ -2,6 +2,21 @@ The last version increases of all libraries were on 2025-03-28
 
 API changes, most recent first:
 
+2025-07-31 - xxxxxxxxxx - lavu 60.7.100 - spherical.h
+  Add AV_SPHERICAL_PARAMETRIC_IMMERSIVE.
+
+2025-07-20 - xxxxxxxxxx - lavu 60.6.100 - attributes.h, avstring.h
+  Add av_scanf_format() and use it on av_sscanf().
+
+2025-07-18 - xxxxxxxxxx - lavu 60.5.100 - pixfmt.h
+  Add AV_PIX_FMT_OHCODEC.
+
+2025-07-18 - xxxxxxxxxx - lavu 60.5.100 - hwcontext.h
+  Add AV_HWDEVICE_TYPE_OHCODEC and AVOHCodecDeviceContext.
+
+2025-07-xx - xxxxxxxxxd - lavfi 11.2.100 - avfilter.h
+  Add AVFilterGraph->max_buffered_frames.
+
 2025-07-07 - eca477da52 - lavc 62.6.100 - packet.h
   Add AV_PKT_DATA_RTCP_SR.
 
@@ -598,7 +613,7 @@ API changes, most recent first:
   Deprecate AVFrame.palette_has_changed without replacement.
 
 2023-05-15 - 7d1d61cc5f5 - lavc 60 - avcodec.h
-  Depreate AVCodecContext.ticks_per_frame in favor of
+  Deprecate AVCodecContext.ticks_per_frame in favor of
   AVCodecContext.framerate (encoding) and
   AV_CODEC_PROP_FIELDS (decoding).
 
@@ -606,7 +621,7 @@ API changes, most recent first:
   Add AV_CODEC_PROP_FIELDS.
 
 2023-05-15 - 8b20d0dcb5c - lavc 60 - codec.h
-  Depreate AV_CODEC_CAP_SUBFRAMES without replacement.
+  Deprecate AV_CODEC_CAP_SUBFRAMES without replacement.
 
 2023-05-07 - c2ae8e30b7f - lavc 60.11.100 - codec_par.h
   Add AVCodecParameters.framerate.

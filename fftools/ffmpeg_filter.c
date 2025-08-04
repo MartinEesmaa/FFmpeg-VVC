@@ -1949,6 +1949,12 @@ static int configure_filtergraph(FilterGraph *fg, FilterGraphThread *fgt)
         fgt->graph->nb_threads = filter_complex_nbthreads;
     }
 
+    if (filter_buffered_frames) {
+        ret = av_opt_set_int(fgt->graph, "max_buffered_frames", filter_buffered_frames, 0);
+        if (ret < 0)
+            return ret;
+    }
+
     hw_device = hw_device_for_filter();
 
     ret = graph_parse(fg, fgt->graph, graph_desc, &inputs, &outputs, hw_device);
@@ -2722,7 +2728,7 @@ static void sub2video_heartbeat(InputFilter *ifilter, int64_t pts, AVRational tb
     if (pts2 >= ifp->sub2video.end_pts || ifp->sub2video.initialize)
         /* if we have hit the end of the current displayed subpicture,
            or if we need to initialize the system, update the
-           overlayed subpicture and its start/end times */
+           overlaid subpicture and its start/end times */
         sub2video_update(ifp, pts2 + 1, NULL);
     else
         sub2video_push_ref(ifp, pts2);
@@ -3135,7 +3141,7 @@ static int filter_thread(void *arg)
             goto finish;
 
 read_frames:
-        // retrieve all newly avalable frames
+        // retrieve all newly available frames
         ret = read_frames(fg, &fgt, fgt.frame);
         if (ret == AVERROR_EOF) {
             av_log(fg, AV_LOG_VERBOSE, "All consumers returned EOF\n");

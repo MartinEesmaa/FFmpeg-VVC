@@ -1601,6 +1601,11 @@ static int old_codec48(SANMVideoContext *ctx, int width, int height)
         }
         break;
     case 2:
+        if (decoded_size > ctx->buf_size) {
+            av_log(ctx->avctx, AV_LOG_ERROR, "Decoded size %u is too large.\n", decoded_size);
+            return AVERROR_INVALIDDATA;
+        }
+
         if (rle_decode(ctx, &ctx->gb, dst, decoded_size))
             return AVERROR_INVALIDDATA;
         break;
@@ -1649,7 +1654,7 @@ static int process_frame_obj(SANMVideoContext *ctx, GetByteContext *gb)
     bytestream2_skip(gb, 2);
     parm2 = bytestream2_get_le16u(gb);
 
-    if (w < 1 || h < 1 || w > 800 || h > 600 || left > 800 || top > 600) {
+    if (w < 1 || h < 1 || w > 800 || h > 600 || left > 800 || top > 600 || left + w <= 0 || top + h <= 0) {
         av_log(ctx->avctx, AV_LOG_WARNING,
                "ignoring invalid fobj dimensions: c%d %d %d @ %d %d\n",
                codec, w, h, left, top);
@@ -1670,6 +1675,8 @@ static int process_frame_obj(SANMVideoContext *ctx, GetByteContext *gb)
             /* Rebel Assault 1: 384x242 internal size */
             xres = 384;
             yres = 242;
+            if (w > xres || h > yres)
+                return AVERROR_INVALIDDATA;
             ctx->have_dimensions = 1;
         } else if (codec == 37 || codec == 47 || codec == 48) {
             /* these codecs work on full frames, trust their dimensions */
@@ -1708,7 +1715,7 @@ static int process_frame_obj(SANMVideoContext *ctx, GetByteContext *gb)
             }
         }
     } else {
-        if (((left + w > ctx->width) || (top + h > ctx->height)) && fsc) {
+        if (((left + w > ctx->width) || (top + h > ctx->height)) && (fsc || codec == 20)) {
             /* correct unexpected overly large frames: this happens
              * for instance with The Dig's sq1.san video: it has a few
              * (all black) 640x480 frames halfway in, while the rest is
@@ -1768,11 +1775,11 @@ static int process_frame_obj(SANMVideoContext *ctx, GetByteContext *gb)
     if ((w == ctx->width) && (h == ctx->height)) {
         memcpy(ctx->fbuf, ctx->frm0, ctx->fbuf_size);
     } else {
-        uint8_t *dst = (uint8_t *)ctx->fbuf + left + top * ctx->pitch;
         const uint8_t *src = (uint8_t *)ctx->frm0;
         const int cw = FFMIN(w, ctx->width - left);
         const int ch = FFMIN(h, ctx->height - top);
         if ((cw > 0) && (ch > 0) && (left >= 0) && (top >= 0)) {
+            uint8_t *dst = (uint8_t *)ctx->fbuf + left + top * ctx->pitch;
             for (int i = 0; i < ch; i++) {
                 memcpy(dst, src, cw);
                 dst += ctx->pitch;

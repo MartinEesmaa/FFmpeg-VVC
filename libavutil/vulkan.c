@@ -447,7 +447,7 @@ int ff_vk_exec_pool_init(FFVulkanContext *s, AVVulkanDeviceQueueFamily *qf,
         pool->query_results = nb_queries;
         pool->query_statuses = nb_queries;
 
-        /* Video encode quieries produce two results per query */
+        /* Video encode queries produce two results per query */
         if (query_type == VK_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK_KHR) {
             int nb_results = av_popcount(ef->encodeFeedbackFlags);
             pool->query_status_stride = nb_results + 1;
@@ -1408,7 +1408,8 @@ int ff_vk_host_map_buffer(FFVulkanContext *s, AVBufferRef **dst,
         return AVERROR(ENOMEM);
 
     /* Add the offset at the start, which gets ignored */
-    buffer_size = offs + src_buf->size;
+    const ptrdiff_t src_offset = src_data - src_buf->data;
+    buffer_size = offs + (src_buf->size - src_offset);
     buffer_size = FFALIGN(buffer_size, s->props.properties.limits.minMemoryMapAlignment);
     buffer_size = FFALIGN(buffer_size, s->hprops.minImportedHostPointerAlignment);
 

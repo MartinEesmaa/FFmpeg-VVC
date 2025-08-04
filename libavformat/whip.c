@@ -258,7 +258,7 @@ typedef struct WHIPContext {
     int64_t whip_dtls_time;
     int64_t whip_srtp_time;
 
-    /* The certificate and private key content used for DTLS hanshake */
+    /* The certificate and private key content used for DTLS handshake */
     char cert_buf[MAX_CERTIFICATE_SIZE];
     char key_buf[MAX_CERTIFICATE_SIZE];
     /* The fingerprint of certificate, used in SDP offer. */
@@ -1495,6 +1495,7 @@ static int create_rtp_muxer(AVFormatContext *s)
     uint8_t *buffer = NULL;
     char buf[64];
     WHIPContext *whip = s->priv_data;
+    whip->udp->flags |= AVIO_FLAG_NONBLOCK;
 
     const AVOutputFormat *rtp_format = av_guess_format("rtp", NULL, NULL);
     if (!rtp_format) {
@@ -1865,12 +1866,12 @@ static av_cold void whip_deinit(AVFormatContext *s)
     av_freep(&whip->authorization);
     av_freep(&whip->cert_file);
     av_freep(&whip->key_file);
-    ffurl_closep(&whip->udp);
     ff_srtp_free(&whip->srtp_audio_send);
     ff_srtp_free(&whip->srtp_video_send);
     ff_srtp_free(&whip->srtp_rtcp_send);
     ff_srtp_free(&whip->srtp_recv);
     ffurl_close(whip->dtls_uc);
+    ffurl_closep(&whip->udp);
 }
 
 static int whip_check_bitstream(AVFormatContext *s, AVStream *st, const AVPacket *pkt)

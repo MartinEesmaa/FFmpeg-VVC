@@ -629,6 +629,14 @@ typedef struct AVFilterGraph {
     avfilter_execute_func *execute;
 
     char *aresample_swr_opts; ///< swr options to use for the auto-inserted aresample filters, Access ONLY through AVOptions
+
+    /**
+     * Sets the maximum number of buffered frames in the filtergraph combined.
+     *
+     * Zero means no limit. This field must be set before calling
+     * avfilter_graph_config().
+     */
+    unsigned max_buffered_frames;
 } AVFilterGraph;
 
 /**
@@ -890,7 +898,7 @@ typedef struct AVFilterParams {
     char                *instance_name;
 
     /**
-     * Options to be apllied to the filter.
+     * Options to be applied to the filter.
      *
      * Filled by avfilter_graph_segment_parse(). Afterwards may be freely
      * modified by the caller.
@@ -1073,7 +1081,7 @@ int avfilter_graph_segment_init(AVFilterGraphSegment *seg, int flags);
  * Unlabeled outputs are
  * - linked to the first unlinked unlabeled input in the next non-disabled
  *   filter in the chain, if one exists
- * - exported in the ouputs linked list otherwise, with NULL label
+ * - exported in the outputs linked list otherwise, with NULL label
  *
  * Similarly, unlinked input pads are exported in the inputs linked list.
  *

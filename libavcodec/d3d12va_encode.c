@@ -299,21 +299,20 @@ static int d3d12va_encode_issue(AVCodecContext *avctx,
                        "header: %d.\n", err);
                 goto fail;
             }
+            pic->header_size = (int)bit_len / 8;
+            pic->aligned_header_size = pic->header_size % ctx->req.CompressedBitstreamBufferAccessAlignment ?
+                                    FFALIGN(pic->header_size, ctx->req.CompressedBitstreamBufferAccessAlignment) :
+                                    pic->header_size;
+
+            hr = ID3D12Resource_Map(pic->output_buffer, 0, NULL, (void **)&ptr);
+            if (FAILED(hr)) {
+                err = AVERROR_UNKNOWN;
+                goto fail;
+            }
+
+            memcpy(ptr, data, pic->aligned_header_size);
+            ID3D12Resource_Unmap(pic->output_buffer, 0, NULL);
         }
-
-        pic->header_size = (int)bit_len / 8;
-        pic->aligned_header_size = pic->header_size % ctx->req.CompressedBitstreamBufferAccessAlignment ?
-                                   FFALIGN(pic->header_size, ctx->req.CompressedBitstreamBufferAccessAlignment) :
-                                   pic->header_size;
-
-        hr = ID3D12Resource_Map(pic->output_buffer, 0, NULL, (void **)&ptr);
-        if (FAILED(hr)) {
-            err = AVERROR_UNKNOWN;
-            goto fail;
-        }
-
-        memcpy(ptr, data, pic->aligned_header_size);
-        ID3D12Resource_Unmap(pic->output_buffer, 0, NULL);
     }
 
     d3d12_refs.NumTexture2Ds = base_pic->nb_refs[0] + base_pic->nb_refs[1];
@@ -1154,7 +1153,7 @@ static int d3d12va_create_encoder_heap(AVCodecContext *avctx)
 
     D3D12_VIDEO_ENCODER_HEAP_DESC desc = {
         .NodeMask             = 0,
-        .Flags                = D3D12_VIDEO_ENCODER_FLAG_NONE,
+        .Flags                = D3D12_VIDEO_ENCODER_HEAP_FLAG_NONE,
         .EncodeCodec          = ctx->codec->d3d12_codec,
         .EncodeProfile        = ctx->profile->d3d12_profile,
         .EncodeLevel          = ctx->level,
@@ -1266,7 +1265,7 @@ static int d3d12va_encode_create_command_objects(AVCodecContext *avctx)
 {
     D3D12VAEncodeContext *ctx = avctx->priv_data;
     ID3D12CommandAllocator *command_allocator = NULL;
-    int err;
+    int err = AVERROR_UNKNOWN;
     HRESULT hr;
 
     D3D12_COMMAND_QUEUE_DESC queue_desc = {
