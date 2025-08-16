@@ -1313,6 +1313,7 @@ static int write_extra_headers(AVCodecContext *avctx,
         if (err < 0)
             goto fail;
     } else {
+        err = 0;
         *data_len = 0;
     }
 
@@ -1633,6 +1634,7 @@ static const FFCodecDefault vulkan_encode_h264_defaults[] = {
     { "b_qoffset",      "0"   },
     { "qmin",           "-1"  },
     { "qmax",           "-1"  },
+    { "refs",           "0"   },
     { NULL },
 };
 

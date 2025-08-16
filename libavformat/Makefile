@@ -360,6 +360,7 @@ OBJS-$(CONFIG_MATROSKA_MUXER)            += matroskaenc.o matroska.o \
                                             vorbiscomment.o wv.o dovi_isom.o
 OBJS-$(CONFIG_MCA_DEMUXER)               += mca.o
 OBJS-$(CONFIG_MCC_DEMUXER)               += mccdec.o subtitles.o
+OBJS-$(CONFIG_MCC_MUXER)                 += mccenc.o
 OBJS-$(CONFIG_MD5_MUXER)                 += hashenc.o
 OBJS-$(CONFIG_MGSTS_DEMUXER)             += mgsts.o
 OBJS-$(CONFIG_MICRODVD_DEMUXER)          += microdvddec.o subtitles.o
@@ -720,6 +721,7 @@ TLS-OBJS-$(CONFIG_OPENSSL)               += tls_openssl.o
 TLS-OBJS-$(CONFIG_SECURETRANSPORT)       += tls_securetransport.o
 TLS-OBJS-$(CONFIG_SCHANNEL)              += tls_schannel.o
 OBJS-$(CONFIG_TLS_PROTOCOL)              += tls.o $(TLS-OBJS-yes)
+OBJS-$(CONFIG_DTLS_PROTOCOL)             += tls.o $(TLS-OBJS-yes)
 OBJS-$(CONFIG_UDP_PROTOCOL)              += udp.o ip.o
 OBJS-$(CONFIG_UDPLITE_PROTOCOL)          += udp.o ip.o
 OBJS-$(CONFIG_UNIX_PROTOCOL)             += unix.o

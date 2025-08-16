@@ -342,6 +342,7 @@ External library support:
   --disable-securetransport disable Secure Transport, needed for TLS support
                            on OSX if openssl and gnutls are not used [autodetect]
   --enable-vapoursynth     enable VapourSynth demuxer [no]
+  --enable-whisper         enable whisper filter [no]
   --disable-xlib           disable xlib [autodetect]
   --disable-zlib           disable zlib [autodetect]
   --enable-libsvthevc      enable HEVC encoding via svt [no]
@@ -2020,6 +2021,7 @@ EXTERNAL_LIBRARY_LIST="
     pocketsphinx
     vapoursynth
     vulkan_static
+    whisper
     libsvtjpegxs
 "
 
@@ -2667,6 +2669,7 @@ CONFIG_EXTRA="
     rv34dsp
     scene_sad
     sinewin
+    smpte_436m
     snappy
     srtp
     startcode
@@ -2675,6 +2678,7 @@ CONFIG_EXTRA="
     tpeldsp
     vaapi_1
     vaapi_encode
+    vulkan_1_4
     vc1dsp
     videodsp
     vp3dsp
@@ -3106,6 +3110,7 @@ prores_decoder_select="blockdsp idctdsp"
 prores_encoder_select="fdctdsp"
 prores_aw_encoder_select="fdctdsp"
 prores_ks_encoder_select="fdctdsp"
+prores_raw_decoder_select="blockdsp idctdsp"
 qcelp_decoder_select="lsp"
 qdm2_decoder_select="mpegaudiodsp"
 ra_144_decoder_select="audiodsp"
@@ -3171,7 +3176,7 @@ vp6a_decoder_select="vp6_decoder"
 vp6f_decoder_select="vp6_decoder"
 vp7_decoder_select="h264pred videodsp vp8dsp"
 vp8_decoder_select="h264pred videodsp vp8dsp"
-vp9_decoder_select="videodsp vp9_parser vp9_superframe_split_bsf"
+vp9_decoder_select="videodsp vp9_parser cbs_vp9 vp9_superframe_split_bsf"
 vvc_decoder_select="cabac cbs_h266 golomb videodsp vvc_sei"
 wcmv_decoder_select="inflate_wrapper"
 webp_decoder_select="vp8_decoder exif"
@@ -3308,6 +3313,8 @@ mpeg4_videotoolbox_hwaccel_deps="videotoolbox"
 mpeg4_videotoolbox_hwaccel_select="mpeg4_decoder"
 prores_videotoolbox_hwaccel_deps="videotoolbox"
 prores_videotoolbox_hwaccel_select="prores_decoder"
+prores_raw_vulkan_hwaccel_deps="vulkan spirv_compiler"
+prores_raw_vulkan_hwaccel_select="prores_raw_decoder"
 vc1_d3d11va_hwaccel_deps="d3d11va"
 vc1_d3d11va_hwaccel_select="vc1_decoder"
 vc1_d3d11va2_hwaccel_deps="d3d11va"
@@ -3342,6 +3349,8 @@ vp9_vdpau_hwaccel_deps="vdpau VdpPictureInfoVP9"
 vp9_vdpau_hwaccel_select="vp9_decoder"
 vp9_videotoolbox_hwaccel_deps="videotoolbox"
 vp9_videotoolbox_hwaccel_select="vp9_decoder"
+vp9_vulkan_hwaccel_deps="vulkan vulkan_1_4"
+vp9_vulkan_hwaccel_select="vp9_decoder"
 vvc_vaapi_hwaccel_deps="vaapi VAPictureParameterBufferVVC"
 vvc_vaapi_hwaccel_select="vvc_decoder"
 wmv3_d3d11va_hwaccel_select="vc1_d3d11va_hwaccel"
@@ -3362,6 +3371,7 @@ qsvdec_select="qsv"
 qsvenc_select="qsv"
 qsvvpp_select="qsv"
 vaapi_encode_deps="vaapi"
+vulkan_1_4_deps="vulkan"
 vulkan_encode_deps="vulkan"
 v4l2_m2m_deps="linux_videodev2_h sem_timedwait"
 
@@ -3414,6 +3424,8 @@ av1_qsv_encoder_deps="libvpl"
 av1_qsv_encoder_select="qsvenc"
 av1_vaapi_encoder_deps="VAEncPictureParameterBufferAV1"
 av1_vaapi_encoder_select="cbs_av1 vaapi_encode"
+av1_vulkan_encoder_deps="vulkan_1_4"
+av1_vulkan_encoder_select="cbs_av1 vulkan_encode"
 h263_v4l2m2m_decoder_deps="v4l2_m2m h263_v4l2_m2m"
 h263_v4l2m2m_encoder_deps="v4l2_m2m h263_v4l2_m2m"
 h264_amf_encoder_deps="amf"
@@ -3540,6 +3552,7 @@ av1_metadata_bsf_select="cbs_av1"
 dovi_rpu_bsf_select="cbs_h265 cbs_av1 dovi_rpudec dovi_rpuenc"
 dts2pts_bsf_select="cbs_h264 h264parse"
 eac3_core_bsf_select="ac3_parser"
+eia608_to_smpte436m_bsf_select="smpte_436m"
 evc_frame_merge_bsf_select="evcparse"
 filter_units_bsf_select="cbs"
 h264_metadata_bsf_deps="const_nan"
@@ -3548,6 +3561,7 @@ h264_redundant_pps_bsf_select="cbs_h264"
 hevc_metadata_bsf_select="cbs_h265"
 mjpeg2jpeg_bsf_select="jpegtables"
 mpeg2_metadata_bsf_select="cbs_mpeg2"
+smpte436m_to_eia608_bsf_select="smpte_436m"
 trace_headers_bsf_select="cbs cbs_vp8"
 vp9_metadata_bsf_select="cbs_vp9"
 vvc_metadata_bsf_select="cbs_h266"
@@ -3742,6 +3756,9 @@ matroska_audio_muxer_select="matroska_muxer"
 matroska_demuxer_select="riffdec"
 matroska_demuxer_suggest="bzlib zlib"
 matroska_muxer_select="iso_writer mpeg4audio riffenc aac_adtstoasc_bsf pgs_frame_merge_bsf vp9_superframe_bsf"
+mcc_demuxer_select="smpte_436m"
+mcc_muxer_select="smpte_436m"
+mcc_muxer_suggest="eia608_to_smpte436m_bsf"
 mlp_demuxer_select="mlp_parser"
 mmf_muxer_select="riffenc"
 mov_demuxer_select="iso_media riffdec"
@@ -3755,6 +3772,7 @@ mpegts_demuxer_select="iso_media"
 mpegts_muxer_select="ac3_parser adts_muxer latm_muxer h264_mp4toannexb_bsf hevc_mp4toannexb_bsf vvc_mp4toannexb_bsf"
 mpegtsraw_demuxer_select="mpegts_demuxer"
 mxf_muxer_select="iso_writer pcm_rechunk_bsf rangecoder"
+mxf_muxer_suggest="eia608_to_smpte436m_bsf"
 mxf_d10_muxer_select="mxf_muxer"
 mxf_opatom_muxer_select="mxf_muxer"
 nut_muxer_select="riffenc"
@@ -4096,6 +4114,7 @@ xstack_qsv_filter_deps="libmfx"
 xstack_qsv_filter_select="qsvvpp"
 pad_vaapi_filter_deps="vaapi_1"
 drawbox_vaapi_filter_deps="vaapi_1"
+whisper_filter_deps="whisper"
 
 # examples
 avio_http_serve_files_deps="avformat avutil fork"
@@ -4952,7 +4971,7 @@ msvc_common_flags(){
             -lstdc++)             ;;
             -l*)                  echo ${flag#-l}.lib ;;
             -LARGEADDRESSAWARE)   echo $flag ;;
-            -L*)                  echo -libpath:${flag#-L} ;;
+            -L*) [ "$_flags_type" = "link" ] && echo -libpath:${flag#-L} ;;
             -Wl,*)                ;;
             *)                    echo $flag ;;
         esac
@@ -4972,6 +4991,12 @@ msvc_flags(){
                                        -wd4273 -wd4554 -wd4701 -wd4703 ;;
         esac
     done
+}
+
+msvc_flags_link(){
+    _flags_type=link
+    msvc_flags "$@"
+    unset _flags_type
 }
 
 icl_flags(){
@@ -5159,7 +5184,7 @@ probe_cc(){
         _cc_o='-Fo$@'
         _cc_e='-P'
         _flags_filter=icl_flags
-        _ld_lib='lib%.a'
+        _ld_lib='%.lib'
         _ld_path='-libpath:'
         # -Qdiag-error to make icl error when seeing certain unknown arguments
         _flags='-nologo -Qdiag-error:4044,10157'
@@ -5176,15 +5201,15 @@ probe_cc(){
         # but we can force it back to gnu mode and get the version from there.
         _ident=$($_cc -flavor gnu --version 2>/dev/null)
         _ld_o='-out:$@'
-        _flags_filter=msvc_flags
-        _ld_lib='lib%.a'
+        _flags_filter=msvc_flags_link
+        _ld_lib='%.lib'
         _ld_path='-libpath:'
-    elif $_cc -nologo- 2>&1 | grep -q ^Microsoft || { $_cc -v 2>&1 | grep -q clang && $_cc -? > /dev/null 2>&1; }; then
+    elif VSLANG=1033 $_cc -nologo- 2>&1 | grep -q ^Microsoft || { $_cc -v 2>&1 | grep -q clang && $_cc -? > /dev/null 2>&1; }; then
         _type=msvc
-        if $_cc -nologo- 2>&1 | grep -q ^Microsoft; then
+        if VSLANG=1033 $_cc -nologo- 2>&1 | grep -q ^Microsoft; then
             # Depending on the tool (cl.exe or link.exe), the version number
             # is printed on the first line of stderr or stdout
-            _ident=$($_cc 2>&1 | grep ^Microsoft | head -n1 | tr -d '\r')
+            _ident=$(VSLANG=1033 $_cc 2>&1 | grep ^Microsoft | head -n1 | tr -d '\r')
         else
             _ident=$($_cc --version 2>/dev/null | head -n1 | tr -d '\r')
         fi
@@ -5200,13 +5225,14 @@ probe_cc(){
         _cflags_noopt="-O1"
         if $_cc -nologo- 2>&1 | grep -q Linker; then
             _ld_o='-out:$@'
+            _flags_filter=msvc_flags_link
         else
             _ld_o='-Fe$@'
+            _flags_filter=msvc_flags
         fi
         _cc_o='-Fo$@'
         _cc_e='-P -Fi$@'
-        _flags_filter=msvc_flags
-        _ld_lib='lib%.a'
+        _ld_lib='%.lib'
         _ld_path='-libpath:'
         _flags='-nologo'
         disable stripping
@@ -5293,7 +5319,7 @@ if [ -z "$CC_DEPFLAGS" ] && [ "$dep_cc" != "$cc" ]; then
     DEPCCFLAGS=$_flags
 fi
 
-if $ar 2>&1 | grep -q ^Microsoft; then
+if VSLANG=1033 $ar 2>&1 | grep -q ^Microsoft; then
     arflags="-nologo"
     ar_o='-out:$@'
 elif $ar 2>&1 | grep -q "\[D\] "; then
@@ -5303,6 +5329,12 @@ else
     arflags="rc"
     ar_o='$@'
 fi
+
+# Treat unrecognized flags as errors on MSVC
+test_cpp_condition windows.h "_MSC_FULL_VER >= 193030705" &&
+    check_cflags -options:strict
+test_host_cpp_condition windows.h "_MSC_FULL_VER >= 193030705" &&
+    check_host_cflags -options:strict
 
 add_cflags $extra_cflags
 add_cxxflags $extra_cxxflags
@@ -5325,6 +5357,7 @@ if test "$cpu" = host; then
     case "$cc_type" in
         gcc|llvm_gcc)
             check_native(){
+                : > $TMPC
                 $cc $1=native -v -c -o $TMPO $TMPC >$TMPE 2>&1 || return
                 sed -n "/cc1.*$1=/{
                             s/.*$1=\\([^ ]*\\).*/\\1/
@@ -5336,6 +5369,7 @@ if test "$cpu" = host; then
         ;;
         clang)
             check_native(){
+                : > $TMPC
                 $cc $1=native -v -c -o $TMPO $TMPC >$TMPE 2>&1 || return
                 sed -n "/cc1.*-target-cpu /{
                             s/.*-target-cpu \\([^ ]*\\).*/\\1/
@@ -5632,7 +5666,7 @@ elif enabled ppc; then
             cpuflags="-mcpu=$cpu"
             disable vsx
         ;;
-        power[7-8]*)
+        power[7-9]*|power10)
             cpuflags="-mcpu=$cpu"
         ;;
         cell)
@@ -5985,9 +6019,6 @@ case $target_os in
     win32|win64)
         disable symver
         if enabled shared; then
-            # Link to the import library instead of the normal static library
-            # for shared libs.
-            LD_LIB='%.lib'
             # Cannot build both shared and static libs with MSVC or icl.
             disable static
         fi
@@ -5995,6 +6026,8 @@ case $target_os in
         enabled x86_32 && check_ldflags -LARGEADDRESSAWARE
         add_cppflags -DWIN32_LEAN_AND_MEAN
         shlibdir_default="$bindir_default"
+        LIBPREF=""
+        LIBSUF=".lib"
         SLIBPREF=""
         SLIBSUF=".dll"
         SLIBNAME_WITH_VERSION='$(SLIBPREF)$(FULLNAME)-$(LIBVERSION)$(SLIBSUF)'
@@ -7165,6 +7198,8 @@ enabled libvorbis         && require_pkg_config libvorbis vorbis vorbis/codec.h 
                              require_pkg_config libvorbisenc vorbisenc vorbis/vorbisenc.h vorbis_encode_init
 enabled libsvtjpegxs      && require_pkg_config libsvtjpegxs "SvtJpegxs >= 0.9.0" SvtJpegxsEnc.h svt_jpeg_xs_encoder_init
 
+enabled whisper           && require_pkg_config whisper "whisper >= 1.7.5" whisper.h whisper_init_from_file_with_params
+
 enabled libvpx            && {
     enabled libvpx_vp8_decoder && {
         check_pkg_config libvpx_vp8_decoder "vpx >= 1.4.0" "vpx/vpx_decoder.h vpx/vp8dx.h" vpx_codec_vp8_dx ||
@@ -7261,10 +7296,10 @@ enabled omx               && require_headers OMX_Core.h && \
 enabled openssl           && { { check_pkg_config openssl "openssl >= 3.0.0" openssl/ssl.h OPENSSL_init_ssl &&
                                  { enabled gplv3 || ! enabled gpl || enabled nonfree || die "ERROR: OpenSSL >=3.0.0 requires --enable-version3"; }; } ||
                                { enabled gpl && ! enabled nonfree && die "ERROR: OpenSSL <3.0.0 is incompatible with the gpl"; } ||
-                               check_pkg_config openssl "openssl >= 1.1.0" openssl/ssl.h OPENSSL_init_ssl ||
+                               check_pkg_config openssl "openssl >= 1.1.1" openssl/ssl.h OPENSSL_init_ssl ||
                                check_lib openssl openssl/ssl.h OPENSSL_init_ssl -lssl -lcrypto ||
                                check_lib openssl openssl/ssl.h OPENSSL_init_ssl -lssl -lcrypto -lws2_32 -lgdi32 ||
-                               die "ERROR: openssl (>= 1.1.0) not found"; }
+                               die "ERROR: openssl (>= 1.1.1) not found"; }
 enabled pocketsphinx      && require_pkg_config pocketsphinx pocketsphinx pocketsphinx/pocketsphinx.h ps_init
 enabled rkmpp             && { require_pkg_config rkmpp rockchip_mpp  rockchip/rk_mpi.h mpp_create &&
                                require_pkg_config rockchip_mpp "rockchip_mpp >= 1.3.7" rockchip/rk_mpi.h mpp_create &&
@@ -7523,6 +7558,9 @@ fi
 
 if disabled vulkan; then
     disable libglslang libshaderc spirv_compiler
+else
+    check_pkg_config_header_only vulkan_1_4 "vulkan >= 1.4.317" "vulkan/vulkan.h" "defined VK_VERSION_1_4" ||
+        check_cpp_condition vulkan_1_4 "vulkan/vulkan.h" "defined(VK_VERSION_1_5) || (defined(VK_VERSION_1_4) && VK_HEADER_VERSION >= 317)"
 fi
 
 if enabled x86; then
@@ -7750,7 +7788,25 @@ if enabled icc; then
             disable aligned_stack
     fi
 elif enabled gcc; then
-    check_optflags -fno-tree-vectorize
+    gcc_version=$($cc -dumpversion)
+    major_version=${gcc_version%%.*}
+    if [ $major_version -lt 13 ]; then
+        # Disable tree-vectorize for GCC <13 - it has historically been buggy.
+        check_optflags -fno-tree-vectorize
+    else
+        case $arch in
+        x86|arm|aarch64)
+            # Allow the default of having tree-vectorize enabled on well tested
+            # architectures.
+            ;;
+        *)
+            # Disable tree-vectorize on potentially less tested
+            # architectures. Known issues:
+            # - https://gcc.gnu.org/PR121064 on Loongarch
+            check_optflags -fno-tree-vectorize
+            ;;
+        esac
+    fi
     check_cflags -Werror=format-security
     check_cflags -Werror=implicit-function-declaration
     check_cflags -Werror=missing-prototypes
