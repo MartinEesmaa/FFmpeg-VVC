@@ -215,7 +215,9 @@ static void run_transcription(AVFilterContext *ctx, AVFrame *frame, int samples)
 
     for (int i = 0; i < n_segments; ++i) {
         const char *text = whisper_full_get_segment_text(wctx->ctx_wsp, i);
-        char *text_cleaned = av_strireplace(text + 1, "[BLANK_AUDIO]", "");
+        if (av_isspace(text[0]))
+            text++;
+        char *text_cleaned = av_strireplace(text, "[BLANK_AUDIO]", "");
 
         if (av_strnlen(text_cleaned, 1) == 0) {
             av_freep(&text_cleaned);
@@ -428,7 +430,8 @@ static int query_formats(const AVFilterContext *ctx,
 #define HOURS 3600000000
 
 static const AVOption whisper_options[] = {
-    { "model", "Path to the whisper.cpp model file", OFFSET(model_path), AV_OPT_TYPE_STRING,.flags = FLAGS }, { "language", "Language for transcription ('auto' for auto-detect)", OFFSET(language), AV_OPT_TYPE_STRING, {.str = "auto"}, .flags = FLAGS },
+    { "model", "Path to the whisper.cpp model file", OFFSET(model_path), AV_OPT_TYPE_STRING,.flags = FLAGS },
+    { "language", "Language for transcription ('auto' for auto-detect)", OFFSET(language), AV_OPT_TYPE_STRING, {.str = "auto"}, .flags = FLAGS },
     { "queue", "Audio queue size", OFFSET(queue), AV_OPT_TYPE_DURATION, {.i64 = 3000000}, 20000, HOURS, .flags = FLAGS },
     { "use_gpu", "Use GPU for processing", OFFSET(use_gpu), AV_OPT_TYPE_BOOL, {.i64 = 1}, 0, 1, .flags = FLAGS },
     { "gpu_device", "GPU device to use", OFFSET(gpu_device), AV_OPT_TYPE_INT, {.i64 = 0}, 0, INT_MAX, .flags = FLAGS },

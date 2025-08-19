@@ -30,8 +30,12 @@ color_space=bt470bg
 color_primaries=unknown
 color_transfer=unknown
 chroma_location=center
-TAG:UserComment=AppleMark
+TAG:ExifIFD/UserComment=AppleMark
 
+[SIDE_DATA]
+side_data_type=EXIF metadata
+size=55
+[/SIDE_DATA]
 [/FRAME]
 [FRAME]
 media_type=audio

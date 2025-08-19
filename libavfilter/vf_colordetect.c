@@ -39,13 +39,6 @@
 
 #include "vf_colordetect.h"
 
-enum AlphaMode {
-    ALPHA_NONE = -1,
-    ALPHA_UNDETERMINED = 0,
-    ALPHA_STRAIGHT,
-    /* No way to positively identify premultiplied alpha */
-};
-
 enum ColorDetectMode {
     COLOR_DETECT_COLOR_RANGE = 1 << 0,
     COLOR_DETECT_ALPHA_MODE  = 1 << 1,
@@ -64,7 +57,7 @@ typedef struct ColorDetectContext {
     int mpeg_max;
 
     atomic_int detected_range; // enum AVColorRange
-    atomic_int detected_alpha; // enum AlphaMode
+    atomic_int detected_alpha; // enum FFAlphaDetect
 } ColorDetectContext;
 
 #define OFFSET(x) offsetof(ColorDetectContext, x)
@@ -124,9 +117,9 @@ static int config_input(AVFilterLink *inlink)
 
     if (desc->flags & AV_PIX_FMT_FLAG_ALPHA) {
         s->idx_a = desc->comp[desc->nb_components - 1].plane;
-        atomic_init(&s->detected_alpha, ALPHA_UNDETERMINED);
+        atomic_init(&s->detected_alpha, FF_ALPHA_UNDETERMINED);
     } else {
-        atomic_init(&s->detected_alpha, ALPHA_NONE);
+        atomic_init(&s->detected_alpha, FF_ALPHA_NONE);
     }
 
     ff_color_detect_dsp_init(&s->dsp, depth, inlink->color_range);
@@ -172,23 +165,24 @@ static int detect_alpha(AVFilterContext *ctx, void *arg,
      *
      * This simplifies to:
      *   (x - mpeg_min) * pixel_max > (mpeg_max - mpeg_min) * a
-     *   = P * x - K > Q * a in the below formula.
+     *   = alpha_max * x - offset > mpeg_range * a in the below formula.
      *
      * We subtract an additional offset of (1 << (depth - 1)) to account for
-     * rounding errors in the value of `x`, and an extra safety margin of
-     * Q because vf_premultiply.c et al. add an offset of (a >> 1) & 1.
+     * rounding errors in the value of `x`.
      */
-    const int p = (1 << s->depth) - 1;
-    const int q = s->mpeg_max - s->mpeg_min;
-    const int k = p * s->mpeg_min + q + (1 << (s->depth - 1));
+    const int alpha_max = (1 << s->depth) - 1;
+    const int mpeg_range = s->mpeg_max - s->mpeg_min;
+    const int offset = alpha_max * s->mpeg_min + (1 << (s->depth - 1));
 
+    int ret = 0;
     for (int i = 0; i < nb_planes; i++) {
         const ptrdiff_t stride = in->linesize[i];
-        if (s->dsp.detect_alpha(in->data[i] + y_start * stride, stride,
-                                alpha, alpha_stride, w, h_slice, p, q, k)) {
-            atomic_store(&s->detected_alpha, ALPHA_STRAIGHT);
-            return 0;
-        }
+        ret = s->dsp.detect_alpha(in->data[i] + y_start * stride, stride,
+                                  alpha, alpha_stride, w, h_slice, alpha_max,
+                                  mpeg_range, offset);
+        ret |= atomic_fetch_or_explicit(&s->detected_alpha, ret, memory_order_relaxed);
+        if (ret == FF_ALPHA_STRAIGHT)
+            break;
     }
 
     return 0;
@@ -202,7 +196,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
 
     if (s->mode & COLOR_DETECT_COLOR_RANGE && s->detected_range == AVCOL_RANGE_UNSPECIFIED)
         ff_filter_execute(ctx, detect_range, in, NULL, nb_threads);
-    if (s->mode & COLOR_DETECT_ALPHA_MODE && s->detected_alpha == ALPHA_UNDETERMINED)
+
+    if (s->mode & COLOR_DETECT_ALPHA_MODE && s->detected_alpha != FF_ALPHA_NONE &&
+        s->detected_alpha != FF_ALPHA_STRAIGHT)
         ff_filter_execute(ctx, detect_alpha, in, NULL, nb_threads);
 
     return ff_filter_frame(inlink->dst->outputs[0], in);
@@ -223,9 +219,10 @@ static av_cold void uninit(AVFilterContext *ctx)
 
     if (s->mode & COLOR_DETECT_ALPHA_MODE) {
         av_log(ctx, AV_LOG_INFO, "  Alpha mode: %s\n",
-               s->detected_alpha == ALPHA_NONE     ? "none" :
-               s->detected_alpha == ALPHA_STRAIGHT ? "straight / independent"
-                                                   : "undetermined");
+               s->detected_alpha == FF_ALPHA_NONE        ? "none" :
+               s->detected_alpha == FF_ALPHA_STRAIGHT    ? "straight" :
+               s->detected_alpha == FF_ALPHA_TRANSPARENT ? "undetermined"
+                                                         : "opaque");
     }
 }
 

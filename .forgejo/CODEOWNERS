@@ -12,6 +12,7 @@
 # =======
 libavcodec/.*aac.* @lynne
 libavcodec/.*ac3.* @lynne
+libavcodec/.*adpcm.* @zane
 libavcodec/.*atrac9.* @lynne
 libavcodec/.*bitpacked.* @lynne
 libavcodec/.*d3d12va.* @jianhuaw
@@ -20,9 +21,10 @@ libavcodec/.*ffv1.* @lynne @michaelni
 libavcodec/golomb.* @michaelni
 libavcodec/.*h266.* @frankplow @NuoMi @jianhuaw
 libavcodec/h26x/.* @frankplow @NuoMi @jianhuaw
-libavcodec/.*jpegxl.* @lynne
-libavcodec/.*jxl.* @lynne
+libavcodec/.*jpegxl.* @lynne @Traneptora
+libavcodec/.*jxl.* @lynne @Traneptora
 libavcodec/.*opus.* @lynne
+libavcodec/.*png.* @Traneptora
 libavcodec/.*prores.* @lynne
 libavcodec/rangecoder.* @michaelni
 libavcodec/ratecontrol.* @michaelni
@@ -44,7 +46,16 @@ libavfilter/vsrc_mandelbrot.* @michaelni
 
 # avformat
 # =======
+libavformat/alp.* @zane
+libavformat/amv.* @zane
+libavformat/apm.* @zane
+libavformat/argo_.* @zane
 libavformat/iamf.* @jamrial
+libavformat/.*jpegxl.* @Traneptora
+libavformat/.*jxl.* @Traneptora
+libavformat/kvag.* @zane
+libavformat/pp_bnk.* @zane
+libavformat/scd.* @zane
 
 # avutil
 # ======
