@@ -145,25 +145,28 @@ int av_exif_set_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, enum AVTif
                       uint32_t count, const uint8_t *ifd_lead, uint32_t ifd_offset, const void *value);
 
 /**
+ * Also check subdirectories.
+ */
+#define AV_EXIF_FLAG_RECURSIVE (1 << 0)
+
+/**
  * Get an entry with the tagged ID from the EXIF metadata struct. A pointer to the entry
- * will be written into *value. If the recursive flag is set to true, this function will check
- * subdirectories as well.
+ * will be written into *value.
  *
  * If the entry was present and returned successfully, a positive number is returned.
  * If the entry was not found, *value is left untouched and zero is returned.
  * If an error occurred, a negative number is returned.
  */
-int av_exif_get_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int recursive, AVExifEntry **value);
+int av_exif_get_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int flags, AVExifEntry **value);
 
 /**
- * Remove an entry from the provided EXIF metadata struct. If the recursive flag is set
- * to true, then this function will check subdirectories as well.
+ * Remove an entry from the provided EXIF metadata struct.
  *
  * If the entry was present and removed successfully, a positive number is returned.
  * If the entry was not found, zero is returned.
  * If an error occurred, a negative number is returned.
  */
-int av_exif_remove_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int recursive);
+int av_exif_remove_entry(void *logctx, AVExifMetadata *ifd, uint16_t id, int flags);
 
 /**
  * Decodes the EXIF data provided in the buffer and writes it into the
@@ -222,11 +225,5 @@ int av_exif_matrix_to_orientation(const int32_t *matrix);
  * i.e. not between 1 and 8 (inclusive).
  */
 int av_exif_orientation_to_matrix(int32_t *matrix, int orientation);
-
-#if FF_API_OLD_EXIF
-/* Used by the AVI demuxer */
-int avpriv_exif_decode_ifd(void *logctx, const uint8_t *buf, int size,
-                           int le, int depth, AVDictionary **metadata);
-#endif /* FF_API_OLD_EXIF */
 
 #endif /* AVCODEC_EXIF_H */

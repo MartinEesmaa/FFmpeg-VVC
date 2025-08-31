@@ -275,16 +275,19 @@ static int huff_reader_build_canonical(HuffReader *r, const uint8_t *code_length
             lens[idx] = code_lengths[sym];
         }
     }
-    if (nb_codes <= 1) {
-        if (nb_codes == 1) {
-            /* special-case 1 symbol since the vlc reader cannot handle it */
-            r->nb_symbols = 1;
-            r->simple = 1;
-            r->simple_symbols[0] = syms[0];
-        }
+
+    if (nb_codes == 0) {
         // No symbols
         return AVERROR_INVALIDDATA;
     }
+    if (nb_codes == 1) {
+        // Special-case 1 symbol since the VLC reader cannot handle it
+        r->nb_symbols = 1;
+        r->simple = 1;
+        r->simple_symbols[0] = syms[0];
+        return 0;
+    }
+
     ret = ff_vlc_init_from_lengths(&r->vlc, 8, nb_codes, lens, 1,
                                    syms, 2, 2, 0, VLC_INIT_OUTPUT_LE, logctx);
     if (ret < 0)
@@ -1477,7 +1480,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             memcpy(exif_buf->data, gb.buffer, chunk_size);
 
             /* if this succeeds then exif_buf is either freed or transferred to the AVFrame */
-            ret = ff_exif_attach_buffer(avctx, p, exif_buf, AV_EXIF_TIFF_HEADER);
+            ret = ff_decode_exif_attach_buffer(avctx, p, exif_buf, AV_EXIF_TIFF_HEADER);
             if (ret < 0) {
                 av_log(avctx, AV_LOG_WARNING, "unable to attach EXIF buffer\n");
                 av_buffer_unref(&exif_buf);

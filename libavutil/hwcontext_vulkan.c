@@ -153,11 +153,11 @@ typedef struct VulkanDevicePriv {
     /* Disable host image transfer */
     int disable_host_transfer;
 
+    /* Prefer memcpy over dynamic host pointer imports */
+    int avoid_host_import;
+
     /* Maximum queues */
     int limit_queues;
-
-    /* Nvidia */
-    int dev_is_nvidia;
 } VulkanDevicePriv;
 
 typedef struct VulkanFramesPriv {
@@ -1463,13 +1463,6 @@ static int setup_queue_families(AVHWDeviceContext *ctx, VkDeviceCreateInfo *cd)
     VulkanDevicePriv *p = ctx->hwctx;
     AVVulkanDeviceContext *hwctx = &p->p;
     FFVulkanFunctions *vk = &p->vkctx.vkfn;
-    VkPhysicalDeviceDriverProperties dprops = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES,
-    };
-    VkPhysicalDeviceProperties2 props2 = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
-        .pNext = &dprops,
-    };
 
     VkQueueFamilyProperties2 *qf = NULL;
     VkQueueFamilyVideoPropertiesKHR *qf_vid = NULL;
@@ -1523,13 +1516,6 @@ static int setup_queue_families(AVHWDeviceContext *ctx, VkDeviceCreateInfo *cd)
 
     hwctx->nb_qf = 0;
 
-    /* NVIDIA's proprietary drivers have stupid limits, where each queue
-     * you allocate takes tens of milliseconds, and the more queues you
-     * allocate, the less you'll have left before initializing a device
-     * simply fails (112 seems to be the max). GLOBALLY.
-     * Detect this, and minimize using queues as much as possible. */
-    vk->GetPhysicalDeviceProperties2(hwctx->phys_dev, &props2);
-
     /* Pick each queue family to use. */
 #define PICK_QF(type, vid_op)                                            \
     do {                                                                 \
@@ -1555,7 +1541,7 @@ static int setup_queue_families(AVHWDeviceContext *ctx, VkDeviceCreateInfo *cd)
             hwctx->qf[i].idx = idx;                                      \
             hwctx->qf[i].num = qf[idx].queueFamilyProperties.queueCount; \
             if (p->limit_queues ||                                       \
-                dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY) {    \
+                p->dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY) { \
                 int max = p->limit_queues;                               \
                 if (type == VK_QUEUE_GRAPHICS_BIT)                       \
                     hwctx->qf[i].num = FFMIN(hwctx->qf[i].num,           \
@@ -1810,6 +1796,12 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
             p->disable_multiplane = strtol(opt_d->value, NULL, 10);
     }
 
+    /* Disable host pointer imports (by default on nvidia) */
+    p->avoid_host_import = p->dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY;
+    opt_d = av_dict_get(opts, "avoid_host_import", NULL, 0);
+    if (opt_d)
+        p->avoid_host_import = strtol(opt_d->value, NULL, 10);
+
     /* Set the public device feature struct and its pNext chain */
     hwctx->device_features = p->feats.device;
 
@@ -1868,6 +1860,8 @@ static int vulkan_device_init(AVHWDeviceContext *ctx)
     p->props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     p->props.pNext = &p->hprops;
     p->hprops.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
+    p->hprops.pNext = &p->dprops;
+    p->dprops.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
 
     vk->GetPhysicalDeviceProperties2(hwctx->phys_dev, &p->props);
     av_log(ctx, AV_LOG_VERBOSE, "Using device: %s\n",
@@ -1882,8 +1876,6 @@ static int vulkan_device_init(AVHWDeviceContext *ctx)
     if (p->vkctx.extensions & FF_VK_EXT_EXTERNAL_HOST_MEMORY)
         av_log(ctx, AV_LOG_VERBOSE, "    minImportedHostPointerAlignment:    %"PRIu64"\n",
                p->hprops.minImportedHostPointerAlignment);
-
-    p->dev_is_nvidia = (p->props.properties.vendorID == 0x10de);
 
     vk->GetPhysicalDeviceQueueFamilyProperties(hwctx->phys_dev, &qf_num, NULL);
     if (!qf_num) {
@@ -2903,7 +2895,7 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     }
 
     /* Nvidia is violating the spec because they thought no one would use this. */
-    if (p->dev_is_nvidia &&
+    if (p->dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY &&
         (((fmt->nb_images == 1) && (fmt->vk_planes > 1)) ||
          (av_pix_fmt_desc_get(hwfc->sw_format)->nb_components == 1)))
         supported_usage &= ~VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
@@ -4489,7 +4481,7 @@ static int vulkan_transfer_frame(AVHWFramesContext *hwfc,
     }
 
     /* Setup buffers first */
-    if (p->vkctx.extensions & FF_VK_EXT_EXTERNAL_HOST_MEMORY) {
+    if (p->vkctx.extensions & FF_VK_EXT_EXTERNAL_HOST_MEMORY && !p->avoid_host_import) {
         err = host_map_frame(hwfc, bufs, &nb_bufs, swf, region, upload);
         if (err >= 0)
             host_mapped = 1;
