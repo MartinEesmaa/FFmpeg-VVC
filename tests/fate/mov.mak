@@ -92,7 +92,7 @@ fate-mov-frag-overlap: CMD = framemd5 -i $(TARGET_SAMPLES)/mov/frag_overlap.mp4
 
 fate-mov-mp4-frag-flush: CMD = md5 -f lavfi -i color=blue,format=rgb24,trim=duration=0.04 -f lavfi -i anullsrc,aformat=s16,atrim=duration=2 -c:v png -c:a pcm_s16le -movflags +empty_moov+hybrid_fragmented -frag_duration 1000000 -frag_interleave 1 -bitexact -f mp4
 fate-mov-mp4-frag-flush: CMP = oneline
-fate-mov-mp4-frag-flush: REF = c9d0236bde4a0b24a01f6a032fd72e04
+fate-mov-mp4-frag-flush: REF = a1ac687d15552505f3c01a43285f32d0
 FATE_MOV_FFMPEG-$(call ALLYES, LAVFI_INDEV COLOR_FILTER FORMAT_FILTER TRIM_FILTER \
                                ANULLSRC_FILTER AFORMAT_FILTER ATRIM_FILTER        \
                                WRAPPED_AVFRAME_DECODER PCM_S16LE_DECODER PCM_S16BE_DECODER \
@@ -188,7 +188,7 @@ fate-mov-heic-demux-clap-irot-imir: CMD = stream_demux mov $(TARGET_SAMPLES)/hei
 FATE_MOV_FFMPEG_FFPROBE_SAMPLES-$(call FRAMECRC, MOV, HEVC MJPEG, HEVC_PARSER) \
                            += fate-mov-heic-demux-still-image-multiple-thumb
 fate-mov-heic-demux-still-image-multiple-thumb: CMD = stream_demux mov $(TARGET_SAMPLES)/heif/P1001091.HIF "" "-c:v copy -map 0" \
-  "-show_entries stream=index,id:stream_disposition"
+  "-show_entries stream=index,id:stream_disposition:stream_side_data_list:frame=stream_index:frame_side_data_list:frame_tags"
 
 # heic demuxing - still image with multiple items in a grid.
 FATE_MOV_FFMPEG_FFPROBE_SAMPLES-$(call FRAMECRC, MOV, HEVC, HEVC_PARSER) \

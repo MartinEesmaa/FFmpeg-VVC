@@ -108,6 +108,7 @@ Configuration options:
   --disable-runtime-cpudetect disable detecting CPU capabilities at runtime (smaller binary)
   --enable-gray            enable full grayscale support (slower color)
   --disable-swscale-alpha  disable alpha channel support in swscale
+  --disable-unstable       disable building optional unstable / experimental code
   --disable-all            disable building components, libraries and programs
   --disable-autodetect     disable automatically detected external libraries [no]
 
@@ -2089,6 +2090,7 @@ FEATURE_LIST="
     small
     static
     swscale_alpha
+    unstable
 "
 
 # this list should be kept in linking order
@@ -4262,6 +4264,7 @@ enable runtime_cpudetect
 enable safe_bitstream_reader
 enable static
 enable swscale_alpha
+enable unstable
 enable valgrind_backtrace
 
 sws_max_filter_size_default=256
@@ -4835,6 +4838,9 @@ set_default nvcc
 if enabled cuda_nvcc; then
     if $nvcc $nvccflags_default 2>&1 | grep -qi unsupported; then
         nvccflags_default="-gencode arch=compute_60,code=sm_60 -O2"
+    fi
+    if $nvcc $nvccflags_default 2>&1 | grep -qi unsupported; then
+        nvccflags_default="-gencode arch=compute_75,code=sm_75 -O2"
     fi
 fi
 
@@ -7327,15 +7333,6 @@ enabled rkmpp             && { require_pkg_config rkmpp rockchip_mpp  rockchip/r
                              }
 enabled vapoursynth       && require_headers "vapoursynth/VSScript4.h vapoursynth/VapourSynth4.h"
 
-enabled openssl            && {
-    enabled whip_muxer && {
-        $pkg_config --exists --print-errors "openssl >= 1.0.1k" ||
-        require_pkg_config openssl "openssl >= 1.0.1k" openssl/ssl.h SSL_library_init ||
-        require_pkg_config openssl "openssl >= 1.0.1k" openssl/ssl.h OPENSSL_init_ssl
-    }
-}
-
-
 if enabled gcrypt; then
     GCRYPT_CONFIG="${cross_prefix}libgcrypt-config"
     if "${GCRYPT_CONFIG}" --version > /dev/null 2>&1; then
@@ -7390,7 +7387,7 @@ enabled schannel &&
     schannel_extralibs="-lsecur32 -lncrypt -lcrypt32" ||
         disable schannel
 
-enabled schannel && check_cc dtls_protocol "windows.h security.h schnlsp.h" "int i = SP_PROT_DTLS1_X_CLIENT;" -DSECURITY_WIN32
+enabled schannel && check_cc dtls_protocol "windows.h security.h schnlsp.h" "int i = SECPKG_ATTR_DTLS_MTU;" -DSECURITY_WIN32
 
 makeinfo --version > /dev/null 2>&1 && enable makeinfo  || disable makeinfo
 enabled makeinfo \
@@ -8216,6 +8213,7 @@ echo "perl enabled              ${perl-no}"
 echo "pod2man enabled           ${pod2man-no}"
 echo "makeinfo enabled          ${makeinfo-no}"
 echo "makeinfo supports HTML    ${makeinfo_html-no}"
+echo "experimental features     ${unstable-no}"
 echo "xmllint enabled           ${xmllint-no}"
 test -n "$random_seed" &&
     echo "random seed               ${random_seed}"

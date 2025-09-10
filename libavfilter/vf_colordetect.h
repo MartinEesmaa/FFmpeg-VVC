@@ -22,9 +22,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <libavutil/avassert.h>
-#include <libavutil/macros.h>
-#include <libavutil/pixfmt.h>
+#include "libavutil/avassert.h"
+#include "libavutil/pixfmt.h"
 
 enum FFAlphaDetect {
     FF_ALPHA_NONE         = -1,
@@ -50,6 +49,8 @@ typedef struct FFColorDetectDSPContext {
 void ff_color_detect_dsp_init(FFColorDetectDSPContext *dsp, int depth,
                               enum AVColorRange color_range);
 
+void ff_color_detect_dsp_init_aarch64(FFColorDetectDSPContext *dsp, int depth,
+                                      enum AVColorRange color_range);
 void ff_color_detect_dsp_init_x86(FFColorDetectDSPContext *dsp, int depth,
                                   enum AVColorRange color_range);
 

@@ -170,8 +170,7 @@ typedef struct LibplaceboContext {
     /* input state */
     LibplaceboInput *inputs;
     int nb_inputs;
-    int64_t status_pts; ///< tracks status of most recently used input
-    int status;
+    int nb_active;
 
     /* settings */
     char *out_format_string;
@@ -204,6 +203,7 @@ typedef struct LibplaceboContext {
     int color_primaries;
     int color_trc;
     int rotation;
+    int alpha_mode;
     AVDictionary *extra_opts;
 
 #if PL_API_VER >= 351
@@ -768,6 +768,7 @@ static int init_vulkan(AVFilterContext *avctx, const AVVulkanDeviceContext *hwct
         return AVERROR(ENOMEM);
     for (int i = 0; i < s->nb_inputs; i++)
         RET(input_init(avctx, &s->inputs[i], i));
+    s->nb_active = s->nb_inputs;
     s->linear_rr = pl_renderer_create(s->log, s->gpu);
 
     /* fall through */
@@ -950,22 +951,19 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
         nb_visible++;
     }
 
-    /* It should be impossible to call output_frame() without at least one
-     * valid nonempty frame mix */
-    av_assert1(nb_visible > 0);
-
     out = ff_get_video_buffer(outlink, outlink->w, outlink->h);
     if (!out)
         return AVERROR(ENOMEM);
 
+    if (!ref)
+        goto props_done;
+
     RET(av_frame_copy_props(out, ref));
-    out->pts = pts;
     out->width = outlink->w;
     out->height = outlink->h;
     out->colorspace = outlink->colorspace;
     out->color_range = outlink->color_range;
-    if (s->fps.num)
-        out->duration = 1;
+    out->alpha_mode = outlink->alpha_mode;
     if (s->deinterlace)
         out->flags &= ~(AV_FRAME_FLAG_INTERLACED | AV_FRAME_FLAG_TOP_FIELD_FIRST);
 
@@ -1000,6 +998,11 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
         const AVRational stretch = av_div_q(ar_ref, ar_out);
         out->sample_aspect_ratio = av_mul_q(ref->sample_aspect_ratio, stretch);
     }
+
+props_done:
+    out->pts = pts;
+    if (s->fps.num)
+        out->duration = 1;
 
     /* Map, render and unmap output frame */
     if (outdesc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
@@ -1069,6 +1072,9 @@ static int output_frame(AVFilterContext *ctx, int64_t pts)
         target.crop = orig_target.crop = (struct pl_rect2df) {0};
         pl_render_image(s->linear_rr, &target, &orig_target, &opts->params);
         target = orig_target;
+    } else if (!ref) {
+        /* Render an empty image to clear the frame to the desired fill color */
+        pl_render_image(s->linear_rr, NULL, &target, &opts->params);
     }
 
     if (outdesc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
@@ -1162,11 +1168,7 @@ static int handle_input(AVFilterContext *ctx, LibplaceboInput *input)
         pl_queue_push(input->queue, NULL); /* Signal EOF to pl_queue */
         input->status = status;
         input->status_pts = pts;
-        if (!s->status || pts >= s->status_pts) {
-            /* Also propagate to output unless overwritten by later status change */
-            s->status = status;
-            s->status_pts = pts;
-        }
+        s->nb_active--;
     }
 
     return 0;
@@ -1243,6 +1245,10 @@ static int libplacebo_activate(AVFilterContext *ctx)
             }
         }
 
+        /* In constant FPS mode, we can also output an empty frame if there is
+         * a gap in the input timeline and we still have active streams */
+        ok |= s->fps.num && s->nb_active > 0;
+
         if (retry) {
             return 0;
         } else if (ok) {
@@ -1250,8 +1256,18 @@ static int libplacebo_activate(AVFilterContext *ctx)
             for (int i = 0; i < s->nb_inputs; i++)
                 drain_input_pts(&s->inputs[i], out_pts);
             return output_frame(ctx, out_pts);
-        } else if (s->status) {
-            ff_outlink_set_status(outlink, s->status, s->status_pts);
+        } else if (s->nb_active == 0) {
+            /* Forward most recent status */
+            int status = s->inputs[0].status;
+            int64_t status_pts = s->inputs[0].status_pts;
+            for (int i = 1; i < s->nb_inputs; i++) {
+                const LibplaceboInput *in = &s->inputs[i];
+                if (in->status_pts > status_pts) {
+                    status = s->inputs[i].status;
+                    status_pts = s->inputs[i].status_pts;
+                }
+            }
+            ff_outlink_set_status(outlink, status, status_pts);
             return 0;
         }
 
@@ -1325,6 +1341,7 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
         RET(ff_formats_ref(infmts, &cfg_in[i]->formats));
         RET(ff_formats_ref(ff_all_color_spaces(), &cfg_in[i]->color_spaces));
         RET(ff_formats_ref(ff_all_color_ranges(), &cfg_in[i]->color_ranges));
+        RET(ff_formats_ref(ff_all_alpha_modes(), &cfg_in[i]->alpha_modes));
     }
 
     RET(ff_formats_ref(outfmts, &cfg_out[0]->formats));
@@ -1336,6 +1353,10 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
     outfmts = s->color_range > 0 ? ff_make_formats_list_singleton(s->color_range)
                                  : ff_all_color_ranges();
     RET(ff_formats_ref(outfmts, &cfg_out[0]->color_ranges));
+
+    outfmts = s->alpha_mode > 0 ? ff_make_formats_list_singleton(s->alpha_mode)
+                                 : ff_all_alpha_modes();
+    RET(ff_formats_ref(outfmts, &cfg_out[0]->alpha_modes));
     return 0;
 
 fail:
@@ -1402,13 +1423,15 @@ static int libplacebo_config_output(AVFilterLink *outlink)
 
     if (s->nb_inputs > 1 && !s->disable_fbos) {
         /* Create a separate renderer and composition texture */
-        pl_fmt fmt = pl_find_fmt(s->gpu, PL_FMT_FLOAT, 4, 16, 0, PL_FMT_CAP_BLENDABLE);
+        const enum pl_fmt_caps caps = PL_FMT_CAP_BLENDABLE | PL_FMT_CAP_BLITTABLE;
+        pl_fmt fmt = pl_find_fmt(s->gpu, PL_FMT_FLOAT, 4, 16, 0, caps);
         bool ok = !!fmt;
         if (ok) {
             ok = pl_tex_recreate(s->gpu, &s->linear_tex, pl_tex_params(
                 .format     = fmt,
                 .w          = outlink->w,
                 .h          = outlink->h,
+                .blit_dst   = true,
                 .renderable = true,
                 .sampleable = true,
                 .storable   = fmt->caps & PL_FMT_CAP_STORABLE,
@@ -1596,6 +1619,13 @@ static const AVOption libplacebo_options[] = {
     {"180",                            NULL,  0, AV_OPT_TYPE_CONST, {.i64=PL_ROTATION_180}, .flags = STATIC, .unit = "rotation"},
     {"270",                            NULL,  0, AV_OPT_TYPE_CONST, {.i64=PL_ROTATION_270}, .flags = STATIC, .unit = "rotation"},
     {"360",                            NULL,  0, AV_OPT_TYPE_CONST, {.i64=PL_ROTATION_360}, .flags = STATIC, .unit = "rotation"},
+
+    {"alpha_mode", "select alpha moda", OFFSET(alpha_mode), AV_OPT_TYPE_INT, {.i64=-1}, -1, AVALPHA_MODE_NB-1, DYNAMIC, .unit = "alpha_mode"},
+    {"auto", "keep the same alpha mode",  0, AV_OPT_TYPE_CONST, {.i64=-1},                              0, 0, DYNAMIC, .unit = "alpha_mode"},
+    {"unspecified",                      NULL, 0, AV_OPT_TYPE_CONST, {.i64=AVALPHA_MODE_UNSPECIFIED},   0, 0, DYNAMIC, .unit = "alpha_mode"},
+    {"unknown",                          NULL, 0, AV_OPT_TYPE_CONST, {.i64=AVALPHA_MODE_UNSPECIFIED},   0, 0, DYNAMIC, .unit = "alpha_mode"},
+    {"premultiplied",                    NULL, 0, AV_OPT_TYPE_CONST, {.i64=AVALPHA_MODE_PREMULTIPLIED}, 0, 0, DYNAMIC, .unit = "alpha_mode"},
+    {"straight",                         NULL, 0, AV_OPT_TYPE_CONST, {.i64=AVALPHA_MODE_STRAIGHT},      0, 0, DYNAMIC, .unit = "alpha_mode"},
 
     { "upscaler", "Upscaler function", OFFSET(upscaler), AV_OPT_TYPE_STRING, {.str = "spline36"}, .flags = DYNAMIC },
     { "downscaler", "Downscaler function", OFFSET(downscaler), AV_OPT_TYPE_STRING, {.str = "mitchell"}, .flags = DYNAMIC },

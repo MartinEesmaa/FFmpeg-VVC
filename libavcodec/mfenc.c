@@ -876,6 +876,9 @@ static int mf_encv_output_adjust(AVCodecContext *avctx, IMFMediaType *type)
 
         if (c->opt_enc_scenario >= 0)
             ICodecAPI_SetValue(c->codec_api, &ff_CODECAPI_AVScenarioInfo, FF_VAL_VT_UI4(c->opt_enc_scenario));
+
+        if (avctx->flags & AV_CODEC_FLAG_LOW_DELAY)
+            ICodecAPI_SetValue(c->codec_api, &ff_CODECAPI_AVLowLatencyMode, FF_VAL_VT_UI4(1));
     }
 
     return 0;
@@ -1365,6 +1368,9 @@ static int mf_close(AVCodecContext *avctx)
 
     if (c->async_events)
         IMFMediaEventGenerator_Release(c->async_events);
+
+    if (c->dxgiManager)
+        IMFDXGIDeviceManager_Release(c->dxgiManager);
 
 #if !HAVE_UWP
     if (c->library)

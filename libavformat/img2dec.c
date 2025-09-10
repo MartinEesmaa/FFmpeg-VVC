@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include "libavutil/avassert.h"
 #include "libavutil/avstring.h"
+#include "libavutil/bprint.h"
 #include "libavutil/log.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
@@ -93,26 +94,26 @@ static int infer_size(int *width_ptr, int *height_ptr, int size)
  * @param start_index  minimum accepted value for the first index in the range
  * @return -1 if no image file could be found
  */
-static int find_image_range(AVIOContext *pb, int *pfirst_index, int *plast_index,
+static int find_image_range(int *pfirst_index, int *plast_index,
                             const char *path, int start_index, int start_index_range)
 {
-    char buf[1024];
-    int range, last_index, range1, first_index;
+    int range, last_index, range1, first_index, ret;
+    AVBPrint filename;
 
+    av_bprint_init(&filename, 0, AV_BPRINT_SIZE_UNLIMITED);
     /* find the first image */
     for (first_index = start_index; first_index < start_index + start_index_range; first_index++) {
-        if (av_get_frame_filename(buf, sizeof(buf), path, first_index) < 0) {
-            *pfirst_index =
-            *plast_index  = 1;
-            if (pb || avio_check(buf, AVIO_FLAG_READ) > 0)
-                return 0;
-            return -1;
-        }
-        if (avio_check(buf, AVIO_FLAG_READ) > 0)
+        av_bprint_clear(&filename);
+        ret = ff_bprint_get_frame_filename(&filename, path, first_index, 0);
+        if (ret < 0)
+            goto fail;
+        if (avio_check(filename.str, AVIO_FLAG_READ) > 0)
             break;
     }
-    if (first_index == start_index + start_index_range)
+    if (first_index == start_index + start_index_range) {
+        ret = AVERROR(EINVAL);
         goto fail;
+    }
 
     /* find the last image */
     last_index = first_index;
@@ -123,15 +124,18 @@ static int find_image_range(AVIOContext *pb, int *pfirst_index, int *plast_index
                 range1 = 1;
             else
                 range1 = 2 * range;
-            if (av_get_frame_filename(buf, sizeof(buf), path,
-                                      last_index + range1) < 0)
+            av_bprint_clear(&filename);
+            ret = ff_bprint_get_frame_filename(&filename, path, last_index + range1, 0);
+            if (ret < 0)
                 goto fail;
-            if (avio_check(buf, AVIO_FLAG_READ) <= 0)
+            if (avio_check(filename.str, AVIO_FLAG_READ) <= 0)
                 break;
             range = range1;
             /* just in case... */
-            if (range >= (1 << 30))
+            if (range >= (1 << 30)) {
+                ret = AVERROR(EINVAL);
                 goto fail;
+            }
         }
         /* we are sure than image last_index + range exists */
         if (!range)
@@ -140,10 +144,10 @@ static int find_image_range(AVIOContext *pb, int *pfirst_index, int *plast_index
     }
     *pfirst_index = first_index;
     *plast_index  = last_index;
-    return 0;
-
+    ret = 0;
 fail:
-    return -1;
+    av_bprint_finalize(&filename, NULL);
+    return ret;
 }
 
 static int img_read_probe(const AVProbeData *p)
@@ -184,7 +188,6 @@ int ff_img_read_header(AVFormatContext *s1)
         return AVERROR(EINVAL);
     }
 
-    av_strlcpy(s->path, s1->url, sizeof(s->path));
     s->img_number = 0;
     s->img_count  = 0;
 
@@ -222,17 +225,22 @@ int ff_img_read_header(AVFormatContext *s1)
                 s->pattern_type = PT_SEQUENCE;
         }
         if (s->pattern_type == PT_SEQUENCE) {
-            if (find_image_range(s1->pb, &first_index, &last_index, s->path,
+            if (find_image_range(&first_index, &last_index, s1->url,
                                  s->start_number, s->start_number_range) < 0) {
-                av_log(s1, AV_LOG_ERROR,
-                       "Could find no file with path '%s' and index in the range %d-%d\n",
-                       s->path, s->start_number, s->start_number + s->start_number_range - 1);
-                return AVERROR(ENOENT);
+                if (s1->pb || avio_check(s1->url, AVIO_FLAG_READ) > 0) {
+                    // Fallback to normal mode
+                    s->pattern_type = PT_NONE;
+                } else {
+                    av_log(s1, AV_LOG_ERROR,
+                           "Could find no file or sequence with path '%s' and index in the range %d-%d\n",
+                           s1->url, s->start_number, s->start_number + s->start_number_range - 1);
+                    return AVERROR(ENOENT);
+                }
             }
         } else if (s->pattern_type == PT_GLOB) {
 #if HAVE_GLOB
             int gerr;
-            gerr = glob(s->path, GLOB_NOCHECK|GLOB_BRACE|GLOB_NOMAGIC, NULL, &s->globstate);
+            gerr = glob(s1->url, GLOB_NOCHECK|GLOB_BRACE|GLOB_NOMAGIC, NULL, &s->globstate);
             if (gerr != 0) {
                 return AVERROR(ENOENT);
             }
@@ -270,7 +278,7 @@ int ff_img_read_header(AVFormatContext *s1)
         st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
         st->codecpar->codec_id   = ffifmt(s1->iformat)->raw_codec_id;
     } else {
-        const char *str = strrchr(s->path, '.');
+        const char *str = strrchr(s1->url, '.');
         s->split_planes       = str && !av_strcasecmp(str + 1, "y");
         st->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
         if (s1->pb) {
@@ -313,7 +321,7 @@ int ff_img_read_header(AVFormatContext *s1)
                 ffio_rewind_with_probe_data(s1->pb, &probe_buffer, probe_buffer_size);
         }
         if (st->codecpar->codec_id == AV_CODEC_ID_NONE)
-            st->codecpar->codec_id = ff_guess_image2_codec(s->path);
+            st->codecpar->codec_id = ff_guess_image2_codec(s1->url);
         if (st->codecpar->codec_id == AV_CODEC_ID_LJPEG)
             st->codecpar->codec_id = AV_CODEC_ID_MJPEG;
         if (st->codecpar->codec_id == AV_CODEC_ID_ALIAS_PIX) // we cannot distinguish this from BRENDER_PIX
@@ -355,13 +363,13 @@ static int add_filename_as_pkt_side_data(char *filename, AVPacket *pkt) {
 int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
 {
     VideoDemuxData *s = s1->priv_data;
-    char filename_bytes[1024];
-    char *filename = filename_bytes;
+    AVBPrint filename;
     int i, res;
     int size[3]           = { 0 }, ret[3] = { 0 };
     AVIOContext *f[3]     = { NULL };
     AVCodecParameters *par = s1->streams[0]->codecpar;
 
+    av_bprint_init(&filename, 0, AV_BPRINT_SIZE_UNLIMITED);
     if (!s->is_pipe) {
         /* loop over input */
         if (s->loop && s->img_number > s->img_last) {
@@ -370,36 +378,43 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
         if (s->img_number > s->img_last)
             return AVERROR_EOF;
         if (s->pattern_type == PT_NONE) {
-            av_strlcpy(filename_bytes, s->path, sizeof(filename_bytes));
+            av_bprintf(&filename, "%s", s1->url);
         } else if (s->use_glob) {
 #if HAVE_GLOB
-            filename = s->globstate.gl_pathv[s->img_number];
+            av_bprintf(&filename, "%s", s->globstate.gl_pathv[s->img_number]);
 #endif
         } else {
-        if (av_get_frame_filename(filename_bytes, sizeof(filename_bytes),
-                                  s->path,
-                                  s->img_number) < 0 && s->img_number > 1)
-            return AVERROR(EIO);
+            int ret = ff_bprint_get_frame_filename(&filename, s1->url, s->img_number, 0);
+            if (ret < 0) {
+                av_bprint_finalize(&filename, NULL);
+                return ret;
+            }
+        }
+        if (!av_bprint_is_complete(&filename)) {
+            av_bprint_finalize(&filename, NULL);
+            return AVERROR(ENOMEM);
         }
         for (i = 0; i < 3; i++) {
             if (s1->pb &&
-                !strcmp(filename_bytes, s->path) &&
+                !strcmp(filename.str, s1->url) &&
                 !s->loop &&
                 !s->split_planes) {
                 f[i] = s1->pb;
-            } else if (s1->io_open(s1, &f[i], filename, AVIO_FLAG_READ, NULL) < 0) {
+            } else if (s1->io_open(s1, &f[i], filename.str, AVIO_FLAG_READ, NULL) < 0) {
                 if (i >= 1)
                     break;
                 av_log(s1, AV_LOG_ERROR, "Could not open file : %s\n",
-                       filename);
+                       filename.str);
+                av_bprint_finalize(&filename, NULL);
                 return AVERROR(EIO);
             }
             size[i] = avio_size(f[i]);
 
             if (!s->split_planes)
                 break;
-            filename[strlen(filename) - 1] = 'U' + i;
+            filename.str[filename.len - 1] = 'U' + i;
         }
+        av_bprint_finalize(&filename, NULL);
 
         if (par->codec_id == AV_CODEC_ID_NONE) {
             AVProbeData pd = { 0 };
@@ -409,13 +424,15 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
             int score = 0;
 
             ret = avio_read(f[0], header, PROBE_BUF_MIN);
-            if (ret < 0)
+            if (ret < 0) {
+                av_bprint_finalize(&filename, NULL);
                 return ret;
+            }
             memset(header + ret, 0, sizeof(header) - ret);
             avio_skip(f[0], -ret);
             pd.buf = header;
             pd.buf_size = ret;
-            pd.filename = filename;
+            pd.filename = filename.str;
 
             ifmt = ffifmt(av_probe_input_format3(&pd, 1, &score));
             if (ifmt && ifmt->read_packet == ff_img_read_packet && ifmt->raw_codec_id)
@@ -448,7 +465,7 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
     if (s->ts_from_file) {
         struct stat img_stat;
         av_assert0(!s->is_pipe); // The ts_from_file option is not supported by piped input demuxers
-        if (stat(filename, &img_stat)) {
+        if (stat(filename.str, &img_stat)) {
             res = AVERROR(EIO);
             goto fail;
         }
@@ -471,10 +488,11 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
      * as packet side_data.
      */
     if (!s->is_pipe && s->export_path_metadata == 1) {
-        res = add_filename_as_pkt_side_data(filename, pkt);
+        res = add_filename_as_pkt_side_data(filename.str, pkt);
         if (res < 0)
             goto fail;
     }
+    av_bprint_finalize(&filename, NULL);
 
     pkt->size = 0;
     for (i = 0; i < 3; i++) {
@@ -513,6 +531,7 @@ int ff_img_read_packet(AVFormatContext *s1, AVPacket *pkt)
     }
 
 fail:
+    av_bprint_finalize(&filename, NULL);
     if (!s->is_pipe) {
         for (i = 0; i < 3; i++) {
             if (f[i] != s1->pb)

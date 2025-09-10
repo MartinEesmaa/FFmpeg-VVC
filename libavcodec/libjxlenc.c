@@ -357,6 +357,15 @@ static int libjxl_preprocess_stream(AVCodecContext *avctx, const AVFrame *frame,
         jxl_fmt->data_type = info.bits_per_sample <= 8 ? JXL_TYPE_UINT8 : JXL_TYPE_UINT16;
     }
 
+    if (info.alpha_bits) {
+        if (avctx->alpha_mode == AVALPHA_MODE_PREMULTIPLIED ||
+            avctx->alpha_mode == AVALPHA_MODE_UNSPECIFIED && frame->alpha_mode == AVALPHA_MODE_PREMULTIPLIED) {
+            info.alpha_premultiplied = 1;
+        } else if (avctx->alpha_mode != AVALPHA_MODE_STRAIGHT && frame->alpha_mode != AVALPHA_MODE_STRAIGHT) {
+            av_log(avctx, AV_LOG_WARNING, "Unknown alpha mode, assuming straight (independent)\n");
+        }
+    }
+
 #if JPEGXL_NUMERIC_VERSION >= JPEGXL_COMPUTE_NUMERIC_VERSION(0, 8, 0)
     jxl_bit_depth.bits_per_sample = bits_per_sample;
     jxl_bit_depth.type = JXL_BIT_DEPTH_FROM_PIXEL_FORMAT;
@@ -434,6 +443,19 @@ static int libjxl_preprocess_stream(AVCodecContext *avctx, const AVFrame *frame,
         av_log(avctx, AV_LOG_ERROR, "Failed to set JxlBasicInfo\n");
         ret = AVERROR_EXTERNAL;
         goto end;
+    }
+
+    if (info.alpha_bits) {
+        JxlExtraChannelInfo extra_info;
+        JxlEncoderInitExtraChannelInfo(JXL_CHANNEL_ALPHA, &extra_info);
+        extra_info.bits_per_sample = info.alpha_bits;
+        extra_info.exponent_bits_per_sample = info.alpha_exponent_bits;
+        extra_info.alpha_premultiplied = info.alpha_premultiplied;
+
+        if (JxlEncoderSetExtraChannelInfo(ctx->encoder, 0, &extra_info) != JXL_ENC_SUCCESS) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to set JxlExtraChannelInfo for alpha!\n");
+            return AVERROR_EXTERNAL;
+        }
     }
 
     sd = av_frame_get_side_data(frame, AV_FRAME_DATA_ICC_PROFILE);
@@ -771,6 +793,9 @@ const FFCodec ff_libjxl_encoder = {
                         FF_CODEC_CAP_AUTO_THREADS | FF_CODEC_CAP_INIT_CLEANUP |
                         FF_CODEC_CAP_ICC_PROFILES,
     CODEC_PIXFMTS_ARRAY(libjxl_supported_pixfmts),
+    .alpha_modes    = (const enum AVAlphaMode[]) {
+        AVALPHA_MODE_STRAIGHT, AVALPHA_MODE_PREMULTIPLIED, AVALPHA_MODE_UNSPECIFIED
+    },
     .p.priv_class     = &libjxl_encode_class,
     .p.wrapper_name   = "libjxl",
 };
@@ -791,6 +816,9 @@ const FFCodec ff_libjxl_anim_encoder = {
                         FF_CODEC_CAP_AUTO_THREADS | FF_CODEC_CAP_INIT_CLEANUP |
                         FF_CODEC_CAP_ICC_PROFILES,
     CODEC_PIXFMTS_ARRAY(libjxl_supported_pixfmts),
+    .alpha_modes    = (const enum AVAlphaMode[]) {
+        AVALPHA_MODE_STRAIGHT, AVALPHA_MODE_PREMULTIPLIED, AVALPHA_MODE_UNSPECIFIED
+    },
     .p.priv_class     = &libjxl_encode_class,
     .p.wrapper_name   = "libjxl",
 };

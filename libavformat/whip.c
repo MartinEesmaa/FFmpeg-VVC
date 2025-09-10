@@ -81,6 +81,13 @@
 #define STUN_MAGIC_COOKIE 0x2112A442
 
 /**
+ * Refer to RFC 8445 5.1.2
+ * priority = (2^24)*(type preference) + (2^8)*(local preference) + (2^0)*(256 - component ID)
+ * host candidate priority is 126 << 24 | 65535 << 8 | 255
+ */
+#define STUN_HOST_CANDIDATE_PRIORITY 126 << 24 | 65535 << 8 | 255
+
+/**
  * The DTLS content type.
  * See https://tools.ietf.org/html/rfc2246#section-6.2.1
  * change_cipher_spec(20), alert(21), handshake(22), application_data(23)
@@ -151,14 +158,16 @@
 #define WHIP_SDP_CREATOR_IP "127.0.0.1"
 
 /* Calculate the elapsed time from starttime to endtime in milliseconds. */
-#define ELAPSED(starttime, endtime) ((int)(endtime - starttime) / 1000)
+#define ELAPSED(starttime, endtime) ((float)(endtime - starttime) / 1000)
 
 /* STUN Attribute, comprehension-required range (0x0000-0x7FFF) */
 enum STUNAttr {
     STUN_ATTR_USERNAME                  = 0x0006, /// shared secret response/bind request
+    STUN_ATTR_PRIORITY                  = 0x0024, /// must be included in a Binding request
     STUN_ATTR_USE_CANDIDATE             = 0x0025, /// bind request
     STUN_ATTR_MESSAGE_INTEGRITY         = 0x0008, /// bind request/response
     STUN_ATTR_FINGERPRINT               = 0x8028, /// rfc5389
+    STUN_ATTR_ICE_CONTROLLING           = 0x802A, /// ICE controlling role
 };
 
 enum WHIPState {
@@ -231,6 +240,7 @@ typedef struct WHIPContext {
      */
     char *sdp_offer;
 
+    uint64_t ice_tie_breaker; // random 64 bit, for ICE-CONTROLLING
     /* The ICE username and pwd from remote server. */
     char *ice_ufrag_remote;
     char *ice_pwd_remote;
@@ -370,7 +380,7 @@ static av_cold int initialize(AVFormatContext *s)
     WHIPContext *whip = s->priv_data;
     uint32_t seed;
 
-    whip->whip_starttime = av_gettime();
+    whip->whip_starttime = av_gettime_relative();
 
     ret = certificate_key_init(s);
     if (ret < 0) {
@@ -382,6 +392,13 @@ static av_cold int initialize(AVFormatContext *s)
     seed = av_get_random_seed();
     av_lfg_init(&whip->rnd, seed);
 
+    /* 64 bit tie breaker for ICE-CONTROLLING (RFC 8445 16.1) */
+    ret = av_random_bytes((uint8_t *)&whip->ice_tie_breaker, sizeof(whip->ice_tie_breaker));
+    if (ret < 0) {
+        av_log(whip, AV_LOG_ERROR, "Couldn't generate random bytes for ICE tie breaker\n");
+        return ret;
+    }
+
     whip->audio_first_seq = av_lfg_get(&whip->rnd) & 0x0fff;
     whip->video_first_seq = whip->audio_first_seq + 1;
 
@@ -391,9 +408,9 @@ static av_cold int initialize(AVFormatContext *s)
 
     if (whip->state < WHIP_STATE_INIT)
         whip->state = WHIP_STATE_INIT;
-    whip->whip_init_time = av_gettime();
-    av_log(whip, AV_LOG_VERBOSE, "Init state=%d, handshake_timeout=%dms, pkt_size=%d, seed=%d, elapsed=%dms\n",
-        whip->state, whip->handshake_timeout, whip->pkt_size, seed, ELAPSED(whip->whip_starttime, av_gettime()));
+    whip->whip_init_time = av_gettime_relative();
+    av_log(whip, AV_LOG_VERBOSE, "Init state=%d, handshake_timeout=%dms, pkt_size=%d, seed=%d, elapsed=%.2fms\n",
+        whip->state, whip->handshake_timeout, whip->pkt_size, seed, ELAPSED(whip->whip_starttime, av_gettime_relative()));
 
     return 0;
 }
@@ -562,7 +579,7 @@ static int parse_codec(AVFormatContext *s)
  */
 static int generate_sdp_offer(AVFormatContext *s)
 {
-    int ret = 0, profile, level, profile_iop;
+    int ret = 0, profile_idc = 0, level, profile_iop = 0;
     const char *acodec_name = NULL, *vcodec_name = NULL;
     AVBPrint bp;
     WHIPContext *whip = s->priv_data;
@@ -630,12 +647,12 @@ static int generate_sdp_offer(AVFormatContext *s)
     }
 
     if (whip->video_par) {
-        profile_iop = profile = whip->video_par->profile;
         level = whip->video_par->level;
         if (whip->video_par->codec_id == AV_CODEC_ID_H264) {
             vcodec_name = "H264";
-            profile_iop &= AV_PROFILE_H264_CONSTRAINED;
-            profile &= (~AV_PROFILE_H264_CONSTRAINED);
+            profile_iop |= whip->video_par->profile & AV_PROFILE_H264_CONSTRAINED ? 1 << 6 : 0;
+            profile_iop |= whip->video_par->profile & AV_PROFILE_H264_INTRA ? 1 << 4 : 0;
+            profile_idc = whip->video_par->profile & 0x00ff;
         }
 
         av_bprintf(&bp, ""
@@ -661,7 +678,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             whip->video_payload_type,
             vcodec_name,
             whip->video_payload_type,
-            profile,
+            profile_idc,
             profile_iop,
             level,
             whip->video_ssrc,
@@ -682,7 +699,7 @@ static int generate_sdp_offer(AVFormatContext *s)
 
     if (whip->state < WHIP_STATE_OFFER)
         whip->state = WHIP_STATE_OFFER;
-    whip->whip_offer_time = av_gettime();
+    whip->whip_offer_time = av_gettime_relative();
     av_log(whip, AV_LOG_VERBOSE, "Generated state=%d, offer: %s\n", whip->state, whip->sdp_offer);
 
 end:
@@ -848,12 +865,12 @@ static int parse_answer(AVFormatContext *s)
                 goto end;
             }
         } else if (av_strstart(line, "a=candidate:", &ptr) && !whip->ice_protocol) {
-            ptr = av_stristr(ptr, "udp");
             if (ptr && av_stristr(ptr, "host")) {
-                char protocol[17], host[129];
-                int priority, port;
-                ret = sscanf(ptr, "%16s %d %128s %d typ host", protocol, &priority, host, &port);
-                if (ret != 4) {
+                /* Refer to RFC 5245 15.1 */
+                char foundation[33], protocol[17], host[129];
+                int component_id, priority, port;
+                ret = sscanf(ptr, "%32s %d %16s %d %128s %d typ host", foundation, &component_id, protocol, &priority, host, &port);
+                if (ret != 6) {
                     av_log(whip, AV_LOG_ERROR, "Failed %d to parse line %d %s from %s\n",
                         ret, i, line, whip->sdp_answer);
                     ret = AVERROR(EIO);
@@ -898,10 +915,10 @@ static int parse_answer(AVFormatContext *s)
 
     if (whip->state < WHIP_STATE_NEGOTIATED)
         whip->state = WHIP_STATE_NEGOTIATED;
-    whip->whip_answer_time = av_gettime();
-    av_log(whip, AV_LOG_VERBOSE, "SDP state=%d, offer=%zuB, answer=%zuB, ufrag=%s, pwd=%zuB, transport=%s://%s:%d, elapsed=%dms\n",
+    whip->whip_answer_time = av_gettime_relative();
+    av_log(whip, AV_LOG_VERBOSE, "SDP state=%d, offer=%zuB, answer=%zuB, ufrag=%s, pwd=%zuB, transport=%s://%s:%d, elapsed=%.2fms\n",
         whip->state, strlen(whip->sdp_offer), strlen(whip->sdp_answer), whip->ice_ufrag_remote, strlen(whip->ice_pwd_remote),
-        whip->ice_protocol, whip->ice_host, whip->ice_port, ELAPSED(whip->whip_starttime, av_gettime()));
+        whip->ice_protocol, whip->ice_host, whip->ice_port, ELAPSED(whip->whip_starttime, av_gettime_relative()));
 
 end:
     avio_context_free(&pb);
@@ -912,8 +929,8 @@ end:
  * Creates and marshals an ICE binding request packet.
  *
  * This function creates and marshals an ICE binding request packet. The function only
- * generates the username attribute and does not include goog-network-info, ice-controlling,
- * use-candidate, and priority. However, some of these attributes may be added in the future.
+ * generates the username attribute and does not include goog-network-info,
+ * use-candidate. However, some of these attributes may be added in the future.
  *
  * @param s Pointer to the AVFormatContext
  * @param buf Pointer to memory buffer to store the request packet
@@ -965,6 +982,14 @@ static int ice_create_request(AVFormatContext *s, uint8_t *buf, int buf_size, in
     /* Write the use-candidate attribute */
     avio_wb16(pb, STUN_ATTR_USE_CANDIDATE); /* attribute type use-candidate */
     avio_wb16(pb, 0); /* size of use-candidate */
+
+    avio_wb16(pb, STUN_ATTR_PRIORITY);
+    avio_wb16(pb, 4);
+    avio_wb32(pb, STUN_HOST_CANDIDATE_PRIORITY);
+
+    avio_wb16(pb, STUN_ATTR_ICE_CONTROLLING);
+    avio_wb16(pb, 8);
+    avio_wb64(pb, whip->ice_tie_breaker);
 
     /* Build and update message integrity */
     avio_wb16(pb, STUN_ATTR_MESSAGE_INTEGRITY); /* attribute type message integrity */
@@ -1179,9 +1204,9 @@ static int udp_connect(AVFormatContext *s)
 
     if (whip->state < WHIP_STATE_UDP_CONNECTED)
         whip->state = WHIP_STATE_UDP_CONNECTED;
-    whip->whip_udp_time = av_gettime();
-    av_log(whip, AV_LOG_VERBOSE, "UDP state=%d, elapsed=%dms, connected to udp://%s:%d\n",
-        whip->state, ELAPSED(whip->whip_starttime, av_gettime()), whip->ice_host, whip->ice_port);
+    whip->whip_udp_time = av_gettime_relative();
+    av_log(whip, AV_LOG_VERBOSE, "UDP state=%d, elapsed=%.2fms, connected to udp://%s:%d\n",
+        whip->state, ELAPSED(whip->whip_starttime, av_gettime_relative()), whip->ice_host, whip->ice_port);
 
 end:
     av_dict_free(&opts);
@@ -1191,7 +1216,7 @@ end:
 static int ice_dtls_handshake(AVFormatContext *s)
 {
     int ret = 0, size, i;
-    int64_t starttime = av_gettime(), now;
+    int64_t starttime = av_gettime_relative(), now;
     WHIPContext *whip = s->priv_data;
     AVDictionary *opts = NULL;
     char buf[256], *cert_buf = NULL, *key_buf = NULL;
@@ -1225,9 +1250,9 @@ next_packet:
             /* DTLS handshake is done, exit the loop. */
             break;
 
-        now = av_gettime();
+        now = av_gettime_relative();
         if (now - starttime >= whip->handshake_timeout * 1000) {
-            av_log(whip, AV_LOG_ERROR, "DTLS handshake timeout=%dms, cost=%dms, elapsed=%dms, state=%d\n",
+            av_log(whip, AV_LOG_ERROR, "DTLS handshake timeout=%dms, cost=%.2fms, elapsed=%.2fms, state=%d\n",
                 whip->handshake_timeout, ELAPSED(starttime, now), ELAPSED(whip->whip_starttime, now), whip->state);
             ret = AVERROR(ETIMEDOUT);
             goto end;
@@ -1254,10 +1279,10 @@ next_packet:
         if (ice_is_binding_response(whip->buf, ret)) {
             if (whip->state < WHIP_STATE_ICE_CONNECTED) {
                 whip->state = WHIP_STATE_ICE_CONNECTED;
-                whip->whip_ice_time = av_gettime();
-                av_log(whip, AV_LOG_VERBOSE, "ICE STUN ok, state=%d, url=udp://%s:%d, location=%s, username=%s:%s, res=%dB, elapsed=%dms\n",
+                whip->whip_ice_time = av_gettime_relative();
+                av_log(whip, AV_LOG_VERBOSE, "ICE STUN ok, state=%d, url=udp://%s:%d, location=%s, username=%s:%s, res=%dB, elapsed=%.2fms\n",
                     whip->state, whip->ice_host, whip->ice_port, whip->whip_resource_url ? whip->whip_resource_url : "",
-                    whip->ice_ufrag_remote, whip->ice_ufrag_local, ret, ELAPSED(whip->whip_starttime, av_gettime()));
+                    whip->ice_ufrag_remote, whip->ice_ufrag_local, ret, ELAPSED(whip->whip_starttime, av_gettime_relative()));
 
                 ff_url_join(buf, sizeof(buf), "dtls", NULL, whip->ice_host, whip->ice_port, NULL);
                 av_dict_set_int(&opts, "mtu", whip->pkt_size, 0);
@@ -1302,8 +1327,8 @@ next_packet:
             }
             if (!ret) {
                 whip->state = WHIP_STATE_DTLS_FINISHED;
-                whip->whip_dtls_time = av_gettime();
-                av_log(whip, AV_LOG_VERBOSE, "DTLS handshake is done, elapsed=%dms\n",
+                whip->whip_dtls_time = av_gettime_relative();
+                av_log(whip, AV_LOG_VERBOSE, "DTLS handshake is done, elapsed=%.2fms\n",
                     ELAPSED(whip->whip_starttime, whip->whip_dtls_time));
             }
             goto next_packet;
@@ -1401,9 +1426,9 @@ static int setup_srtp(AVFormatContext *s)
 
     if (whip->state < WHIP_STATE_SRTP_FINISHED)
         whip->state = WHIP_STATE_SRTP_FINISHED;
-    whip->whip_srtp_time = av_gettime();
-    av_log(whip, AV_LOG_VERBOSE, "SRTP setup done, state=%d, suite=%s, key=%zuB, elapsed=%dms\n",
-        whip->state, suite, sizeof(send_key), ELAPSED(whip->whip_starttime, av_gettime()));
+    whip->whip_srtp_time = av_gettime_relative();
+    av_log(whip, AV_LOG_VERBOSE, "SRTP setup done, state=%d, suite=%s, key=%zuB, elapsed=%.2fms\n",
+        whip->state, suite, sizeof(send_key), ELAPSED(whip->whip_starttime, av_gettime_relative()));
 
 end:
     return ret;
@@ -1559,8 +1584,8 @@ static int create_rtp_muxer(AVFormatContext *s)
     if (whip->state < WHIP_STATE_READY)
         whip->state = WHIP_STATE_READY;
     av_log(whip, AV_LOG_INFO, "Muxer state=%d, buffer_size=%d, max_packet_size=%d, "
-                           "elapsed=%dms(init:%d,offer:%d,answer:%d,udp:%d,ice:%d,dtls:%d,srtp:%d)\n",
-        whip->state, buffer_size, max_packet_size, ELAPSED(whip->whip_starttime, av_gettime()),
+                           "elapsed=%.2fms(init:%.2f,offer:%.2f,answer:%.2f,udp:%.2f,ice:%.2f,dtls:%.2f,srtp:%.2f)\n",
+        whip->state, buffer_size, max_packet_size, ELAPSED(whip->whip_starttime, av_gettime_relative()),
         ELAPSED(whip->whip_starttime,   whip->whip_init_time),
         ELAPSED(whip->whip_init_time,   whip->whip_offer_time),
         ELAPSED(whip->whip_offer_time,  whip->whip_answer_time),
@@ -1768,18 +1793,23 @@ static int whip_write_packet(AVFormatContext *s, AVPacket *pkt)
      * and RTCP like PLI requests, then respond to them.
      */
     ret = ffurl_read(whip->udp, whip->buf, sizeof(whip->buf));
-    if (ret > 0) {
-        if (is_dtls_packet(whip->buf, ret)) {
-            if ((ret = ffurl_write(whip->dtls_uc, whip->buf, ret)) < 0) {
-                av_log(whip, AV_LOG_ERROR, "Failed to handle DTLS message\n");
-                goto end;
-            }
-        }
-    } else if (ret != AVERROR(EAGAIN)) {
+    if (ret < 0) {
+        if (ret == AVERROR(EAGAIN))
+            goto write_packet;
         av_log(whip, AV_LOG_ERROR, "Failed to read from UDP socket\n");
         goto end;
     }
-
+    if (!ret) {
+        av_log(whip, AV_LOG_ERROR, "Receive EOF from UDP socket\n");
+        goto end;
+    }
+    if (is_dtls_packet(whip->buf, ret)) {
+        if ((ret = ffurl_write(whip->dtls_uc, whip->buf, ret)) < 0) {
+            av_log(whip, AV_LOG_ERROR, "Failed to handle DTLS message\n");
+            goto end;
+        }
+    }
+write_packet:
     if (whip->h264_annexb_insert_sps_pps && st->codecpar->codec_id == AV_CODEC_ID_H264) {
         if ((ret = h264_annexb_insert_sps_pps(s, pkt)) < 0) {
             av_log(whip, AV_LOG_ERROR, "Failed to insert SPS/PPS before IDR\n");

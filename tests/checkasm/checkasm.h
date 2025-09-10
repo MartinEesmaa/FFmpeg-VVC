@@ -135,6 +135,7 @@ void checkasm_check_sw_rgb(void);
 void checkasm_check_sw_scale(void);
 void checkasm_check_sw_yuv2rgb(void);
 void checkasm_check_sw_yuv2yuv(void);
+void checkasm_check_sw_ops(void);
 void checkasm_check_takdsp(void);
 void checkasm_check_utvideodsp(void);
 void checkasm_check_v210dec(void);
@@ -345,6 +346,22 @@ typedef struct CheckasmPerf {
 #define PERF_STOP(t)  t = AV_READ_TIME() - t
 #endif
 
+#define CALL4(...)\
+    do {\
+        tfunc(__VA_ARGS__); \
+        tfunc(__VA_ARGS__); \
+        tfunc(__VA_ARGS__); \
+        tfunc(__VA_ARGS__); \
+    } while (0)
+
+#define CALL16(...)\
+    do {\
+        CALL4(__VA_ARGS__); \
+        CALL4(__VA_ARGS__); \
+        CALL4(__VA_ARGS__); \
+        CALL4(__VA_ARGS__); \
+    } while (0)
+
 /* Benchmark the function */
 #define bench_new(...)\
     do {\
@@ -355,14 +372,12 @@ typedef struct CheckasmPerf {
             uint64_t tsum = 0;\
             uint64_t ti, tcount = 0;\
             uint64_t t = 0; \
-            const uint64_t truns = bench_runs;\
+            const uint64_t truns = FFMAX(bench_runs >> 3, 1);\
             checkasm_set_signal_handler_state(1);\
             for (ti = 0; ti < truns; ti++) {\
                 PERF_START(t);\
-                tfunc(__VA_ARGS__);\
-                tfunc(__VA_ARGS__);\
-                tfunc(__VA_ARGS__);\
-                tfunc(__VA_ARGS__);\
+                CALL16(__VA_ARGS__);\
+                CALL16(__VA_ARGS__);\
                 PERF_STOP(t);\
                 if (t*tcount <= tsum*4 && ti > 0) {\
                     tsum += t;\
@@ -411,6 +426,13 @@ DECL_CHECKASM_CHECK_FUNC(uint16_t);
 DECL_CHECKASM_CHECK_FUNC(uint32_t);
 DECL_CHECKASM_CHECK_FUNC(int16_t);
 DECL_CHECKASM_CHECK_FUNC(int32_t);
+
+int checkasm_check_float_ulp(const char *file, int line,
+                             const float *buf1, ptrdiff_t stride1,
+                             const float *buf2, ptrdiff_t stride2,
+                             int w, int h, const char *name,
+                             unsigned max_ulp, int align_w, int align_h,
+                             int padding);
 
 #define PASTE(a,b) a ## b
 #define CONCAT(a,b) PASTE(a,b)
