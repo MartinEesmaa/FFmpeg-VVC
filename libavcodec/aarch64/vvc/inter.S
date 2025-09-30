@@ -385,6 +385,62 @@ function ff_vvc_dmvr_12_neon, export=1
         ret
 endfunc
 
+function ff_vvc_dmvr_v_8_neon, export=1
+        movrel          x7, X(ff_vvc_inter_luma_dmvr_filters)
+        add             x7, x7, x5, lsl #1
+        ld2r            {v0.16b, v1.16b}, [x7]
+        tbz             w6, #4, 12f
+
+        ldr             s16, [x1, #16]
+        ld1             {v2.16b}, [x1], x2
+20:
+        ldr             s17, [x1, #16]
+        umull           v4.8h, v0.8b, v2.8b
+        umull2          v5.8h, v0.16b, v2.16b
+        ld1             {v3.16b}, [x1], x2
+        umull           v16.8h, v0.8b, v16.8b
+        umull           v6.8h, v1.8b, v3.8b
+        umull2          v7.8h, v1.16b, v3.16b
+        add             v4.8h, v4.8h, v6.8h
+        umull           v18.8h, v1.8b, v17.8b
+        add             v5.8h, v5.8h, v7.8h
+        urshr           v4.8h, v4.8h, #2
+        add             v19.4h, v16.4h, v18.4h
+        urshr           v5.8h, v5.8h, #2
+        urshr           v19.4h, v19.4h, #2
+        st1             {v4.8h, v5.8h}, [x0], #32
+        subs            w3, w3, #1
+        mov             v2.16b, v3.16b
+        st1             {v19.4h}, [x0], #8
+        mov             v16.16b, v17.16b
+        add             x0, x0, #(VVC_MAX_PB_SIZE * 2 - 32 - 8)
+        b.ne            20b
+        ret
+
+12:
+        ldr             s16, [x1, #8]
+        ld1             {v2.8b}, [x1], x2
+2:
+        ldr             s17, [x1, #8]
+        umull           v4.8h, v0.8b, v2.8b
+        ld1             {v3.8b}, [x1], x2
+        umull           v16.8h, v0.8b, v16.8b
+        umull           v6.8h, v1.8b, v3.8b
+        add             v4.8h, v4.8h, v6.8h
+        umull           v18.8h, v1.8b, v17.8b
+        srshr           v4.8h, v4.8h, #2
+        add             v19.4h, v16.4h, v18.4h
+        srshr           v19.4h, v19.4h, #2
+        st1             {v4.8h}, [x0], #16
+        subs            w3, w3, #1
+        mov             v2.16b, v3.16b
+        st1             {v19.4h}, [x0], #8
+        mov             v16.16b, v17.16b
+        add             x0, x0, #(VVC_MAX_PB_SIZE * 2 - 16 - 8)
+        b.ne            2b
+        ret
+endfunc
+
 function ff_vvc_dmvr_h_8_neon, export=1
         movrel          x7, X(ff_vvc_inter_luma_dmvr_filters)
         add             x7, x7, x4, lsl #1
@@ -599,18 +655,13 @@ function ff_vvc_dmvr_hv_8_neon, export=1
 endfunc
 
 function ff_vvc_dmvr_hv_12_neon, export=1
-        movi            v29.4s, #(12 - 6)
-        movi            v30.4s, #(1 << (12 - 7))    // offset1
+        mvni            v29.4s, #(12 - 6 - 1)
         b               0f
 endfunc
 
 function ff_vvc_dmvr_hv_10_neon, export=1
-        movi            v29.4s, #(10 - 6)
-        movi            v30.4s, #(1 << (10 - 7))    // offset1
+        mvni            v29.4s, #(10 - 6 - 1)
 0:
-        movi            v31.4s, #8                  // offset2
-        neg             v29.4s, v29.4s
-
         sub             sp, sp, #(VVC_MAX_PB_SIZE * 4)
 
         movrel          x9, X(ff_vvc_inter_luma_dmvr_filters)
@@ -626,7 +677,6 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         add             x12, x9, my, lsl #1
         ldrb            w10, [x12]
         ldrb            w11, [x12, #1]
-        sxtw            x6, w6
         dup             v2.8h, w10                  // filter_y[0]
         dup             v3.8h, w11                  // filter_y[1]
 
@@ -635,7 +685,7 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         mov             w10, #0                     // start filter_y or not
         add             height, height, #1
         sub             dst, dst, #(VVC_MAX_PB_SIZE * 2)
-        sub             src_stride, src_stride, x6, lsl #1
+        sub             src_stride, src_stride, w6, sxtw #1
         cset            w15, gt                     // width > 16
 1:
         mov             x12, tmp0
@@ -656,14 +706,10 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         umlal           v18.4s, v17.4h, v1.4h
         umlal2          v19.4s, v17.8h, v1.8h
 
-        add             v4.4s, v4.4s, v30.4s
-        add             v5.4s, v5.4s, v30.4s
-        add             v18.4s, v18.4s, v30.4s
-        add             v19.4s, v19.4s, v30.4s
-        ushl            v4.4s, v4.4s, v29.4s
-        ushl            v5.4s, v5.4s, v29.4s
-        ushl            v18.4s, v18.4s, v29.4s
-        ushl            v19.4s, v19.4s, v29.4s
+        urshl           v4.4s, v4.4s, v29.4s
+        urshl           v5.4s, v5.4s, v29.4s
+        urshl           v18.4s, v18.4s, v29.4s
+        urshl           v19.4s, v19.4s, v29.4s
         uqxtn           v6.4h, v4.4s
         uqxtn2          v6.8h, v5.4s
         uqxtn           v7.4h, v18.4s
@@ -681,18 +727,10 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         umlal2          v18.4s, v6.8h, v3.8h
         umlal           v19.4s, v7.4h, v3.4h
         umlal2          v20.4s, v7.8h, v3.8h
-        add             v17.4s, v17.4s, v31.4s
-        add             v18.4s, v18.4s, v31.4s
-        add             v19.4s, v19.4s, v31.4s
-        add             v20.4s, v20.4s, v31.4s
-        ushr            v17.4s, v17.4s, #4
-        ushr            v18.4s, v18.4s, #4
-        ushr            v19.4s, v19.4s, #4
-        ushr            v20.4s, v20.4s, #4
-        uqxtn           v6.4h, v17.4s
-        uqxtn2          v6.8h, v18.4s
-        uqxtn           v7.4h, v19.4s
-        uqxtn2          v7.8h, v20.4s
+        uqrshrn         v6.4h, v17.4s, #4
+        uqrshrn2        v6.8h, v18.4s, #4
+        uqrshrn         v7.4h, v19.4s, #4
+        uqrshrn2        v7.8h, v20.4s, #4
         stp             q6, q7, [x14], #32
         b               3f
 2:
@@ -704,10 +742,8 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         umlal           v4.4s, v7.4h, v1.4h
         umlal2          v5.4s, v7.8h, v1.8h
 
-        add             v4.4s, v4.4s, v30.4s
-        add             v5.4s, v5.4s, v30.4s
-        ushl            v4.4s, v4.4s, v29.4s
-        ushl            v5.4s, v5.4s, v29.4s
+        urshl           v4.4s, v4.4s, v29.4s
+        urshl           v5.4s, v5.4s, v29.4s
         uqxtn           v6.4h, v4.4s
         uqxtn2          v6.8h, v5.4s
         str             q6, [x13], #16
@@ -719,10 +755,8 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         umull2          v18.4s, v16.8h, v2.8h
         umlal           v17.4s, v6.4h, v3.4h
         umlal2          v18.4s, v6.8h, v3.8h
-        add             v17.4s, v17.4s, v31.4s
-        add             v18.4s, v18.4s, v31.4s
-        ushr            v17.4s, v17.4s, #4
-        ushr            v18.4s, v18.4s, #4
+        urshr           v17.4s, v17.4s, #4
+        urshr           v18.4s, v18.4s, #4
         uqxtn           v16.4h, v17.4s
         uqxtn2          v16.8h, v18.4s
         str             q16, [x14], #16
@@ -731,8 +765,7 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         ldr             d6, [src], #8
         umull           v4.4s, v7.4h, v1.4h
         umlal           v4.4s, v6.4h, v0.4h
-        add             v4.4s, v4.4s, v30.4s
-        ushl            v4.4s, v4.4s, v29.4s
+        urshl           v4.4s, v4.4s, v29.4s
         uqxtn           v6.4h, v4.4s
         str             d6, [x13], #8
 
@@ -741,8 +774,7 @@ function ff_vvc_dmvr_hv_10_neon, export=1
         ldr             d16, [x12], #8
         umull           v17.4s, v16.4h, v2.4h
         umlal           v17.4s, v6.4h, v3.4h
-        add             v17.4s, v17.4s, v31.4s
-        ushr            v17.4s, v17.4s, #4
+        urshr           v17.4s, v17.4s, #4
         uqxtn           v16.4h, v17.4s
         str             d16, [x14], #8
 4:
@@ -827,28 +859,21 @@ function vvc_bdof_grad_filter_8x_neon, export=0
         src1            .req x5
         width           .req w6
         height          .req w7
+        tbnz            w6, #4, 16f
 
-1:
-        mov             x10, src0
-        mov             w11, width
-        mov             x12, gh0
-        mov             x13, gv0
-        mov             x14, src1
-        mov             x15, gh1
-        mov             x16, gv1
-2:
-        ldur            q0, [x10, #2]
-        ldur            q1, [x10, #-2]
-        ldr             q2, [x10, #(VVC_MAX_PB_SIZE << 1)]
-        ldr             q3, [x10, #-(VVC_MAX_PB_SIZE << 1)]
+8:
+        ldur            q0, [src0, #2]
+        ldur            q1, [src0, #-2]
+        ldr             q2, [src0, #(VVC_MAX_PB_SIZE << 1)]
+        ldr             q3, [src0, #-(VVC_MAX_PB_SIZE << 1)]
         sshr            v0.8h, v0.8h, #6
         sshr            v1.8h, v1.8h, #6
-        ldur            q4, [x14, #2]
-        ldur            q5, [x14, #-2]
+        ldur            q4, [src1, #2]
+        ldur            q5, [src1, #-2]
         sshr            v2.8h, v2.8h, #6
         sshr            v3.8h, v3.8h, #6
-        ldr             q6, [x14, #(VVC_MAX_PB_SIZE << 1)]
-        ldr             q7, [x14, #-(VVC_MAX_PB_SIZE << 1)]
+        ldr             q6, [src1, #(VVC_MAX_PB_SIZE << 1)]
+        ldr             q7, [src1, #-(VVC_MAX_PB_SIZE << 1)]
         // results of gradient_h0
         sub             v0.8h, v0.8h, v1.8h
         // results of gradient_v0
@@ -863,26 +888,20 @@ function vvc_bdof_grad_filter_8x_neon, export=0
         // results of gradient_v1
         sub             v6.8h, v6.8h, v7.8h
 
-        add             x10, x10, #16
-        add             x14, x14, #16
-
         // (gradient_h0 + gradient_h1) >> 1
         shadd           v1.8h, v0.8h, v4.8h
         // gradient_h0 - gradient_h1
         sub             v5.8h, v0.8h, v4.8h
-
-        subs            w11, w11, #8
 
         // (gradient_v0 + gradient_v1) >> 1
         shadd           v3.8h, v2.8h, v6.8h
         // gradient_v0 - gradient_v1
         sub             v7.8h, v2.8h, v6.8h
 
-        st1             {v1.8h}, [x12], #16
-        st1             {v5.8h}, [x15], #16
-        st1             {v3.8h}, [x13], #16
-        st1             {v7.8h}, [x16], #16
-        b.ne            2b
+        st1             {v1.8h}, [gh0]
+        st1             {v5.8h}, [gh1]
+        st1             {v3.8h}, [gv0]
+        st1             {v7.8h}, [gv1]
 
         subs            height, height, #1
         add             gh0, gh0, #(BDOF_BLOCK_SIZE << 1)
@@ -891,7 +910,84 @@ function vvc_bdof_grad_filter_8x_neon, export=0
         add             gh1, gh1, #(BDOF_BLOCK_SIZE << 1)
         add             gv1, gv1, #(BDOF_BLOCK_SIZE << 1)
         add             src1, src1, #(VVC_MAX_PB_SIZE << 1)
-        b.ne            1b
+        b.ne            8b
+        ret
+
+16:
+        ldur            q0, [src0, #2]
+        ldur            q1, [src0, #18]
+        ldur            q16, [src0, #-2]
+        sshr            v0.8h, v0.8h, #6
+        ldur            q17, [src0, #14]
+        sshr            v1.8h, v1.8h, #6
+        ldp             q18, q19, [src0, #-(VVC_MAX_PB_SIZE << 1)]
+        sshr            v16.8h, v16.8h, #6
+        ldp             q2, q3, [src0, #(VVC_MAX_PB_SIZE << 1)]!
+        ldur            q20, [src1, #2]
+        sshr            v17.8h, v17.8h, #6
+        ldur            q21, [src1, #18]
+        sshr            v2.8h, v2.8h, #6
+        ldur            q22, [src1, #-2]
+        sshr            v3.8h, v3.8h, #6
+        ldur            q23, [src1, #14]
+        sshr            v18.8h, v18.8h, #6
+        ldp             q26, q27, [src1, #-(VVC_MAX_PB_SIZE << 1)]
+        sshr            v19.8h, v19.8h, #6
+        ldp             q24, q25, [src1, #(VVC_MAX_PB_SIZE << 1)]!
+
+        // results of gradient_h0
+        sub             v0.8h, v0.8h, v16.8h
+        sub             v1.8h, v1.8h, v17.8h
+
+        // results of gradient_v0
+        sub             v2.8h, v2.8h, v18.8h
+        sub             v3.8h, v3.8h, v19.8h
+
+        sshr            v20.8h, v20.8h, #6
+        sshr            v21.8h, v21.8h, #6
+        sshr            v22.8h, v22.8h, #6
+        sshr            v23.8h, v23.8h, #6
+
+        // results of gradient_h1
+        sub             v20.8h, v20.8h, v22.8h
+        sub             v21.8h, v21.8h, v23.8h
+
+        sshr            v24.8h, v24.8h, #6
+        sshr            v25.8h, v25.8h, #6
+
+        // gradient_h0 - gradient_h1
+        sub             v22.8h, v0.8h, v20.8h
+        sub             v23.8h, v1.8h, v21.8h
+
+        // (gradient_h0 + gradient_h1) >> 1
+        shadd           v16.8h, v0.8h, v20.8h
+        shadd           v17.8h, v1.8h, v21.8h
+
+        st1             {v22.8h, v23.8h}, [gh1], #32
+
+        sshr            v26.8h, v26.8h, #6
+        sshr            v27.8h, v27.8h, #6
+
+        st1             {v16.8h, v17.8h}, [gh0], #32
+
+        // results of gradient_v1
+        sub             v24.8h, v24.8h, v26.8h
+        sub             v25.8h, v25.8h, v27.8h
+
+        // (gradient_v0 + gradient_v1) >> 1
+        shadd           v18.8h, v2.8h, v24.8h
+        shadd           v19.8h, v3.8h, v25.8h
+
+        // gradient_v0 - gradient_v1
+        sub             v26.8h, v2.8h, v24.8h
+        sub             v27.8h, v3.8h, v25.8h
+
+        st1             {v18.8h,v19.8h}, [gv0], #32
+
+        subs            height, height, #1
+        st1             {v26.8h,v27.8h}, [gv1], #32
+
+        b.ne            16b
         ret
 
 .unreq gh0

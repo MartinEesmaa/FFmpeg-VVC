@@ -110,8 +110,10 @@ void checkasm_check_hevc_deblock(void);
 void checkasm_check_hevc_idct(void);
 void checkasm_check_hevc_pel(void);
 void checkasm_check_hevc_sao(void);
+void checkasm_check_hpeldsp(void);
 void checkasm_check_huffyuvdsp(void);
 void checkasm_check_idctdsp(void);
+void checkasm_check_idet(void);
 void checkasm_check_jpeg2000dsp(void);
 void checkasm_check_llauddsp(void);
 void checkasm_check_lls(void);
@@ -183,7 +185,7 @@ int double_near_abs_eps_array(const double *a, const double *b, double eps,
 extern AVLFG checkasm_lfg;
 #define rnd() av_lfg_get(&checkasm_lfg)
 
-static av_unused void *func_ref, *func_new;
+av_unused static void *func_ref, *func_new;
 
 extern uint64_t bench_runs;
 

@@ -118,6 +118,7 @@ typedef struct UDPContext {
     int remaining_in_dg;
     char *localaddr;
     int timeout;
+    int dscp;
     struct sockaddr_storage local_addr_storage;
     char *sources;
     char *block;
@@ -142,8 +143,9 @@ static const AVOption options[] = {
     { "reuse_socket",   "explicitly allow reusing UDP sockets",            OFFSET(reuse_socket),   AV_OPT_TYPE_BOOL,   { .i64 = -1 },    -1, 1,       .flags = D|E },
     { "broadcast", "explicitly allow or disallow broadcast destination",   OFFSET(is_broadcast),   AV_OPT_TYPE_BOOL,   { .i64 = 0  },     0, 1,       E },
     { "ttl",            "Time to live (multicast only)",                   OFFSET(ttl),            AV_OPT_TYPE_INT,    { .i64 = 16 },     0, 255,     E },
+    { "dscp",           "DSCP class for outgoing packets",                 OFFSET(dscp),           AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, 63,      E },
     { "connect",        "set if connect() should be called on socket",     OFFSET(is_connected),   AV_OPT_TYPE_BOOL,   { .i64 =  0 },     0, 1,       .flags = D|E },
-    { "fifo_size",      "set the UDP receiving circular buffer size, expressed as a number of packets with size of 188 bytes", OFFSET(circular_buffer_size), AV_OPT_TYPE_INT, {.i64 = 7*4096}, 0, INT_MAX, D },
+    { "fifo_size",      "set the UDP circular buffer size (in 188-byte packets)", OFFSET(circular_buffer_size), AV_OPT_TYPE_INT, {.i64 = HAVE_PTHREAD_CANCEL ? 7*4096 : 0}, 0, INT_MAX, D },
     { "overrun_nonfatal", "survive in case of UDP receiving circular buffer overrun", OFFSET(overrun_nonfatal), AV_OPT_TYPE_BOOL, {.i64 = 0}, 0, 1,    D },
     { "timeout",        "set raise error timeout, in microseconds (only in read mode)",OFFSET(timeout),         AV_OPT_TYPE_INT,  {.i64 = 0}, 0, INT_MAX, D },
     { "sources",        "Source list",                                     OFFSET(sources),        AV_OPT_TYPE_STRING, { .str = NULL },               .flags = D|E },
@@ -280,14 +282,12 @@ static int udp_set_multicast_sources(URLContext *h,
                                      struct sockaddr_storage *sources,
                                      int nb_sources, int include)
 {
-    int i;
     if (addr->sa_family != AF_INET) {
 #if HAVE_STRUCT_GROUP_SOURCE_REQ && defined(MCAST_BLOCK_SOURCE)
         /* For IPv4 prefer the old approach, as that alone works reliably on
          * Windows and it also supports supplying the interface based on its
          * address. */
-        int i;
-        for (i = 0; i < nb_sources; i++) {
+        for (int i = 0; i < nb_sources; i++) {
             struct group_source_req mreqs;
             int level = addr->sa_family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6;
 
@@ -314,7 +314,7 @@ static int udp_set_multicast_sources(URLContext *h,
 #endif
     }
 #if HAVE_STRUCT_IP_MREQ_SOURCE && defined(IP_BLOCK_SOURCE)
-    for (i = 0; i < nb_sources; i++) {
+    for (int i = 0; i < nb_sources; i++) {
         struct ip_mreq_source mreqs;
         if (sources[i].ss_family != AF_INET) {
             av_log(h, AV_LOG_ERROR, "Source/block address %d is of incorrect protocol family\n", i + 1);
@@ -691,7 +691,7 @@ end:
 static int udp_open(URLContext *h, const char *uri, int flags)
 {
     char hostname[1024];
-    int port, udp_fd = -1, tmp, bind_ret = -1, dscp = -1;
+    int port, udp_fd = -1, tmp, bind_ret = -1;
     UDPContext *s = h->priv_data;
     int is_output;
     const char *p;
@@ -731,10 +731,6 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             /* assume if no digits were found it is a request to enable it */
             if (buf == endptr)
                 s->overrun_nonfatal = 1;
-            if (!HAVE_PTHREAD_CANCEL)
-                av_log(h, AV_LOG_WARNING,
-                       "'overrun_nonfatal' option was set but it is not supported "
-                       "on this build (pthread support is required)\n");
         }
         if (av_find_info_tag(buf, sizeof(buf), "ttl", p)) {
             s->ttl = strtol(buf, NULL, 10);
@@ -760,21 +756,13 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             s->is_connected = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "dscp", p)) {
-            dscp = strtol(buf, NULL, 10);
+            s->dscp = strtol(buf, NULL, 10);
         }
         if (av_find_info_tag(buf, sizeof(buf), "fifo_size", p)) {
             s->circular_buffer_size = strtol(buf, NULL, 10);
-            if (!HAVE_PTHREAD_CANCEL)
-                av_log(h, AV_LOG_WARNING,
-                       "'circular_buffer_size' option was set but it is not supported "
-                       "on this build (pthread support is required)\n");
         }
         if (av_find_info_tag(buf, sizeof(buf), "bitrate", p)) {
             s->bitrate = strtoll(buf, NULL, 10);
-            if (!HAVE_PTHREAD_CANCEL)
-                av_log(h, AV_LOG_WARNING,
-                       "'bitrate' option was set but it is not supported "
-                       "on this build (pthread support is required)\n");
         }
         if (av_find_info_tag(buf, sizeof(buf), "burst_bits", p)) {
             s->burst_bits = strtoll(buf, NULL, 10);
@@ -799,6 +787,16 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             s->timeout = strtol(buf, NULL, 10);
         if (is_output && av_find_info_tag(buf, sizeof(buf), "broadcast", p))
             s->is_broadcast = strtol(buf, NULL, 10);
+    }
+    if (!HAVE_PTHREAD_CANCEL) {
+        int64_t      optvals[] = {s->overrun_nonfatal, s->bitrate, s->circular_buffer_size};
+        const char* optnames[] = {  "overrun_nonfatal",  "bitrate",  "fifo_size"};
+        for (unsigned i = 0; i < FF_ARRAY_ELEMS(optvals); i++) {
+            if (optvals[i])
+                av_log(h, AV_LOG_WARNING,
+                       "'%s' option was set but it is not supported "
+                       "on this build (pthread support is required)\n", optnames[i]);
+        }
     }
     /* handling needed to support options picking from both AVOption and URL */
     s->circular_buffer_size *= 188;
@@ -870,8 +868,8 @@ static int udp_open(URLContext *h, const char *uri, int flags)
             av_log(h, AV_LOG_WARNING, "socket option UDPLITE_RECV_CSCOV not available");
     }
 
-    if (dscp >= 0) {
-        dscp <<= 2;
+    if (s->dscp >= 0) {
+        int dscp = s->dscp << 2;
         if (setsockopt (udp_fd, IPPROTO_IP, IP_TOS, &dscp, sizeof(dscp)) != 0) {
             ret = ff_neterrno();
             goto fail;

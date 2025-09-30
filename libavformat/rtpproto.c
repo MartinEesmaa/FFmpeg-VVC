@@ -66,12 +66,17 @@ typedef struct RTPContext {
 #define OFFSET(x) offsetof(RTPContext, x)
 #define D AV_OPT_FLAG_DECODING_PARAM
 #define E AV_OPT_FLAG_ENCODING_PARAM
+#define DEPR AV_OPT_FLAG_DEPRECATED
 static const AVOption options[] = {
     { "ttl",                "Time to live (multicast only)",                                    OFFSET(ttl),             AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, 255,     .flags = D|E },
     { "buffer_size",        "Send/Receive buffer size (in bytes)",                              OFFSET(buffer_size),     AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
     { "rtcp_port",          "Custom rtcp port",                                                 OFFSET(rtcp_port),       AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
+    { "rtcpport",           "Custom rtcp port",                                                 OFFSET(rtcp_port),       AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
     { "local_rtpport",      "Local rtp port",                                                   OFFSET(local_rtpport),   AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
+    { "localrtpport",       "Local rtp port",                                                   OFFSET(local_rtpport),   AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
+    { "localport",          "Local rtp port",                                                   OFFSET(local_rtpport),   AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E|DEPR },
     { "local_rtcpport",     "Local rtcp port",                                                  OFFSET(local_rtcpport),  AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
+    { "localrtcpport",      "Local rtcp port",                                                  OFFSET(local_rtcpport),  AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
     { "connect",            "Connect socket",                                                   OFFSET(connect),         AV_OPT_TYPE_BOOL,   { .i64 =  0 },     0, 1,       .flags = D|E },
     { "write_to_source",    "Send packets to the source address of the latest received packet", OFFSET(write_to_source), AV_OPT_TYPE_BOOL,   { .i64 =  0 },     0, 1,       .flags = D|E },
     { "pkt_size",           "Maximum packet size",                                              OFFSET(pkt_size),        AV_OPT_TYPE_INT,    { .i64 = -1 },    -1, INT_MAX, .flags = D|E },
@@ -235,6 +240,7 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
     const char *p;
     int i, max_retry_count = 3;
     int rtcpflags;
+    int ret;
 
     av_url_split(NULL, 0, NULL, 0, hostname, sizeof(hostname), &rtp_port,
                  path, sizeof(path), uri);
@@ -291,8 +297,10 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
         if (av_find_info_tag(buf, sizeof(buf), "localaddr", p)) {
             av_freep(&s->localaddr);
             s->localaddr = av_strdup(buf);
-            if (!s->localaddr)
+            if (!s->localaddr) {
+                ret = AVERROR(ENOMEM);
                 goto fail;
+            }
         }
     }
     if (s->rw_timeout >= 0)
@@ -303,10 +311,12 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
 
         if (!(fec_protocol = av_get_token(&p, "="))) {
             av_log(h, AV_LOG_ERROR, "Failed to parse the FEC protocol value\n");
+            ret = AVERROR(EINVAL);
             goto fail;
         }
         if (strcmp(fec_protocol, "prompeg")) {
             av_log(h, AV_LOG_ERROR, "Unsupported FEC protocol %s\n", fec_protocol);
+            ret = AVERROR(EINVAL);
             goto fail;
         }
 
@@ -315,6 +325,7 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
 
         if (av_dict_parse_string(&fec_opts, p, "=", ":", 0) < 0) {
             av_log(h, AV_LOG_ERROR, "Failed to parse the FEC options\n");
+            ret = AVERROR(EINVAL);
             goto fail;
         }
         if (s->ttl > 0) {
@@ -326,8 +337,9 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
         build_udp_url(s, buf, sizeof(buf),
                       hostname, s->localaddr, rtp_port, s->local_rtpport,
                       sources, block);
-        if (ffurl_open_whitelist(&s->rtp_hd, buf, flags, &h->interrupt_callback,
-                                 NULL, h->protocol_whitelist, h->protocol_blacklist, h) < 0)
+        ret = ffurl_open_whitelist(&s->rtp_hd, buf, flags, &h->interrupt_callback,
+                                   NULL, h->protocol_whitelist, h->protocol_blacklist, h);
+        if (ret < 0)
             goto fail;
         s->local_rtpport = ff_udp_get_local_port(s->rtp_hd);
         if(s->local_rtpport == 65535) {
@@ -351,8 +363,9 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
         build_udp_url(s, buf, sizeof(buf),
                       hostname, s->localaddr, s->rtcp_port, s->local_rtcpport,
                       sources, block);
-        if (ffurl_open_whitelist(&s->rtcp_hd, buf, rtcpflags, &h->interrupt_callback,
-                                 NULL, h->protocol_whitelist, h->protocol_blacklist, h) < 0)
+        ret = ffurl_open_whitelist(&s->rtcp_hd, buf, rtcpflags, &h->interrupt_callback,
+                                   NULL, h->protocol_whitelist, h->protocol_blacklist, h);
+        if (ret < 0)
             goto fail;
         break;
     }
@@ -360,8 +373,9 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
     s->fec_hd = NULL;
     if (fec_protocol) {
         ff_url_join(buf, sizeof(buf), fec_protocol, NULL, hostname, rtp_port, NULL);
-        if (ffurl_open_whitelist(&s->fec_hd, buf, flags, &h->interrupt_callback,
-                             &fec_opts, h->protocol_whitelist, h->protocol_blacklist, h) < 0)
+        ret = ffurl_open_whitelist(&s->fec_hd, buf, flags, &h->interrupt_callback,
+                                   &fec_opts, h->protocol_whitelist, h->protocol_blacklist, h);
+        if (ret < 0)
             goto fail;
     }
 
@@ -385,7 +399,7 @@ static int rtp_open(URLContext *h, const char *uri, int flags)
     ffurl_closep(&s->fec_hd);
     av_free(fec_protocol);
     av_dict_free(&fec_opts);
-    return AVERROR(EIO);
+    return ret;
 }
 
 static int rtp_read(URLContext *h, uint8_t *buf, int size)

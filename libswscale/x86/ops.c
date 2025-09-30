@@ -206,7 +206,7 @@ static int setup_dither(const SwsOp *op, SwsOpPriv *out)
     DECL_COMMON_PATTERNS(F32, dither##SIZE##EXT,                                \
         .op    = SWS_OP_DITHER,                                                 \
         .setup = setup_dither,                                                  \
-        .free  = SIZE > 2 ? av_free : NULL,                                     \
+        .free  = (1 << SIZE) > 2 ? av_free : NULL,                              \
         .dither_size = SIZE,                                                    \
     );
 
@@ -649,7 +649,7 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
 
     *out = (SwsCompiledOp) {
         .priv = chain,
-        .free = (void (*)(void *)) ff_sws_op_chain_free,
+        .free = ff_sws_op_chain_free_cb,
 
         /* Use at most two full YMM regs during the widest precision section */
         .block_size = 2 * FFMIN(mmsize, 32) / ff_sws_op_list_max_size(ops),

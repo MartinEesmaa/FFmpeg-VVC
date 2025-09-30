@@ -20,7 +20,6 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/avassert.h"
 #include "libavutil/mem.h"
 #include "network.h"
 #include "os_support.h"
@@ -418,7 +417,6 @@ static X509 *cert_from_pem_string(const char *pem_str)
 
 
 typedef struct TLSContext {
-    const AVClass *class;
     TLSShared tls_shared;
     SSL_CTX *ctx;
     SSL *ssl;
@@ -747,7 +745,6 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     TLSContext *c = h->priv_data;
     TLSShared *s = &c->tls_shared;
     int ret = 0;
-    av_assert0(s);
     s->is_dtls = 1;
 
     c->ctx = SSL_CTX_new(s->listen ? DTLS_server_method() : DTLS_client_method());
@@ -848,7 +845,6 @@ static int tls_open(URLContext *h, const char *uri, int flags, AVDictionary **op
     TLSShared *s = &c->tls_shared;
     int ret;
 
-    av_assert0(s);
     if ((ret = ff_tls_open_underlying(s, h, uri, options)) < 0)
         goto fail;
 
@@ -940,8 +936,10 @@ static int tls_write(URLContext *h, const uint8_t *buf, int size)
     uc->flags &= ~AVIO_FLAG_NONBLOCK;
     uc->flags |= h->flags & AVIO_FLAG_NONBLOCK;
 
-    if (s->is_dtls)
-        size = FFMIN(size, DTLS_get_data_mtu(c->ssl));
+    if (s->is_dtls) {
+        const size_t mtu_size = DTLS_get_data_mtu(c->ssl);
+        size = FFMIN(size, mtu_size);
+    }
 
     ret = SSL_write(c->ssl, buf, size);
     if (ret > 0)

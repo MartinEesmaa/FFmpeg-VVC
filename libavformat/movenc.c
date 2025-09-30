@@ -6604,6 +6604,9 @@ static int mov_flush_fragment(AVFormatContext *s, int force)
             mov_write_moof_tag(s->pb, mov, moof_tracks, mdat_size);
             mov->fragments++;
 
+            if (track->cenc.aes_ctr)
+                ff_mov_cenc_flush(&track->cenc);
+
             avio_wb32(s->pb, mdat_size + 8);
             ffio_wfourcc(s->pb, "mdat");
             mdat_start = avio_tell(s->pb);
@@ -8283,15 +8286,6 @@ static int mov_init(AVFormatContext *s)
                    stream copy. */
                 track->squash_fragment_samples_to_one =
                     ff_is_ttml_stream_paragraph_based(track->par);
-
-                if (mov->flags & FF_MOV_FLAG_FRAGMENT &&
-                    track->squash_fragment_samples_to_one) {
-                    av_log(s, AV_LOG_ERROR,
-                           "Fragmentation is not currently supported for "
-                           "TTML in MP4/ISMV (track synchronization between "
-                           "subtitles and other media is not yet implemented)!\n");
-                    return AVERROR_PATCHWELCOME;
-                }
 
                 if (track->mode != MODE_ISM &&
                     track->par->codec_tag == MOV_ISMV_TTML_TAG &&

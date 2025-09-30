@@ -184,6 +184,9 @@ static const struct {
         { "hevc_pel", checkasm_check_hevc_pel },
         { "hevc_sao", checkasm_check_hevc_sao },
     #endif
+    #if CONFIG_HPELDSP
+        { "hpeldsp", checkasm_check_hpeldsp },
+    #endif
     #if CONFIG_HUFFYUV_DECODER
         { "huffyuvdsp", checkasm_check_huffyuvdsp },
     #endif
@@ -289,6 +292,9 @@ static const struct {
     #endif
     #if CONFIG_HFLIP_FILTER
         { "vf_hflip", checkasm_check_vf_hflip },
+    #endif
+    #if CONFIG_IDET_FILTER
+        { "vf_idet", checkasm_check_idet },
     #endif
     #if CONFIG_NLMEANS_FILTER
         { "vf_nlmeans", checkasm_check_nlmeans },

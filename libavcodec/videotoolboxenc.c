@@ -1709,7 +1709,14 @@ static int vtenc_configure_encoder(AVCodecContext *avctx)
 #endif
 
     // low-latency mode: eliminate frame reordering, follow a one-in-one-out encoding mode
-    if ((avctx->flags & AV_CODEC_FLAG_LOW_DELAY) && avctx->codec_id == AV_CODEC_ID_H264) {
+    if ((avctx->flags & AV_CODEC_FLAG_LOW_DELAY) &&
+        ((avctx->codec_id == AV_CODEC_ID_H264) || (TARGET_CPU_ARM64 && avctx->codec_id == AV_CODEC_ID_HEVC))) {
+        if (!avctx->bit_rate) {
+            av_log(avctx, AV_LOG_ERROR, "Doesn't support automatic bitrate in low_delay mode, "
+                                        "please specify bitrate explicitly\n");
+            status = AVERROR(EINVAL);
+            goto init_cleanup;
+        }
         CFDictionarySetValue(enc_info,
                              compat_keys.kVTVideoEncoderSpecification_EnableLowLatencyRateControl,
                              kCFBooleanTrue);
