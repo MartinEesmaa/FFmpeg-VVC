@@ -1162,9 +1162,13 @@ rtp://@var{hostname}[:@var{port}][?@var{options}]
 @var{port} specifies the RTP port to use.
 
 @var{options} contains a list of &-separated options of the form
-@var{key}=@var{val}.
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
 
-The following options are supported:
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
+
+The list of supported options follows.
 
 @table @option
 
@@ -1535,7 +1539,15 @@ The accepted URL syntax is:
 sctp://@var{host}:@var{port}[?@var{options}]
 @end example
 
-The protocol accepts the following options:
+@var{options} contains a list of &-separated options of the form
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
+
+The list of supported options follows.
+
 @table @option
 @item listen
 If set to any value, listen for an incoming connection. Outgoing connection is done by default.
@@ -1554,18 +1566,13 @@ srt://@var{hostname}:@var{port}[?@var{options}]
 @end example
 
 @var{options} contains a list of &-separated options of the form
-@var{key}=@var{val}.
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
 
-or
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
 
-@example
-@var{options} srt://@var{hostname}:@var{port}
-@end example
-
-@var{options} contains a list of '-@var{key} @var{val}'
-options.
-
-This protocol accepts the following options.
+The list of supported options follows.
 
 @table @option
 @item connect_timeout=@var{milliseconds}
@@ -1918,7 +1925,11 @@ tcp://@var{hostname}:@var{port}[?@var{options}]
 @end example
 
 @var{options} contains a list of &-separated options of the form
-@var{key}=@var{val}.
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
 
 The list of supported options follows.
 
@@ -1973,8 +1984,14 @@ The required syntax for a TLS/SSL url is:
 tls://@var{hostname}:@var{port}[?@var{options}]
 @end example
 
-The following parameters can be set via command line options
-(or in code via @code{AVOption}s):
+@var{options} contains a list of &-separated options of the form
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
+
+The list of supported options follows.
 
 @table @option
 
@@ -2035,12 +2052,19 @@ Datagram Transport Layer Security (DTLS)
 
 The required syntax for a DTLS URL is:
 @example
-dtls://@var{hostname}:@var{port}
+dtls://@var{hostname}:@var{port}[?@var{options}]
 @end example
 
+@var{options} contains a list of &-separated options of the form
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
+
 DTLS shares most options with TLS, but operates over UDP instead of TCP.
-The following parameters can be set via command line options
-(or in code via @code{AVOption}s):
+
+The list of supported options follows.
 
 @table @option
 
@@ -2119,7 +2143,12 @@ The required syntax for an UDP URL is:
 udp://@var{hostname}:@var{port}[?@var{options}]
 @end example
 
-@var{options} contains a list of &-separated options of the form @var{key}=@var{val}.
+@var{options} contains a list of &-separated options of the form
+@var{key}=@var{val}. Standard percent-encoding (and using the plus sign for
+space) can be used to escape keys and values.
+
+Options can also can be specified via command line options (or in code via
+@code{AVOption}s).
 
 In case threading is enabled on the system, a circular buffer is used
 to store the incoming data, which allows one to reduce loss of data due to
