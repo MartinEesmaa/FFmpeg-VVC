@@ -67,16 +67,14 @@
  */
 #define DTLS_SRTP_CHECKSUM_LEN 16
 
+#define WHIP_US_PER_MS 1000
+
 /**
- * When sending ICE or DTLS messages, responses are received via UDP. However, the peer
- * may not be ready and return EAGAIN, in which case we should wait for a short duration
- * and retry reading.
- * For instance, if we try to read from UDP and get EAGAIN, we sleep for 5ms and retry.
- * This macro is used to limit the total duration in milliseconds (e.g., 50ms), so we
- * will try at most 5 times.
- * Keep in mind that this macro should have a minimum duration of 5 ms.
+ * If we try to read from UDP and get EAGAIN, we sleep for 5ms and retry up to 10 times.
+ * This will limit the total duration (in milliseconds, 50ms)
  */
-#define ICE_DTLS_READ_INTERVAL 50
+#define ICE_DTLS_READ_MAX_RETRY 10
+#define ICE_DTLS_READ_SLEEP_DURATION 5
 
 /* The magic cookie for Session Traversal Utilities for NAT (STUN) messages. */
 #define STUN_MAGIC_COOKIE 0x2112A442
@@ -159,6 +157,17 @@
 #define WHIP_SDP_SESSION_ID "4489045141692799359"
 #define WHIP_SDP_CREATOR_IP "127.0.0.1"
 
+/**
+ * Refer to RFC 7675 5.1,
+ *
+ * To prevent expiry of consent, a STUN binding request can be sent periodically.
+ * Implementations SHOULD set a default interval of 5 seconds(5000ms).
+ *
+ * Consent expires after 30 seconds(30000ms).
+ */
+#define WHIP_ICE_CONSENT_CHECK_INTERVAL 5000
+#define WHIP_ICE_CONSENT_EXPIRED_TIMER 30000
+
 /* Calculate the elapsed time from starttime to endtime in milliseconds. */
 #define ELAPSED(starttime, endtime) ((float)(endtime - starttime) / 1000)
 
@@ -192,8 +201,6 @@ enum WHIPState {
     WHIP_STATE_ICE_CONNECTING,
     /* The muxer has received the ICE response from the peer. */
     WHIP_STATE_ICE_CONNECTED,
-    /* The muxer starts attempting the DTLS handshake. */
-    WHIP_STATE_DTLS_CONNECTING,
     /* The muxer has finished the DTLS handshake with the peer. */
     WHIP_STATE_DTLS_FINISHED,
     /* The muxer has finished the SRTP setup. */
@@ -204,9 +211,14 @@ enum WHIPState {
     WHIP_STATE_FAILED,
 };
 
+typedef enum WHIPFlags {
+    WHIP_DTLS_ACTIVE = (1 << 0),
+} WHIPFlags;
+
 typedef struct WHIPContext {
     AVClass *av_class;
 
+    uint32_t flags;
     /* The state of the RTC connection. */
     enum WHIPState state;
 
@@ -244,6 +256,7 @@ typedef struct WHIPContext {
      */
     char *sdp_offer;
 
+    int is_peer_ice_lite;
     uint64_t ice_tie_breaker; // random 64 bit, for ICE-CONTROLLING
     /* The ICE username and pwd from remote server. */
     char *ice_ufrag_remote;
@@ -271,6 +284,8 @@ typedef struct WHIPContext {
     int64_t whip_ice_time;
     int64_t whip_dtls_time;
     int64_t whip_srtp_time;
+    int64_t whip_last_consent_tx_time;
+    int64_t whip_last_consent_rx_time;
 
     /* The certificate and private key content used for DTLS handshake */
     char cert_buf[MAX_CERTIFICATE_SIZE];
@@ -310,6 +325,7 @@ typedef struct WHIPContext {
      * Note that pion requires a smaller value, for example, 1200.
      */
     int pkt_size;
+    int buffer_size;/* Underlying protocol send/receive buffer size */
     /**
      * The optional Bearer token for WHIP Authorization.
      * See https://www.ietf.org/archive/id/draft-ietf-wish-whip-08.html#name-authentication-and-authoriz
@@ -588,6 +604,7 @@ static int generate_sdp_offer(AVFormatContext *s)
     const char *acodec_name = NULL, *vcodec_name = NULL;
     AVBPrint bp;
     WHIPContext *whip = s->priv_data;
+    int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
 
     /* To prevent a crash during cleanup, always initialize it. */
     av_bprint_init(&bp, 1, MAX_SDP_SIZE);
@@ -633,7 +650,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             "a=ice-ufrag:%s\r\n"
             "a=ice-pwd:%s\r\n"
             "a=fingerprint:sha-256 %s\r\n"
-            "a=setup:passive\r\n"
+            "a=setup:%s\r\n"
             "a=mid:0\r\n"
             "a=sendonly\r\n"
             "a=msid:FFmpeg audio\r\n"
@@ -645,6 +662,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             whip->ice_ufrag_local,
             whip->ice_pwd_local,
             whip->dtls_fingerprint,
+            is_dtls_active ? "active" : "passive",
             whip->audio_payload_type,
             acodec_name,
             whip->audio_par->sample_rate,
@@ -668,7 +686,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             "a=ice-ufrag:%s\r\n"
             "a=ice-pwd:%s\r\n"
             "a=fingerprint:sha-256 %s\r\n"
-            "a=setup:passive\r\n"
+            "a=setup:%s\r\n"
             "a=mid:1\r\n"
             "a=sendonly\r\n"
             "a=msid:FFmpeg video\r\n"
@@ -687,6 +705,7 @@ static int generate_sdp_offer(AVFormatContext *s)
             whip->ice_ufrag_local,
             whip->ice_pwd_local,
             whip->dtls_fingerprint,
+            is_dtls_active ? "active" : "passive",
             whip->video_payload_type,
             vcodec_name,
             whip->video_payload_type,
@@ -870,6 +889,8 @@ static int parse_answer(AVFormatContext *s)
 
     for (i = 0; !avio_feof(pb); i++) {
         ff_get_chomp_line(pb, line, sizeof(line));
+        if (av_strstart(line, "a=ice-lite", &ptr))
+            whip->is_peer_ice_lite = 1;
         if (av_strstart(line, "a=ice-ufrag:", &ptr) && !whip->ice_ufrag_remote) {
             whip->ice_ufrag_remote = av_strdup(ptr);
             if (!whip->ice_ufrag_remote) {
@@ -1206,8 +1227,9 @@ static int udp_connect(AVFormatContext *s)
 
     av_dict_set_int(&opts, "connect", 1, 0);
     av_dict_set_int(&opts, "fifo_size", 0, 0);
-    /* Set the max packet size to the buffer size. */
+    /* Pass through the pkt_size and buffer_size to underling protocol */
     av_dict_set_int(&opts, "pkt_size", whip->pkt_size, 0);
+    av_dict_set_int(&opts, "buffer_size", whip->buffer_size, 0);
 
     ret = ffurl_open_whitelist(&whip->udp, url, AVIO_FLAG_WRITE, &s->interrupt_callback,
         &opts, s->protocol_whitelist, s->protocol_blacklist, NULL);
@@ -1236,8 +1258,9 @@ static int ice_dtls_handshake(AVFormatContext *s)
     int ret = 0, size, i;
     int64_t starttime = av_gettime_relative(), now;
     WHIPContext *whip = s->priv_data;
+    int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
     AVDictionary *opts = NULL;
-    char buf[256], *cert_buf = NULL, *key_buf = NULL;
+    char buf[256];
 
     if (whip->state < WHIP_STATE_UDP_CONNECTED || !whip->udp) {
         av_log(whip, AV_LOG_ERROR, "UDP not connected, state=%d, udp=%p\n", whip->state, whip->udp);
@@ -1269,7 +1292,7 @@ next_packet:
             break;
 
         now = av_gettime_relative();
-        if (now - starttime >= whip->handshake_timeout * 1000) {
+        if (now - starttime >= whip->handshake_timeout * WHIP_US_PER_MS) {
             av_log(whip, AV_LOG_ERROR, "DTLS handshake timeout=%dms, cost=%.2fms, elapsed=%.2fms, state=%d\n",
                 whip->handshake_timeout, ELAPSED(starttime, now), ELAPSED(whip->whip_starttime, now), whip->state);
             ret = AVERROR(ETIMEDOUT);
@@ -1277,26 +1300,27 @@ next_packet:
         }
 
         /* Read the STUN or DTLS messages from peer. */
-        for (i = 0; i < ICE_DTLS_READ_INTERVAL / 5 && whip->state < WHIP_STATE_DTLS_CONNECTING; i++) {
+        for (i = 0; i < ICE_DTLS_READ_MAX_RETRY; i++) {
+            if (whip->state > WHIP_STATE_ICE_CONNECTED)
+                break;
             ret = ffurl_read(whip->udp, whip->buf, sizeof(whip->buf));
             if (ret > 0)
                 break;
             if (ret == AVERROR(EAGAIN)) {
-                av_usleep(5 * 1000);
+                av_usleep(ICE_DTLS_READ_SLEEP_DURATION * WHIP_US_PER_MS);
                 continue;
             }
+            if (is_dtls_active)
+                break;
             av_log(whip, AV_LOG_ERROR, "Failed to read message\n");
             goto end;
         }
 
-        /* Got nothing, continue to process handshake. */
-        if (ret <= 0 && whip->state < WHIP_STATE_DTLS_CONNECTING)
-            continue;
-
         /* Handle the ICE binding response. */
         if (ice_is_binding_response(whip->buf, ret)) {
             if (whip->state < WHIP_STATE_ICE_CONNECTED) {
-                whip->state = WHIP_STATE_ICE_CONNECTED;
+                if (whip->is_peer_ice_lite)
+                    whip->state = WHIP_STATE_ICE_CONNECTED;
                 whip->whip_ice_time = av_gettime_relative();
                 av_log(whip, AV_LOG_VERBOSE, "ICE STUN ok, state=%d, url=udp://%s:%d, location=%s, username=%s:%s, res=%dB, elapsed=%.2fms\n",
                     whip->state, whip->ice_host, whip->ice_port, whip->whip_resource_url ? whip->whip_resource_url : "",
@@ -1315,7 +1339,7 @@ next_packet:
                     av_dict_set(&opts, "key_pem", whip->key_buf, 0);
                 av_dict_set_int(&opts, "external_sock", 1, 0);
                 av_dict_set_int(&opts, "use_srtp", 1, 0);
-                av_dict_set_int(&opts, "listen", 1, 0);
+                av_dict_set_int(&opts, "listen", is_dtls_active ? 0 : 1, 0);
                 /* If got the first binding response, start DTLS handshake. */
                 ret = ffurl_open_whitelist(&whip->dtls_uc, buf, AVIO_FLAG_READ_WRITE, &s->interrupt_callback,
                     &opts, s->protocol_whitelist, s->protocol_blacklist, NULL);
@@ -1334,9 +1358,11 @@ next_packet:
             goto next_packet;
         }
 
-        /* If got any DTLS messages, handle it. */
-        if (is_dtls_packet(whip->buf, ret) && whip->state >= WHIP_STATE_ICE_CONNECTED || whip->state == WHIP_STATE_DTLS_CONNECTING) {
-            whip->state = WHIP_STATE_DTLS_CONNECTING;
+        /* Handle DTLS handshake */
+        if (is_dtls_packet(whip->buf, ret) || is_dtls_active) {
+            /* Start consent timer when ICE selected */
+            whip->whip_last_consent_tx_time = whip->whip_last_consent_rx_time = av_gettime_relative();
+            whip->state = WHIP_STATE_ICE_CONNECTED;
             ret = ffurl_handshake(whip->dtls_uc);
             if (ret < 0) {
                 whip->state = WHIP_STATE_FAILED;
@@ -1354,10 +1380,6 @@ next_packet:
     }
 
 end:
-    if (cert_buf)
-        av_free(cert_buf);
-    if (key_buf)
-        av_free(key_buf);
     return ret;
 }
 
@@ -1382,6 +1404,10 @@ static int setup_srtp(AVFormatContext *s)
      */
     const char* suite = "SRTP_AES128_CM_HMAC_SHA1_80";
     WHIPContext *whip = s->priv_data;
+    int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
+    char *cp = is_dtls_active ? send_key : recv_key;
+    char *sp = is_dtls_active ? recv_key : send_key;
+
     ret = ff_dtls_export_materials(whip->dtls_uc, whip->dtls_srtp_materials, sizeof(whip->dtls_srtp_materials));
     if (ret < 0)
         goto end;
@@ -1396,13 +1422,11 @@ static int setup_srtp(AVFormatContext *s)
     char *client_salt = server_key + DTLS_SRTP_KEY_LEN;
     char *server_salt = client_salt + DTLS_SRTP_SALT_LEN;
 
-    /* As DTLS server, the recv key is client master key plus salt. */
-    memcpy(recv_key, client_key, DTLS_SRTP_KEY_LEN);
-    memcpy(recv_key + DTLS_SRTP_KEY_LEN, client_salt, DTLS_SRTP_SALT_LEN);
+    memcpy(cp, client_key, DTLS_SRTP_KEY_LEN);
+    memcpy(cp + DTLS_SRTP_KEY_LEN, client_salt, DTLS_SRTP_SALT_LEN);
 
-    /* As DTLS server, the send key is server master key plus salt. */
-    memcpy(send_key, server_key, DTLS_SRTP_KEY_LEN);
-    memcpy(send_key + DTLS_SRTP_KEY_LEN, server_salt, DTLS_SRTP_SALT_LEN);
+    memcpy(sp, server_key, DTLS_SRTP_KEY_LEN);
+    memcpy(sp + DTLS_SRTP_KEY_LEN, server_salt, DTLS_SRTP_SALT_LEN);
 
     /* Setup SRTP context for outgoing packets */
     if (!av_base64_encode(buf, sizeof(buf), send_key, sizeof(send_key))) {
@@ -1568,8 +1592,8 @@ static int create_rtp_muxer(AVFormatContext *s)
          * therefore, we deactivate the extradata detection for the RTP muxer.
          */
         if (s->streams[i]->codecpar->codec_id == AV_CODEC_ID_H264) {
-            av_freep(&rtp_ctx->streams[i]->codecpar->extradata);
-            rtp_ctx->streams[i]->codecpar->extradata_size = 0;
+            av_freep(&rtp_ctx->streams[0]->codecpar->extradata);
+            rtp_ctx->streams[0]->codecpar->extradata_size = 0;
         }
 
         buffer = av_malloc(buffer_size);
@@ -1846,8 +1870,26 @@ static int whip_write_packet(AVFormatContext *s, AVPacket *pkt)
     WHIPContext *whip = s->priv_data;
     AVStream *st = s->streams[pkt->stream_index];
     AVFormatContext *rtp_ctx = st->priv_data;
-
-    /* TODO: Send binding request every 1s as WebRTC heartbeat. */
+    int64_t now = av_gettime_relative();
+    /**
+     * Refer to RFC 7675
+     * Periodically send Consent Freshness STUN Binding Request
+     */
+    if (now - whip->whip_last_consent_tx_time > WHIP_ICE_CONSENT_CHECK_INTERVAL * WHIP_US_PER_MS) {
+        int size;
+        ret = ice_create_request(s, whip->buf, sizeof(whip->buf), &size);
+        if (ret < 0) {
+            av_log(whip, AV_LOG_ERROR, "Failed to create STUN binding request, size=%d\n", size);
+            goto end;
+        }
+        ret = ffurl_write(whip->udp, whip->buf, size);
+        if (ret < 0) {
+            av_log(whip, AV_LOG_ERROR, "Failed to send STUN binding request, size=%d\n", size);
+            goto end;
+        }
+        whip->whip_last_consent_tx_time = now;
+        av_log(whip, AV_LOG_DEBUG, "Consent Freshness check sent\n");
+    }
 
     /**
      * Receive packets from the server such as ICE binding requests, DTLS messages,
@@ -1863,6 +1905,10 @@ static int whip_write_packet(AVFormatContext *s, AVPacket *pkt)
     if (!ret) {
         av_log(whip, AV_LOG_ERROR, "Receive EOF from UDP socket\n");
         goto end;
+    }
+    if (ice_is_binding_response(whip->buf, ret)) {
+        whip->whip_last_consent_rx_time = av_gettime_relative();
+        av_log(whip, AV_LOG_DEBUG, "Consent Freshness check received\n");
     }
     if (is_dtls_packet(whip->buf, ret)) {
         if ((ret = ffurl_write(whip->dtls_uc, whip->buf, ret)) < 0) {
@@ -1884,6 +1930,14 @@ static int whip_write_packet(AVFormatContext *s, AVPacket *pkt)
             handle_nack_rtx(s, ret);
     }
 write_packet:
+    now = av_gettime_relative();
+    if (now - whip->whip_last_consent_rx_time > WHIP_ICE_CONSENT_EXPIRED_TIMER * WHIP_US_PER_MS) {
+        av_log(whip, AV_LOG_ERROR,
+            "Consent Freshness expired after %.2fms (limited %dms), terminate session\n",
+            ELAPSED(now, whip->whip_last_consent_rx_time), WHIP_ICE_CONSENT_EXPIRED_TIMER);
+        ret = AVERROR(ETIMEDOUT);
+        goto end;
+    }
     if (whip->h264_annexb_insert_sps_pps && st->codecpar->codec_id == AV_CODEC_ID_H264) {
         if ((ret = h264_annexb_insert_sps_pps(s, pkt)) < 0) {
             av_log(whip, AV_LOG_ERROR, "Failed to insert SPS/PPS before IDR\n");
@@ -1896,8 +1950,10 @@ write_packet:
         if (ret == AVERROR(EINVAL)) {
             av_log(whip, AV_LOG_WARNING, "Ignore failed to write packet=%dB, ret=%d\n", pkt->size, ret);
             ret = 0;
+        } else if (ret == AVERROR(EAGAIN)) {
+            av_log(whip, AV_LOG_ERROR, "UDP send blocked, please increase the buffer via -buffer_size\n");
         } else
-            av_log(whip, AV_LOG_ERROR, "Failed to write packet, size=%d\n", pkt->size);
+            av_log(whip, AV_LOG_ERROR, "Failed to write packet, size=%d, ret=%d\n", pkt->size, ret);
         goto end;
     }
 
@@ -1976,6 +2032,9 @@ static int whip_check_bitstream(AVFormatContext *s, AVStream *st, const AVPacket
 static const AVOption options[] = {
     { "handshake_timeout",  "Timeout in milliseconds for ICE and DTLS handshake.",      OFFSET(handshake_timeout),  AV_OPT_TYPE_INT,    { .i64 = 5000 },    -1, INT_MAX, ENC },
     { "pkt_size",           "The maximum size, in bytes, of RTP packets that send out", OFFSET(pkt_size),           AV_OPT_TYPE_INT,    { .i64 = 1200 },    -1, INT_MAX, ENC },
+    { "buffer_size",        "The buffer size, in bytes, of underlying protocol",        OFFSET(buffer_size),        AV_OPT_TYPE_INT,    { .i64 = -1 },      -1, INT_MAX, ENC },
+    { "whip_flags",         "Set flags affecting WHIP connection behavior",             OFFSET(flags),              AV_OPT_TYPE_FLAGS,  { .i64 = 0},         0, UINT_MAX, ENC, .unit = "flags" },
+    { "dtls_active",        "Set dtls role as active",                                  0,                          AV_OPT_TYPE_CONST,  { .i64 = WHIP_DTLS_ACTIVE}, 0, UINT_MAX, ENC, .unit = "flags" },
     { "authorization",      "The optional Bearer token for WHIP Authorization",         OFFSET(authorization),      AV_OPT_TYPE_STRING, { .str = NULL },     0,       0, ENC },
     { "cert_file",          "The optional certificate file path for DTLS",              OFFSET(cert_file),          AV_OPT_TYPE_STRING, { .str = NULL },     0,       0, ENC },
     { "key_file",           "The optional private key file path for DTLS",              OFFSET(key_file),      AV_OPT_TYPE_STRING, { .str = NULL },     0,       0, ENC },

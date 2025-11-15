@@ -25,6 +25,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "parser.h"
+#include "parser_internal.h"
 
 typedef struct AHXParseContext {
     ParseContext pc;
@@ -70,9 +71,9 @@ static int ahx_parse(AVCodecParserContext *s1,
     return next;
 }
 
-const AVCodecParser ff_ahx_parser = {
-    .codec_ids      = { AV_CODEC_ID_AHX },
+const FFCodecParser ff_ahx_parser = {
+    PARSER_CODEC_LIST(AV_CODEC_ID_AHX),
     .priv_data_size = sizeof(AHXParseContext),
-    .parser_parse   = ahx_parse,
-    .parser_close   = ff_parse_close,
+    .parse          = ahx_parse,
+    .close          = ff_parse_close,
 };

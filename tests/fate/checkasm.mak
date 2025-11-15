@@ -9,6 +9,8 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-av_tx                                     \
                 fate-checkasm-blockdsp                                  \
                 fate-checkasm-bswapdsp                                  \
+                fate-checkasm-cavsdsp                                   \
+                fate-checkasm-dcadsp                                    \
                 fate-checkasm-diracdsp                                  \
                 fate-checkasm-exrdsp                                    \
                 fate-checkasm-fdctdsp                                   \
@@ -72,6 +74,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-vf_sobel                                  \
                 fate-checkasm-videodsp                                  \
                 fate-checkasm-vorbisdsp                                 \
+                fate-checkasm-vp3dsp                                    \
                 fate-checkasm-vp8dsp                                    \
                 fate-checkasm-vp9dsp                                    \
                 fate-checkasm-vvc_alf                                   \

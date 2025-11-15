@@ -14,7 +14,7 @@ libavcodec/.*aac.* @lynne
 libavcodec/.*ac3.* @lynne
 libavcodec/.*adpcm.* @zane @pross
 libavcodec/anm.* @pross
-libavcodec/amf.* @OvchinnikovDmitrii
+libavcodec/amf.* @OvchinnikovDmitrii @ArazIusubov
 libavcodec/ansi.* @pross
 libavcodec/aom_film_grain.* @haasn
 libavcodec/.*atrac9.* @lynne
@@ -92,7 +92,7 @@ libavcodec/x86/vpx.* @rbultje
 # avfilter
 # =======
 libavfilter/af_whisper.* @vpalmisano
-libavfilter/.*_amf* @OvchinnikovDmitrii
+libavfilter/.*_amf* @OvchinnikovDmitrii @ArazIusubov
 libavfilter/avfiltergraph.* @haasn
 libavfilter/colorspace.* @rbultje
 libavfilter/formats.* @haasn
@@ -100,6 +100,7 @@ libavfilter/.*f_ebur128.* @haasn
 libavfilter/vf_blackdetect.* @haasn
 libavfilter/vf_colordetect.* @haasn
 libavfilter/vf_colorspace.* @rbultje
+libavfilter/.*drawvg.* @ayosec
 libavfilter/vf_icc.* @haasn
 libavfilter/vf_libplacebo.* @haasn
 libavfilter/vf_premultiply.* @haasn
@@ -155,7 +156,7 @@ libavformat/wtv.* @pross
 
 # avutil
 # ======
-libavutil/.*_amf* @OvchinnikovDmitrii
+libavutil/.*_amf* @OvchinnikovDmitrii @ArazIusubov
 libavutil/.*crc.* @lynne @michaelni
 libavutil/.*d3d12va.* @jianhuaw @tong1wu
 libavutil/csp.* @rbultje @haasn
@@ -215,4 +216,5 @@ doc/.* @GyanD
 # tests
 # =====
 tests/checkasm/riscv/.* @Courmisch
+tests/ref/.*drawvg.* @ayosec
 tests/ref/fate/sub-mcc.* @programmerjake

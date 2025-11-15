@@ -200,6 +200,7 @@ External library support:
   --disable-avfoundation   disable Apple AVFoundation framework [autodetect]
   --enable-avisynth        enable reading of AviSynth script files [no]
   --disable-bzlib          disable bzlib [autodetect]
+  --enable-cairo           enable cairo [no]
   --disable-coreimage      disable Apple CoreImage framework [autodetect]
   --enable-chromaprint     enable audio fingerprinting with chromaprint [no]
   --enable-frei0r          enable frei0r video filtering [no]
@@ -460,8 +461,6 @@ Optimization options (experts only):
   --disable-altivec        disable AltiVec optimizations
   --disable-vsx            disable VSX optimizations
   --disable-power8         disable POWER8 optimizations
-  --disable-amd3dnow       disable 3DNow! optimizations
-  --disable-amd3dnowext    disable 3DNow! extended optimizations
   --disable-mmx            disable MMX optimizations
   --disable-mmxext         disable MMXEXT optimizations
   --disable-sse            disable SSE optimizations
@@ -1960,6 +1959,7 @@ EXTERNAL_LIBRARY_LIST="
     $EXTERNAL_LIBRARY_NONFREE_LIST
     $EXTERNAL_LIBRARY_VERSION3_LIST
     $EXTERNAL_LIBRARY_GPLV3_LIST
+    cairo
     chromaprint
     gcrypt
     gnutls
@@ -2365,7 +2365,6 @@ HEADERS_LIST="
     linux_dma_buf_h
     linux_perf_event_h
     malloc_h
-    opencv2_core_core_c_h
     poll_h
     pthread_np_h
     sys_hwprobe_h
@@ -2877,8 +2876,6 @@ simd128_deps="wasm"
 x86_64_select="i686"
 x86_64_suggest="fast_cmov"
 
-amd3dnow_deps="mmx"
-amd3dnowext_deps="amd3dnow"
 i686_deps="x86"
 mmx_deps="x86"
 mmxext_deps="mmx"
@@ -3142,7 +3139,7 @@ mts2_decoder_select="jpegtables mss34dsp"
 mv30_decoder_select="aandcttables blockdsp"
 mvha_decoder_select="inflate_wrapper llviddsp"
 mwsc_decoder_select="inflate_wrapper"
-mxpeg_decoder_select="mjpeg_decoder"
+mxpeg_decoder_select="hpeldsp mjpeg_decoder"
 nellymoser_decoder_select="sinewin"
 nellymoser_encoder_select="audio_frame_queue sinewin"
 notchlc_decoder_select="lzf"
@@ -3361,6 +3358,8 @@ prores_videotoolbox_hwaccel_deps="videotoolbox"
 prores_videotoolbox_hwaccel_select="prores_decoder"
 prores_raw_vulkan_hwaccel_deps="vulkan spirv_compiler"
 prores_raw_vulkan_hwaccel_select="prores_raw_decoder"
+prores_vulkan_hwaccel_deps="vulkan spirv_compiler"
+prores_vulkan_hwaccel_select="prores_decoder"
 vc1_d3d11va_hwaccel_deps="d3d11va"
 vc1_d3d11va_hwaccel_select="vc1_decoder"
 vc1_d3d11va2_hwaccel_deps="d3d11va"
@@ -3480,6 +3479,7 @@ h264_amf_encoder_deps="amf"
 h264_amf_decoder_deps="amf"
 h264_cuvid_decoder_deps="cuvid"
 h264_cuvid_decoder_select="h264_mp4toannexb_bsf"
+h264_d3d12va_encoder_select="cbs_h264 d3d12va_encode"
 h264_mediacodec_decoder_deps="mediacodec"
 h264_mediacodec_decoder_select="h264_mp4toannexb_bsf h264_parser"
 h264_mediacodec_encoder_deps="mediacodec"
@@ -3600,7 +3600,7 @@ av1_frame_merge_bsf_select="cbs_av1"
 av1_frame_split_bsf_select="cbs_av1"
 av1_metadata_bsf_select="cbs_av1"
 dovi_rpu_bsf_select="cbs_h265 cbs_av1 dovi_rpudec dovi_rpuenc"
-dts2pts_bsf_select="cbs_h264 h264parse"
+dts2pts_bsf_select="cbs_h264 h264parse cbs_h265 hevc_parser"
 eac3_core_bsf_select="ac3_parser"
 eia608_to_smpte436m_bsf_select="smpte_436m"
 evc_frame_merge_bsf_select="evcparse"
@@ -4033,6 +4033,7 @@ dnn_detect_filter_select="dnn"
 dnn_processing_filter_select="dnn"
 drawtext_filter_deps="libfreetype libharfbuzz"
 drawtext_filter_suggest="libfontconfig libfribidi"
+drawvg_filter_deps="cairo"
 elbg_filter_deps="avcodec"
 eq_filter_deps="gpl"
 erosion_opencl_filter_deps="opencl"
@@ -4423,7 +4424,7 @@ CODEC_LIST="
     $ENCODER_LIST
     $DECODER_LIST
 "
-PARSER_LIST=$(find_things_extern parser AVCodecParser libavcodec/parsers.c)
+PARSER_LIST=$(find_things_extern parser FFCodecParser libavcodec/parsers.c)
 BSF_LIST=$(find_things_extern bsf FFBitStreamFilter libavcodec/bitstream_filters.c)
 HWACCEL_LIST=$(find_things_extern hwaccel FFHWAccel libavcodec/hwaccels.h)
 PROTOCOL_LIST=$(find_things_extern protocol URLProtocol libavformat/protocols.c)
@@ -6091,16 +6092,17 @@ case $target_os in
         ;;
     win32|win64)
         disable symver
+        LIBSUF=".lib"
         if enabled shared; then
             # Cannot build both shared and static libs with MSVC or icl.
             disable static
+            LIBSUF="-static.lib"
         fi
         ! enabled small && test_cmd $windres --version && enable gnu_windres
         enabled x86_32 && check_ldflags -LARGEADDRESSAWARE
         add_cppflags -DWIN32_LEAN_AND_MEAN
         shlibdir_default="$bindir_default"
         LIBPREF=""
-        LIBSUF=".lib"
         SLIBPREF=""
         SLIBSUF=".dll"
         SLIBNAME_WITH_VERSION='$(SLIBPREF)$(FULLNAME)-$(LIBVERSION)$(SLIBSUF)'
@@ -6252,8 +6254,6 @@ probe_libc(){
         if ! test_${pfx}cpp_condition crtdefs.h "defined(_UCRT)"; then
             add_${pfx}cppflags -D__USE_MINGW_ANSI_STDIO=1
         fi
-        eval test \$${pfx_no_}cc_type = "gcc" &&
-            add_${pfx}cppflags -D__printf__=__gnu_printf__
         test_${pfx}cpp_condition windows.h "!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600" &&
             add_${pfx}cppflags -D_WIN32_WINNT=0x0600
         add_${pfx}cppflags -D_POSIX_C_SOURCE=200112 -D_XOPEN_SOURCE=600
@@ -6271,8 +6271,6 @@ probe_libc(){
             add_${pfx}cppflags -D__MSVCRT_VERSION__=0x0700
         test_${pfx}cpp_condition windows.h "!defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600" &&
             add_${pfx}cppflags -D_WIN32_WINNT=0x0600
-        eval test \$${pfx_no_}cc_type = "gcc" &&
-            add_${pfx}cppflags -D__printf__=__gnu_printf__
         add_${pfx}cppflags -D_POSIX_C_SOURCE=200112 -D_XOPEN_SOURCE=600
     elif test_${pfx}cpp_condition crtversion.h "defined _VC_CRT_MAJOR_VERSION"; then
         eval ${pfx}libc_type=msvcrt
@@ -7124,6 +7122,7 @@ done
 enabled avisynth          && { require_headers "avisynth/avisynth_c.h avisynth/avs/version.h" &&
                                { test_cpp_condition avisynth/avs/version.h "AVS_MAJOR_VER >= 3 && AVS_MINOR_VER >= 7 && AVS_BUGFIX_VER >= 3 || AVS_MAJOR_VER >= 3 && AVS_MINOR_VER > 7 || AVS_MAJOR_VER > 3" ||
                                  die "ERROR: AviSynth+ header version must be >= 3.7.3"; } }
+enabled cairo             && require_pkg_config cairo cairo "cairo.h" cairo_create
 enabled cuda_nvcc         && { check_nvcc cuda_nvcc || die "ERROR: failed checking for nvcc."; }
 enabled chromaprint       && { check_pkg_config chromaprint libchromaprint "chromaprint.h" chromaprint_get_version ||
                                require chromaprint chromaprint.h chromaprint_get_version -lchromaprint; }
@@ -7173,10 +7172,10 @@ if enabled libglslang; then
     require_headers "glslang/build_info.h" && { test_cpp_condition glslang/build_info.h "GLSLANG_VERSION_MAJOR >= 16" && spvremap="" ; }
     check_lib spirv_compiler glslang/Include/glslang_c_interface.h glslang_initialize_process \
                             -lglslang -lMachineIndependent -lGenericCodeGen \
-                            ${spvremap} -lSPIRV -lSPIRV-Tools-opt -lSPIRV-Tools -lpthread -lstdc++ -lm ||
+                            ${spvremap} -lSPIRV -lSPIRV-Tools-opt -lSPIRV-Tools -lstdc++ $libm_extralibs $pthreads_extralibs ||
                         require spirv_compiler glslang/Include/glslang_c_interface.h glslang_initialize_process \
                             -lglslang -lMachineIndependent -lOSDependent -lHLSL -lOGLCompiler -lGenericCodeGen \
-                            ${spvremap} -lSPIRV -lSPIRV-Tools-opt -lSPIRV-Tools -lpthread -lstdc++ -lm ;
+                            ${spvremap} -lSPIRV -lSPIRV-Tools-opt -lSPIRV-Tools -lstdc++ $libm_extralibs $pthreads_extralibs ;
 fi
 enabled libgme            && { check_pkg_config libgme libgme gme/gme.h gme_new_emu ||
                                require libgme gme/gme.h gme_new_emu -lgme -lstdc++; }
@@ -7240,10 +7239,8 @@ enabled libnpp            && { test_cpp_condition "$(cd "$source_path"; pwd)/lib
                                die "ERROR: libnpp support is deprecated, version 13.0 and up are not supported"; }
 enabled libopencore_amrnb && require libopencore_amrnb opencore-amrnb/interf_dec.h Decoder_Interface_init -lopencore-amrnb
 enabled libopencore_amrwb && require libopencore_amrwb opencore-amrwb/dec_if.h D_IF_init -lopencore-amrwb
-enabled libopencv         && { check_headers opencv2/core/core_c.h &&
-                               { check_pkg_config libopencv opencv opencv2/core/core_c.h cvCreateImageHeader ||
-                                 require libopencv opencv2/core/core_c.h cvCreateImageHeader -lopencv_core -lopencv_imgproc; } ||
-                               require_pkg_config libopencv opencv opencv/cxcore.h cvCreateImageHeader; }
+enabled libopencv         && { check_pkg_config libopencv opencv4 opencv2/core/core_c.h cvCreateImageHeader ||
+                               require libopencv opencv2/core/core_c.h cvCreateImageHeader -lopencv_core -lopencv_imgproc; }
 enabled libopenh264       && require_pkg_config libopenh264 "openh264 >= 1.3.0" wels/codec_api.h WelsGetCodecVersion
 enabled libopenjpeg       && { check_pkg_config libopenjpeg "libopenjp2 >= 2.1.0" openjpeg.h opj_version ||
                                { require_pkg_config libopenjpeg "libopenjp2 >= 2.1.0" openjpeg.h opj_version -DOPJ_STATIC && add_cppflags -DOPJ_STATIC; } }
@@ -8224,8 +8221,6 @@ if enabled x86; then
     echo "x86 assembler             ${x86asmexe}"
     echo "MMX enabled               ${mmx-no}"
     echo "MMXEXT enabled            ${mmxext-no}"
-    echo "3DNow! enabled            ${amd3dnow-no}"
-    echo "3DNow! extended enabled   ${amd3dnowext-no}"
     echo "SSE enabled               ${sse-no}"
     echo "SSSE3 enabled             ${ssse3-no}"
     echo "AESNI enabled             ${aesni-no}"
@@ -8571,8 +8566,10 @@ echo "#endif /* FFMPEG_CONFIG_H */" >> $TMPH
 cp_if_changed $TMPH config.h
 touch ffbuild/.config
 
-# Copy config.asm before printing ALL_COMPONENTS; that's not needed in assembly.
-enabled x86asm && cp_if_changed $TMPASM config.asm
+# Copy config.asm and reopen a new TMPASM for config_components.asm
+enabled x86asm && cp_if_changed $TMPASM config.asm && cat > $TMPASM <<EOF
+; Automatically generated by configure - do not modify!
+EOF
 
 # Reopen a new TMPH for config_components.h.
 cat > $TMPH <<EOF
@@ -8587,6 +8584,7 @@ echo "#endif /* FFMPEG_CONFIG_COMPONENTS_H */" >> $TMPH
 echo "endif # FFMPEG_CONFIG_MAK" >> ffbuild/config.mak
 
 cp_if_changed $TMPH config_components.h
+enabled x86asm && cp_if_changed $TMPASM config_components.asm
 
 cat > $TMPH <<EOF
 /* Generated by ffmpeg configure */
@@ -8639,7 +8637,7 @@ print_enabled_components(){
 
 print_enabled_components libavfilter/filter_list.c FFFilter filter_list $FILTER_LIST
 print_enabled_components libavcodec/codec_list.c FFCodec codec_list $CODEC_LIST
-print_enabled_components libavcodec/parser_list.c AVCodecParser parser_list $PARSER_LIST
+print_enabled_components libavcodec/parser_list.c FFCodecParser parser_list $PARSER_LIST
 print_enabled_components libavcodec/bsf_list.c FFBitStreamFilter bitstream_filters $BSF_LIST
 print_enabled_components libavformat/demuxer_list.c FFInputFormat demuxer_list $DEMUXER_LIST
 print_enabled_components libavformat/muxer_list.c FFOutputFormat muxer_list $MUXER_LIST

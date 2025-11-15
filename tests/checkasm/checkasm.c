@@ -141,7 +141,11 @@ static const struct {
     #if CONFIG_BSWAPDSP
         { "bswapdsp", checkasm_check_bswapdsp },
     #endif
+    #if CONFIG_CAVS_DECODER
+        { "cavsdsp", checkasm_check_cavsdsp },
+    #endif
     #if CONFIG_DCA_DECODER
+        { "dcadsp", checkasm_check_dcadsp },
         { "synth_filter", checkasm_check_synth_filter },
     #endif
     #if CONFIG_DIRAC_DECODER
@@ -246,6 +250,9 @@ static const struct {
     #endif
     #if CONFIG_VC1DSP
         { "vc1dsp", checkasm_check_vc1dsp },
+    #endif
+    #if CONFIG_VP3DSP
+        { "vp3dsp", checkasm_check_vp3dsp },
     #endif
     #if CONFIG_VP8DSP
         { "vp8dsp", checkasm_check_vp8dsp },

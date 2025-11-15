@@ -152,7 +152,7 @@ Codecs:
   adpcm.c                               Zane van Iperen
   alacenc.c                             Jaikrishnan Menon
   alsdec.c                              Thilo Borgmann, Umair Khan
-  amfdec*,amfenc*                   [2] Dmitrii Ovchinnikov
+  amfdec*,amfenc*                   [2] Dmitrii Ovchinnikov, Araz Iusubov
   aptx.c                                Aurelien Jacobs
   ass*                                  Aurelien Jacobs
   asv*                                  Michael Niedermayer
@@ -211,7 +211,7 @@ Codecs:
   libkvazaar.c                          Arttu Ylä-Outinen
   libopenh264enc.c                      Martin Storsjo, Linjie Fu
   libopenjpegenc.c                      Michael Bradshaw
-  libtheoraenc.c                        David Conrad
+  libtheoraenc.c                    [0]
   libvorbis.c                           David Conrad
   libvpx*                               James Zern
   libxavs.c                             Stefan Gehrer
@@ -278,7 +278,7 @@ Codecs:
   xface                                 Stefano Sabatini
 
 Hardware acceleration:
-  amf*                              [2] Dmitrii Ovchinnikov
+  amf*                              [2] Dmitrii Ovchinnikov, Araz Iusubov
   dxva2*                                Hendrik Leppkes, Laurent Aimar, Steve Lhomme
   d3d11va*                              Steve Lhomme
   d3d12va*                              Wu Jianhua

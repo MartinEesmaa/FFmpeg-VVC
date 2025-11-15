@@ -43,7 +43,6 @@
 static av_cold int decode_init(AVCodecContext *avctx)
 {
     ProResRAWContext *s = avctx->priv_data;
-    uint8_t idct_permutation[64];
 
     avctx->bits_per_raw_sample = 12;
     avctx->color_primaries = AVCOL_PRI_UNSPECIFIED;
@@ -55,10 +54,7 @@ static av_cold int decode_init(AVCodecContext *avctx)
     ff_blockdsp_init(&s->bdsp);
     ff_proresdsp_init(&s->prodsp, avctx->bits_per_raw_sample);
 
-    ff_init_scantable_permutation(idct_permutation,
-                                  s->prodsp.idct_permutation_type);
-
-    ff_permute_scantable(s->scan, ff_prores_interlaced_scan, idct_permutation);
+    ff_permute_scantable(s->scan, ff_prores_interlaced_scan, s->prodsp.idct_permutation);
 
     return 0;
 }
@@ -329,10 +325,13 @@ static int decode_frame(AVCodecContext *avctx,
                         AVFrame *frame, int *got_frame_ptr,
                         AVPacket *avpkt)
 {
-    int ret;
+    int ret, dimensions_changed = 0;
     ProResRAWContext *s = avctx->priv_data;
     DECLARE_ALIGNED(32, uint8_t, qmat)[64];
     memset(qmat, 1, 64);
+
+    if (avctx->skip_frame >= AVDISCARD_ALL)
+        return avpkt->size;
 
     switch (avctx->codec_tag) {
     case 0:
@@ -387,13 +386,14 @@ static int decode_frame(AVCodecContext *avctx,
                avctx->width, avctx->height, w, h);
         if ((ret = ff_set_dimensions(avctx, w, h)) < 0)
             return ret;
+        dimensions_changed = 1;
     }
 
     avctx->coded_width  = FFALIGN(w, 16);
     avctx->coded_height = FFALIGN(h, 16);
 
     enum AVPixelFormat pix_fmt = AV_PIX_FMT_BAYER_RGGB16;
-    if (pix_fmt != s->pix_fmt) {
+    if (pix_fmt != s->pix_fmt || dimensions_changed) {
         s->pix_fmt = pix_fmt;
 
         ret = get_pixel_format(avctx, pix_fmt);

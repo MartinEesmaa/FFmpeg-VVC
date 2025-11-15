@@ -22,6 +22,7 @@ AVCODECOBJS-$(CONFIG_ME_CMP)            += motion.o
 AVCODECOBJS-$(CONFIG_MPEGVIDEOENCDSP)   += mpegvideoencdsp.o
 AVCODECOBJS-$(CONFIG_QPELDSP)           += qpeldsp.o
 AVCODECOBJS-$(CONFIG_VC1DSP)            += vc1dsp.o
+AVCODECOBJS-$(CONFIG_VP3DSP)            += vp3dsp.o
 AVCODECOBJS-$(CONFIG_VP8DSP)            += vp8dsp.o
 AVCODECOBJS-$(CONFIG_VIDEODSP)          += videodsp.o
 
@@ -31,7 +32,8 @@ AVCODECOBJS-$(CONFIG_AAC_DECODER)       += aacpsdsp.o \
 AVCODECOBJS-$(CONFIG_AAC_ENCODER)       += aacencdsp.o
 AVCODECOBJS-$(CONFIG_ALAC_DECODER)      += alacdsp.o
 AVCODECOBJS-$(CONFIG_APV_DECODER)       += apv_dsp.o
-AVCODECOBJS-$(CONFIG_DCA_DECODER)       += synth_filter.o
+AVCODECOBJS-$(CONFIG_CAVS_DECODER)      += cavsdsp.o
+AVCODECOBJS-$(CONFIG_DCA_DECODER)       += dcadsp.o synth_filter.o
 AVCODECOBJS-$(CONFIG_DIRAC_DECODER)     += diracdsp.o
 AVCODECOBJS-$(CONFIG_EXR_DECODER)       += exrdsp.o
 AVCODECOBJS-$(CONFIG_FLAC_DECODER)      += flacdsp.o

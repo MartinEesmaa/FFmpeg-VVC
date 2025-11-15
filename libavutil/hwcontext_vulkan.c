@@ -82,6 +82,10 @@ typedef struct VulkanDeviceFeatures {
     VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR subgroup_rotate;
     VkPhysicalDeviceHostImageCopyFeaturesEXT host_image_copy;
 
+#ifdef VK_EXT_zero_initialize_device_memory
+    VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT zero_initialize;
+#endif
+
 #ifdef VK_KHR_shader_expect_assume
     VkPhysicalDeviceShaderExpectAssumeFeaturesKHR expect_assume;
 #endif
@@ -225,6 +229,11 @@ static void device_features_init(AVHWDeviceContext *ctx, VulkanDeviceFeatures *f
     FF_VK_STRUCT_EXT(s, &feats->device, &feats->host_image_copy, FF_VK_EXT_HOST_IMAGE_COPY,
                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES_EXT);
 
+#ifdef VK_EXT_zero_initialize_device_memory
+    FF_VK_STRUCT_EXT(s, &feats->device, &feats->zero_initialize, FF_VK_EXT_ZERO_INITIALIZE,
+                     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ZERO_INITIALIZE_DEVICE_MEMORY_FEATURES_EXT);
+#endif
+
 #ifdef VK_KHR_shader_expect_assume
     FF_VK_STRUCT_EXT(s, &feats->device, &feats->expect_assume, FF_VK_EXT_EXPECT_ASSUME,
                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_EXPECT_ASSUME_FEATURES_KHR);
@@ -310,6 +319,10 @@ static void device_features_copy_needed(VulkanDeviceFeatures *dst, VulkanDeviceF
     COPY_VAL(timeline_semaphore.timelineSemaphore);
     COPY_VAL(subgroup_rotate.shaderSubgroupRotate);
     COPY_VAL(host_image_copy.hostImageCopy);
+
+#ifdef VK_EXT_zero_initialize_device_memory
+    COPY_VAL(zero_initialize.zeroInitializeDeviceMemory);
+#endif
 
     COPY_VAL(video_maintenance_1.videoMaintenance1);
 #ifdef VK_KHR_video_maintenance2
@@ -642,6 +655,9 @@ static const VulkanOptExtension optional_device_exts[] = {
     { VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME,               FF_VK_EXT_COOP_MATRIX            },
     { VK_EXT_SHADER_OBJECT_EXTENSION_NAME,                    FF_VK_EXT_SHADER_OBJECT          },
     { VK_KHR_SHADER_SUBGROUP_ROTATE_EXTENSION_NAME,           FF_VK_EXT_SUBGROUP_ROTATE        },
+#ifdef VK_EXT_zero_initialize_device_memory
+    { VK_EXT_ZERO_INITIALIZE_DEVICE_MEMORY_EXTENSION_NAME,    FF_VK_EXT_ZERO_INITIALIZE        },
+#endif
 #ifdef VK_KHR_shader_expect_assume
     { VK_KHR_SHADER_EXPECT_ASSUME_EXTENSION_NAME,             FF_VK_EXT_EXPECT_ASSUME          },
 #endif
@@ -714,7 +730,7 @@ static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEX
 
 #define ADD_VAL_TO_LIST(list, count, val)                                      \
     do {                                                                       \
-        list = av_realloc_array(list, sizeof(*list), ++count);                 \
+        list = av_realloc_array(list, ++count, sizeof(*list));                 \
         if (!list) {                                                           \
             err = AVERROR(ENOMEM);                                             \
             goto fail;                                                         \
@@ -1430,14 +1446,14 @@ static inline int pick_queue_family(VkQueueFamilyProperties2 *qf, uint32_t num_q
 
 static inline int pick_video_queue_family(VkQueueFamilyProperties2 *qf,
                                           VkQueueFamilyVideoPropertiesKHR *qf_vid, uint32_t num_qf,
-                                          VkVideoCodecOperationFlagBitsKHR flags)
+                                          VkVideoCodecOperationFlagsKHR flags)
 {
     int index = -1;
     uint32_t min_score = UINT32_MAX;
 
     for (int i = 0; i < num_qf; i++) {
-        const VkQueueFlagBits qflags = qf[i].queueFamilyProperties.queueFlags;
-        const VkQueueFlagBits vflags = qf_vid[i].videoCodecOperations;
+        const VkQueueFlags qflags = qf[i].queueFamilyProperties.queueFlags;
+        const VkVideoCodecOperationFlagsKHR vflags = qf_vid[i].videoCodecOperations;
 
         if (!(qflags & (VK_QUEUE_VIDEO_ENCODE_BIT_KHR | VK_QUEUE_VIDEO_DECODE_BIT_KHR)))
             continue;
@@ -1756,6 +1772,11 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     dev_info.pNext = p->feats.device.pNext;
     dev_info.pEnabledFeatures = &p->feats.device.features;
 
+    /* Limit queues to a given number if needed */
+    opt_d = av_dict_get(opts, "limit_queues", NULL, 0);
+    if (opt_d)
+        p->limit_queues = strtol(opt_d->value, NULL, 10);
+
     /* Setup enabled queue families */
     if ((err = setup_queue_families(ctx, &dev_info)))
         goto end;
@@ -1782,11 +1803,6 @@ static int vulkan_device_create_internal(AVHWDeviceContext *ctx,
     opt_d = av_dict_get(opts, "linear_images", NULL, 0);
     if (opt_d)
         p->use_linear_images = strtol(opt_d->value, NULL, 10);
-
-    /* Limit queues to a given number if needed */
-    opt_d = av_dict_get(opts, "limit_queues", NULL, 0);
-    if (opt_d)
-        p->limit_queues = strtol(opt_d->value, NULL, 10);
 
     /* The disable_multiplane argument takes precedent over the option */
     p->disable_multiplane = disable_multiplane;
@@ -2666,7 +2682,7 @@ fail:
 /* Checks if an export flag is enabled, and if it is ORs it with *iexp */
 static void try_export_flags(AVHWFramesContext *hwfc,
                              VkExternalMemoryHandleTypeFlags *comp_handle_types,
-                             VkExternalMemoryHandleTypeFlagBits *iexp,
+                             VkExternalMemoryHandleTypeFlags *iexp,
                              VkExternalMemoryHandleTypeFlagBits exp)
 {
     VkResult ret;
@@ -2837,7 +2853,7 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     AVVulkanFramesContext *hwctx = &fp->p;
     VulkanDevicePriv *p = hwfc->device_ctx->hwctx;
     AVVulkanDeviceContext *dev_hwctx = &p->p;
-    VkImageUsageFlagBits supported_usage;
+    VkImageUsageFlags supported_usage;
     FFVulkanFunctions *vk = &p->vkctx.vkfn;
     const struct FFVkFormatEntry *fmt;
     int disable_multiplane = p->disable_multiplane ||
@@ -2901,21 +2917,19 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
         supported_usage &= ~VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
 
     /* Image usage flags */
-    if (!hwctx->usage) {
-        hwctx->usage = supported_usage & (VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                          VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                          VK_IMAGE_USAGE_STORAGE_BIT      |
-                                          VK_IMAGE_USAGE_SAMPLED_BIT);
+    hwctx->usage |= supported_usage & (VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                       VK_IMAGE_USAGE_STORAGE_BIT      |
+                                       VK_IMAGE_USAGE_SAMPLED_BIT);
 
-        if ((p->vkctx.extensions & FF_VK_EXT_HOST_IMAGE_COPY) && !p->disable_host_transfer)
-            hwctx->usage |= supported_usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
+    if ((p->vkctx.extensions & FF_VK_EXT_HOST_IMAGE_COPY) && !p->disable_host_transfer)
+        hwctx->usage |= supported_usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
 
-        /* Enables encoding of images, if supported by format and extensions */
-        if ((supported_usage & VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR) &&
-            (p->vkctx.extensions & (FF_VK_EXT_VIDEO_ENCODE_QUEUE |
-                                   FF_VK_EXT_VIDEO_MAINTENANCE_1)))
-            hwctx->usage |= VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
-    }
+    /* Enables encoding of images, if supported by format and extensions */
+    if ((supported_usage & VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR) &&
+        (p->vkctx.extensions & (FF_VK_EXT_VIDEO_ENCODE_QUEUE |
+                                FF_VK_EXT_VIDEO_MAINTENANCE_1)))
+        hwctx->usage |= VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
 
     /* Image creation flags.
      * Only fill them in automatically if the image is not going to be used as

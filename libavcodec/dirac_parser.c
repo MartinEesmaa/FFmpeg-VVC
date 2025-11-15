@@ -34,6 +34,7 @@
 #include "libavutil/mem.h"
 
 #include "avcodec.h"
+#include "parser_internal.h"
 
 #define DIRAC_PARSE_INFO_PREFIX 0x42424344
 
@@ -274,9 +275,9 @@ static av_cold void dirac_parse_close(AVCodecParserContext *s)
         av_freep(&pc->buffer);
 }
 
-const AVCodecParser ff_dirac_parser = {
-    .codec_ids      = { AV_CODEC_ID_DIRAC },
+const FFCodecParser ff_dirac_parser = {
+    PARSER_CODEC_LIST(AV_CODEC_ID_DIRAC),
     .priv_data_size = sizeof(DiracParseContext),
-    .parser_parse   = dirac_parse,
-    .parser_close   = dirac_parse_close,
+    .parse          = dirac_parse,
+    .close          = dirac_parse_close,
 };

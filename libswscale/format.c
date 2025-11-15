@@ -546,7 +546,8 @@ int sws_test_colorspace(enum AVColorSpace csp, int output)
 
 int sws_test_primaries(enum AVColorPrimaries prim, int output)
 {
-    return prim > AVCOL_PRI_RESERVED0 && prim < AVCOL_PRI_NB &&
+    return ((prim > AVCOL_PRI_RESERVED0 && prim < AVCOL_PRI_NB) ||
+            (prim >= AVCOL_PRI_EXT_BASE && prim < AVCOL_PRI_EXT_NB)) &&
            prim != AVCOL_PRI_RESERVED;
 }
 
@@ -1271,9 +1272,11 @@ static AVRational *generate_bayer_matrix(const int size_log2)
 static bool trc_is_hdr(enum AVColorTransferCharacteristic trc)
 {
     static_assert(AVCOL_TRC_NB == 19, "Update this list when adding TRCs");
+    static_assert(AVCOL_TRC_EXT_NB == 257, "Update this list when adding TRCs");
     switch (trc) {
     case AVCOL_TRC_LOG:
     case AVCOL_TRC_LOG_SQRT:
+    case AVCOL_TRC_V_LOG:
     case AVCOL_TRC_SMPTEST2084:
     case AVCOL_TRC_ARIB_STD_B67:
         return true;
