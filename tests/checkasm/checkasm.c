@@ -254,6 +254,9 @@ static const struct {
     #if CONFIG_VP3DSP
         { "vp3dsp", checkasm_check_vp3dsp },
     #endif
+    #if CONFIG_VP6_DECODER
+        { "vp6dsp", checkasm_check_vp6dsp },
+    #endif
     #if CONFIG_VP8DSP
         { "vp8dsp", checkasm_check_vp8dsp },
     #endif
@@ -296,6 +299,9 @@ static const struct {
     #endif
     #if CONFIG_EQ_FILTER
         { "vf_eq", checkasm_check_vf_eq },
+    #endif
+    #if CONFIG_FSPP_FILTER
+        { "vf_fspp", checkasm_check_vf_fspp },
     #endif
     #if CONFIG_GBLUR_FILTER
         { "vf_gblur", checkasm_check_vf_gblur },

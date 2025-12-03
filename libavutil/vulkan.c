@@ -1167,6 +1167,37 @@ int ff_vk_map_buffers(FFVulkanContext *s, FFVkBuffer **buf, uint8_t *mem[],
     return 0;
 }
 
+int ff_vk_flush_buffer(FFVulkanContext *s, FFVkBuffer *buf,
+                       size_t offset, size_t mem_size,
+                       int flush)
+{
+    VkResult ret;
+    FFVulkanFunctions *vk = &s->vkfn;
+
+    if (buf->host_ref || buf->flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)
+        return 0;
+
+    const VkMappedMemoryRange flush_data = {
+        .sType  = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+        .memory = buf->mem,
+        .offset = offset,
+        .size   = mem_size,
+    };
+
+    if (flush)
+        ret = vk->FlushMappedMemoryRanges(s->hwctx->act_dev, 1, &flush_data);
+    else
+        ret = vk->InvalidateMappedMemoryRanges(s->hwctx->act_dev, 1, &flush_data);
+
+    if (ret != VK_SUCCESS) {
+        av_log(s, AV_LOG_ERROR, "Failed to flush memory: %s\n",
+               ff_vk_ret2str(ret));
+        return AVERROR_EXTERNAL;
+    }
+
+    return 0;
+}
+
 int ff_vk_unmap_buffers(FFVulkanContext *s, FFVkBuffer **buf, int nb_buffers,
                         int flush)
 {
@@ -1567,6 +1598,12 @@ void ff_vk_set_perm(enum AVPixelFormat pix_fmt, int lut[4], int inv)
         lut[0] = 1;
         lut[1] = 2;
         lut[2] = 0;
+        lut[3] = 3;
+        break;
+    case AV_PIX_FMT_X2BGR10:
+        lut[0] = 0;
+        lut[1] = 2;
+        lut[2] = 1;
         lut[3] = 3;
         break;
     default:
@@ -2012,11 +2049,11 @@ fail:
 
 void ff_vk_frame_barrier(FFVulkanContext *s, FFVkExecContext *e,
                          AVFrame *pic, VkImageMemoryBarrier2 *bar, int *nb_bar,
-                         VkPipelineStageFlags src_stage,
-                         VkPipelineStageFlags dst_stage,
-                         VkAccessFlagBits     new_access,
-                         VkImageLayout        new_layout,
-                         uint32_t             new_qf)
+                         VkPipelineStageFlags2 src_stage,
+                         VkPipelineStageFlags2 dst_stage,
+                         VkAccessFlagBits2     new_access,
+                         VkImageLayout         new_layout,
+                         uint32_t              new_qf)
 {
     int found = -1;
     AVVkFrame *vkf = (AVVkFrame *)pic->data[0];

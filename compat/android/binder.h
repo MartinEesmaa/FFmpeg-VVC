@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2015 Manojkumar Bhosale (Manojkumar.Bhosale@imgtec.com)
+ * Android Binder handler
+ *
+ * Copyright (c) 2025 Dmitrii Okunev
  *
  * This file is part of FFmpeg.
  *
@@ -18,16 +20,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include "libavutil/attributes.h"
-#include "libavutil/mips/cpu.h"
-#include "libavcodec/mpegvideoenc.h"
-#include "mpegvideo_mips.h"
+#ifndef COMPAT_ANDROID_BINDER_H
+#define COMPAT_ANDROID_BINDER_H
 
-av_cold void ff_mpvenc_dct_init_mips(MPVEncContext *s)
-{
-    int cpu_flags = av_get_cpu_flags();
+/**
+ * Initialize Android Binder thread pool.
+ */
+void android_binder_threadpool_init_if_required(void);
 
-    if (have_mmi(cpu_flags)) {
-        s->denoise_dct = ff_denoise_dct_mmi;
-    }
-}
+#endif                          // COMPAT_ANDROID_BINDER_H

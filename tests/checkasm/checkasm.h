@@ -44,7 +44,7 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#if ARCH_X86_32
+#if defined(__i386__) || defined(_M_IX86)
 #include <setjmp.h>
 typedef jmp_buf checkasm_context;
 #define checkasm_save_context() checkasm_handle_signal(setjmp(checkasm_context_buf))
@@ -148,11 +148,13 @@ void checkasm_check_v210enc(void);
 void checkasm_check_vc1dsp(void);
 void checkasm_check_vf_bwdif(void);
 void checkasm_check_vf_eq(void);
+void checkasm_check_vf_fspp(void);
 void checkasm_check_vf_gblur(void);
 void checkasm_check_vf_hflip(void);
 void checkasm_check_vf_threshold(void);
 void checkasm_check_vf_sobel(void);
 void checkasm_check_vp3dsp(void);
+void checkasm_check_vp6dsp(void);
 void checkasm_check_vp8dsp(void);
 void checkasm_check_vp9dsp(void);
 void checkasm_check_videodsp(void);

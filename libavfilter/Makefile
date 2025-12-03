@@ -329,7 +329,7 @@ OBJS-$(CONFIG_FRAMESTEP_FILTER)              += vf_framestep.o
 OBJS-$(CONFIG_FREEZEDETECT_FILTER)           += vf_freezedetect.o
 OBJS-$(CONFIG_FREEZEFRAMES_FILTER)           += vf_freezeframes.o
 OBJS-$(CONFIG_FREI0R_FILTER)                 += vf_frei0r.o
-OBJS-$(CONFIG_FSPP_FILTER)                   += vf_fspp.o qp_table.o
+OBJS-$(CONFIG_FSPP_FILTER)                   += vf_fspp.o vf_fsppdsp.o qp_table.o
 OBJS-$(CONFIG_FSYNC_FILTER)                  += vf_fsync.o
 OBJS-$(CONFIG_GBLUR_FILTER)                  += vf_gblur.o
 OBJS-$(CONFIG_GBLUR_VULKAN_FILTER)           += vf_gblur_vulkan.o vulkan.o vulkan_filter.o
@@ -678,6 +678,7 @@ SKIPHEADERS-$(CONFIG_QSVVPP)                 += qsvvpp.h stack_internal.h
 SKIPHEADERS-$(CONFIG_OPENCL)                 += opencl.h
 SKIPHEADERS-$(CONFIG_VAAPI)                  += vaapi_vpp.h stack_internal.h
 SKIPHEADERS-$(CONFIG_VULKAN)                 += vulkan_filter.h
+SKIPHEADERS-$(CONFIG_SCALE_CUDA_FILTER)      += vf_scale_cuda.h
 
 TOOLS     = graph2dot
 TESTPROGS = drawutils filtfmts formats integral

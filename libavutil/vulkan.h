@@ -507,10 +507,10 @@ int ff_vk_create_imageviews(FFVulkanContext *s, FFVkExecContext *e,
 
 void ff_vk_frame_barrier(FFVulkanContext *s, FFVkExecContext *e,
                          AVFrame *pic, VkImageMemoryBarrier2 *bar, int *nb_bar,
-                         VkPipelineStageFlags src_stage,
-                         VkPipelineStageFlags dst_stage,
-                         VkAccessFlagBits     new_access,
-                         VkImageLayout        new_layout,
+                         VkPipelineStageFlags2 src_stage,
+                         VkPipelineStageFlags2 dst_stage,
+                         VkAccessFlagBits2     new_access,
+                         VkImageLayout         new_layout,
                          uint32_t             new_qf);
 
 /**
@@ -522,6 +522,13 @@ int ff_vk_alloc_mem(FFVulkanContext *s, VkMemoryRequirements *req,
 int ff_vk_create_buf(FFVulkanContext *s, FFVkBuffer *buf, size_t size,
                      void *pNext, void *alloc_pNext,
                      VkBufferUsageFlags usage, VkMemoryPropertyFlagBits flags);
+
+/**
+ * Flush or invalidate a single buffer, with a given size and offset.
+ */
+int ff_vk_flush_buffer(FFVulkanContext *s, FFVkBuffer *buf,
+                       size_t offset, size_t mem_size,
+                       int flush);
 
 /**
  * Buffer management code.

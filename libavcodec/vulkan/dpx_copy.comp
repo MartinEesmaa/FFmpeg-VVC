@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Mans Rullgard <mans@mansr.com>
+ * Copyright (c) 2025 Lynne <dev@lynne.ee>
  *
  * This file is part of FFmpeg.
  *
@@ -18,22 +18,34 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#include <stdint.h>
-
-#include "libavutil/attributes.h"
-#include "libavutil/arm/cpu.h"
-
-#include "libavcodec/vp56dsp.h"
-
-void ff_vp6_edge_filter_hor_neon(uint8_t *yuv, ptrdiff_t stride, int t);
-void ff_vp6_edge_filter_ver_neon(uint8_t *yuv, ptrdiff_t stride, int t);
-
-av_cold void ff_vp6dsp_init_arm(VP56DSPContext *s)
+TYPE read_data(uint off)
 {
-    int cpu_flags = av_get_cpu_flags();
+#ifdef BIG_ENDIAN
+    return TYPE_REVERSE(data[off]);
+#else
+    return data[off];
+#endif
+}
 
-    if (have_neon(cpu_flags)) {
-        s->edge_filter_hor = ff_vp6_edge_filter_hor_neon;
-        s->edge_filter_ver = ff_vp6_edge_filter_ver_neon;
+void main(void)
+{
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (!IS_WITHIN(pos, imageSize(dst[0])))
+        return;
+
+    uint offs = (pos.y*imageSize(dst[0]).x + pos.x)*COMPONENTS;
+#if NB_IMAGES == 1
+    TYPE_VEC val;
+    for (int i = 0; i < COMPONENTS; i++)
+        val[i] = read_data(offs + i);
+    val >>= SHIFT;
+    imageStore(dst[0], pos, val);
+#else
+    const ivec4 fmt_lut = ivec4(2, 0, 1, 3);
+    for (int i = 0; i < COMPONENTS; i++) {
+        TYPE val = read_data(offs + i);
+        val >>= SHIFT;
+        imageStore(dst[fmt_lut[i]], pos, TYPE_VEC(val));
     }
+#endif
 }

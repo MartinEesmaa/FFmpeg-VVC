@@ -861,6 +861,11 @@ static const AVFrame *ref_frame(const struct pl_frame_mix *mix)
     return NULL;
 }
 
+static inline double q2d_fallback(AVRational q, const double def)
+{
+    return (q.num && q.den) ? av_q2d(q) : def;
+}
+
 static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
                          struct pl_frame *target, double target_pts)
 {
@@ -882,8 +887,7 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
         s->var_values[VAR_IN_W]   = s->var_values[VAR_IW] = inlink->w;
         s->var_values[VAR_IN_H]   = s->var_values[VAR_IH] = inlink->h;
         s->var_values[VAR_A]      = (double) inlink->w / inlink->h;
-        s->var_values[VAR_SAR]    = inlink->sample_aspect_ratio.num ?
-            av_q2d(inlink->sample_aspect_ratio) : 1.0;
+        s->var_values[VAR_SAR]    = q2d_fallback(inlink->sample_aspect_ratio, 1.0);
         s->var_values[VAR_IN_T]   = s->var_values[VAR_T]  = image_pts;
         s->var_values[VAR_OUT_T]  = s->var_values[VAR_OT] = target_pts;
         s->var_values[VAR_N]      = outl->frame_count_out;
@@ -913,14 +917,6 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
         image->crop.x1 = image->crop.x0 + s->var_values[VAR_CROP_W];
         image->crop.y1 = image->crop.y0 + s->var_values[VAR_CROP_H];
 
-        const pl_rotation rot_total = image->rotation - target->rotation;
-        if ((rot_total + PL_ROTATION_360) % PL_ROTATION_180 == PL_ROTATION_90) {
-            /* Libplacebo expects the input crop relative to the actual frame
-             * dimensions, so un-transpose them here */
-            FFSWAP(float, image->crop.x0, image->crop.y0);
-            FFSWAP(float, image->crop.x1, image->crop.y1);
-        }
-
         if (src == ref) {
             /* Only update the target crop once, for the 'reference' frame */
             target->crop.x0 = av_expr_eval(s->pos_x_pexpr, s->var_values, NULL);
@@ -928,12 +924,17 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
             target->crop.x1 = target->crop.x0 + s->var_values[VAR_POS_W];
             target->crop.y1 = target->crop.y0 + s->var_values[VAR_POS_H];
 
+
             /* Effective visual crop */
-            const float w_adj = av_q2d(inlink->sample_aspect_ratio) /
-                                av_q2d(outlink->sample_aspect_ratio);
+            double sar_in = q2d_fallback(inlink->sample_aspect_ratio, 1.0);
+            double sar_out = q2d_fallback(outlink->sample_aspect_ratio, 1.0);
+
+            pl_rotation rot_total = PL_ROTATION_360 + image->rotation - target->rotation;
+            if (rot_total % PL_ROTATION_180 == PL_ROTATION_90)
+                sar_in = 1.0 / sar_in;
 
             pl_rect2df fixed = image->crop;
-            pl_rect2df_stretch(&fixed, w_adj, 1.0);
+            pl_rect2df_stretch(&fixed, sar_in / sar_out, 1.0);
 
             switch (s->fit_mode) {
             case FIT_FILL:
@@ -954,6 +955,13 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
             }
             case FIT_SCALE_DOWN:
                 pl_rect2df_aspect_fit(&target->crop, &fixed, 0.0);
+            }
+
+            if (rot_total % PL_ROTATION_180 == PL_ROTATION_90) {
+                /* Libplacebo expects the input crop relative to the actual frame
+                 * dimensions, so un-transpose them here */
+                FFSWAP(float, image->crop.x0, image->crop.y0);
+                FFSWAP(float, image->crop.x1, image->crop.y1);
             }
         }
     }
@@ -1278,7 +1286,7 @@ static int libplacebo_activate(AVFilterContext *ctx)
             in->qstatus = pl_queue_update(in->queue, &in->mix, pl_queue_params(
                 .pts            = TS2T(out_pts, outlink->time_base),
                 .radius         = pl_frame_mix_radius(&s->opts->params),
-                .vsync_duration = l->frame_rate.num ? av_q2d(av_inv_q(l->frame_rate)) : 0,
+                .vsync_duration = q2d_fallback(av_inv_q(l->frame_rate), 0.0),
             ));
 
             switch (in->qstatus) {
@@ -1461,8 +1469,7 @@ static int libplacebo_config_output(AVFilterLink *outlink)
                                  &outlink->w, &outlink->h));
 
     s->reset_sar |= s->normalize_sar || s->nb_inputs > 1;
-    double sar_in = inlink->sample_aspect_ratio.num ?
-                    av_q2d(inlink->sample_aspect_ratio) : 1.0;
+    double sar_in = q2d_fallback(inlink->sample_aspect_ratio, 1.0);
 
     int force_oar = s->force_original_aspect_ratio;
     if (!force_oar && s->fit_sense == FIT_CONSTRAINT) {
@@ -1549,8 +1556,7 @@ static int libplacebo_config_output(AVFilterLink *outlink)
     /* Static variables */
     s->var_values[VAR_OUT_W]    = s->var_values[VAR_OW] = outlink->w;
     s->var_values[VAR_OUT_H]    = s->var_values[VAR_OH] = outlink->h;
-    s->var_values[VAR_DAR]      = outlink->sample_aspect_ratio.num ?
-        av_q2d(outlink->sample_aspect_ratio) : 1.0;
+    s->var_values[VAR_DAR]      = q2d_fallback(outlink->sample_aspect_ratio, 1.0);
     s->var_values[VAR_HSUB]     = 1 << desc->log2_chroma_w;
     s->var_values[VAR_VSUB]     = 1 << desc->log2_chroma_h;
     s->var_values[VAR_OHSUB]    = 1 << out_desc->log2_chroma_w;

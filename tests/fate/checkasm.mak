@@ -67,6 +67,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-vf_colordetect                            \
                 fate-checkasm-vf_colorspace                             \
                 fate-checkasm-vf_eq                                     \
+                fate-checkasm-vf_fspp                                   \
                 fate-checkasm-vf_gblur                                  \
                 fate-checkasm-vf_hflip                                  \
                 fate-checkasm-vf_nlmeans                                \
@@ -75,6 +76,7 @@ FATE_CHECKASM = fate-checkasm-aacencdsp                                 \
                 fate-checkasm-videodsp                                  \
                 fate-checkasm-vorbisdsp                                 \
                 fate-checkasm-vp3dsp                                    \
+                fate-checkasm-vp6dsp                                    \
                 fate-checkasm-vp8dsp                                    \
                 fate-checkasm-vp9dsp                                    \
                 fate-checkasm-vvc_alf                                   \
