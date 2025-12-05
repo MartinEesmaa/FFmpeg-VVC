@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 Mans Rullgard
+ * Copyright (c) 2025 Arpad Panyik <Arpad.Panyik@arm.com>
  *
  * This file is part of FFmpeg.
  *
@@ -18,16 +18,19 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
-#ifndef AVCODEC_ARM_ASM_OFFSETS_H
-#define AVCODEC_ARM_ASM_OFFSETS_H
+#ifndef SWSCALE_AARCH64_ASM_OFFSETS_H
+#define SWSCALE_AARCH64_ASM_OFFSETS_H
 
-/* MpegEncContext */
-#define Y_DC_SCALE               0x04
-#define C_DC_SCALE               0x08
-#define AC_PRED                  0x0c
-#define BLOCK_LAST_INDEX         0x10
-#define H263_AIC                 0x40
-#define INTER_SCANTAB_RASTER_END 0x88
-#define INTRA_SCANTAB_RASTER_END 0x10c
+/* SwsLuts */
+#define SL_IN  0x00
+#define SL_OUT 0x08
 
-#endif /* AVCODEC_ARM_ASM_OFFSETS_H */
+/* SwsColorXform */
+#define SCX_GAMMA     0x00
+#define SCX_MAT       0x10
+#define SCX_GAMMA_IN  (SCX_GAMMA + SL_IN)
+#define SCX_GAMMA_OUT (SCX_GAMMA + SL_OUT)
+#define SCX_MAT_00    SCX_MAT
+#define SCX_MAT_22    (SCX_MAT + 8 * 2)
+
+#endif /* SWSCALE_AARCH64_ASM_OFFSETS_H */

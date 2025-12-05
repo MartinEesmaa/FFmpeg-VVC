@@ -19,6 +19,7 @@ AVCODECOBJS-$(CONFIG_LLVIDDSP)          += llviddsp.o
 AVCODECOBJS-$(CONFIG_LLVIDENCDSP)       += llviddspenc.o
 AVCODECOBJS-$(CONFIG_LPC)               += lpc.o
 AVCODECOBJS-$(CONFIG_ME_CMP)            += motion.o
+AVCODECOBJS-$(CONFIG_MPEGVIDEO)         += mpegvideo_unquantize.o
 AVCODECOBJS-$(CONFIG_MPEGVIDEOENCDSP)   += mpegvideoencdsp.o
 AVCODECOBJS-$(CONFIG_QPELDSP)           += qpeldsp.o
 AVCODECOBJS-$(CONFIG_VC1DSP)            += vc1dsp.o
@@ -81,6 +82,7 @@ SWSCALEOBJS                             += sw_gbrp.o            \
                                            sw_range_convert.o   \
                                            sw_rgb.o             \
                                            sw_scale.o           \
+                                           sw_xyz2rgb.o         \
                                            sw_yuv2rgb.o         \
                                            sw_yuv2yuv.o
 

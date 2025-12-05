@@ -1066,7 +1066,7 @@ int ff_vk_create_buf(FFVulkanContext *s, FFVkBuffer *buf, size_t size,
         .pNext = &ded_req,
     };
 
-    av_log(s, AV_LOG_DEBUG, "Creating a buffer of %"SIZE_SPECIFIER" bytes, "
+    av_log(s, AV_LOG_DEBUG, "Creating a buffer of %zu bytes, "
                             "usage: 0x%x, flags: 0x%x\n",
            size, usage, flags);
 
@@ -1168,7 +1168,7 @@ int ff_vk_map_buffers(FFVulkanContext *s, FFVkBuffer **buf, uint8_t *mem[],
 }
 
 int ff_vk_flush_buffer(FFVulkanContext *s, FFVkBuffer *buf,
-                       size_t offset, size_t mem_size,
+                       VkDeviceSize offset, VkDeviceSize mem_size,
                        int flush)
 {
     VkResult ret;

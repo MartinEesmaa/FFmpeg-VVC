@@ -1890,7 +1890,7 @@ static int vulkan_device_init(AVHWDeviceContext *ctx)
     av_log(ctx, AV_LOG_VERBOSE, "Alignments:\n");
     av_log(ctx, AV_LOG_VERBOSE, "    optimalBufferCopyRowPitchAlignment: %"PRIu64"\n",
            p->props.properties.limits.optimalBufferCopyRowPitchAlignment);
-    av_log(ctx, AV_LOG_VERBOSE, "    minMemoryMapAlignment:              %"SIZE_SPECIFIER"\n",
+    av_log(ctx, AV_LOG_VERBOSE, "    minMemoryMapAlignment:              %zu\n",
            p->props.properties.limits.minMemoryMapAlignment);
     av_log(ctx, AV_LOG_VERBOSE, "    nonCoherentAtomSize:                %"PRIu64"\n",
            p->props.properties.limits.nonCoherentAtomSize);
@@ -2569,7 +2569,7 @@ static int switch_layout_host(AVHWFramesContext *hwfc, FFVkExecPool *ectx,
     VkResult ret;
     VulkanDevicePriv *p = hwfc->device_ctx->hwctx;
     FFVulkanFunctions *vk = &p->vkctx.vkfn;
-    VkHostImageLayoutTransitionInfo layout_change[AV_NUM_DATA_POINTERS];
+    VkHostImageLayoutTransitionInfoEXT layout_change[AV_NUM_DATA_POINTERS];
     int nb_images = ff_vk_count_images(frame);
 
     VkImageLayout new_layout;
@@ -2585,8 +2585,8 @@ static int switch_layout_host(AVHWFramesContext *hwfc, FFVkExecPool *ectx,
         return AVERROR(ENOTSUP);
 
     for (i = 0; i < nb_images; i++) {
-        layout_change[i] = (VkHostImageLayoutTransitionInfo) {
-            .sType = VK_STRUCTURE_TYPE_HOST_IMAGE_LAYOUT_TRANSITION_INFO,
+        layout_change[i] = (VkHostImageLayoutTransitionInfoEXT) {
+            .sType = VK_STRUCTURE_TYPE_HOST_IMAGE_LAYOUT_TRANSITION_INFO_EXT,
             .image = frame->img[i],
             .oldLayout = frame->layout[i],
             .newLayout = new_layout,

@@ -406,7 +406,7 @@ static int d3d12va_encode_av1_get_coded_data(AVCodecContext *avctx,
     av_log(avctx, AV_LOG_DEBUG, "Tile group extra size: %d bytes.\n", tile_group_extra_size);
 
     total_size += (pic->header_size + tile_group_extra_size + av1_pic_hd_size);
-    av_log(avctx, AV_LOG_DEBUG, "Output buffer size %"SIZE_SPECIFIER"\n", total_size);
+    av_log(avctx, AV_LOG_DEBUG, "Output buffer size %zu\n", total_size);
 
     hr = ID3D12Resource_Map(pic->output_buffer, 0, NULL, (void **)&mapped_data);
     if (FAILED(hr)) {
@@ -559,7 +559,7 @@ static int d3d12va_encode_av1_init_sequence_params(AVCodecContext *avctx)
         .Codec                            = D3D12_VIDEO_ENCODER_CODEC_AV1,
         .InputFormat                      = hwctx->format,
         .RateControl                      = ctx->rc,
-        .IntraRefresh                     = D3D12_VIDEO_ENCODER_INTRA_REFRESH_MODE_NONE,
+        .IntraRefresh                     = ctx->intra_refresh.Mode,
         .SubregionFrameEncoding           = D3D12_VIDEO_ENCODER_FRAME_SUBREGION_LAYOUT_MODE_FULL_FRAME,
         .ResolutionsListCount             = 1,
         .pResolutionList                  = &ctx->resolution,
@@ -1082,6 +1082,7 @@ static int d3d12va_encode_av1_close(AVCodecContext *avctx)
 #define FLAGS (AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM)
 static const AVOption d3d12va_encode_av1_options[] = {
     HW_BASE_ENCODE_COMMON_OPTIONS,
+    D3D12VA_ENCODE_COMMON_OPTIONS,
     D3D12VA_ENCODE_RC_OPTIONS,
 
     { "qp", "Constant QP (for P-frames; scaled by qfactor/qoffset for I/B)",
