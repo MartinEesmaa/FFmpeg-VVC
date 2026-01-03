@@ -212,6 +212,10 @@ int ff_vk_load_props(FFVulkanContext *s)
     vk->GetPhysicalDeviceMemoryProperties(s->hwctx->phys_dev, &s->mprops);
     vk->GetPhysicalDeviceFeatures2(s->hwctx->phys_dev, &s->feats);
 
+    for (int i = 0; i < s->mprops.memoryTypeCount; i++)
+        s->host_cached_flag |= s->mprops.memoryTypes[i].propertyFlags &
+                               VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+
     load_enabled_qfs(s);
 
     if (s->qf_props)
@@ -1305,8 +1309,6 @@ int ff_vk_get_pooled_buffer(FFVulkanContext *ctx, AVBufferPool **buf_pool,
         return AVERROR(ENOMEM);
 
     data = (FFVkBuffer *)ref->data;
-    data->stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    data->access = VK_ACCESS_2_NONE;
 
     if (data->size >= size)
         return 0;

@@ -31,7 +31,6 @@ extern const char *ff_source_dpx_copy_comp;
 
 const FFVulkanDecodeDescriptor ff_vk_dec_dpx_desc = {
     .codec_id         = AV_CODEC_ID_DPX,
-    .decode_extension = FF_VK_EXT_PUSH_DESCRIPTOR,
     .queue_flags      = VK_QUEUE_COMPUTE_BIT,
 };
 
@@ -353,10 +352,11 @@ static int init_shader(AVCodecContext *avctx, FFVulkanContext *s,
     };
     RET(ff_vk_shader_add_descriptor_set(s, shd, desc_set, 2, 0, 0));
 
-    if (dpx->endian)
+    if (dpx->endian && bits > 8)
         GLSLC(0, #define BIG_ENDIAN                                           );
     GLSLF(0, #define COMPONENTS (%i)                          ,dpx->components);
     GLSLF(0, #define BITS_PER_COMP (%i)                                  ,bits);
+    GLSLF(0, #define BITS_LOG2 (%i)                             ,av_log2(bits));
     GLSLF(0, #define NB_IMAGES (%i)                                    ,planes);
     if (unpack) {
         if (bits == 10)
@@ -465,8 +465,6 @@ const FFHWAccel ff_dpx_vulkan_hwaccel = {
     .frame_priv_data_size  = sizeof(DPXVulkanDecodePicture),
     .init                  = &vk_decode_dpx_init,
     .update_thread_context = &ff_vk_update_thread_context,
-    .decode_params         = &ff_vk_params_invalidate,
-    .flush                 = &ff_vk_decode_flush,
     .uninit                = &ff_vk_decode_uninit,
     .frame_params          = &ff_vk_frame_params,
     .priv_data_size        = sizeof(FFVulkanDecodeContext),

@@ -91,10 +91,6 @@ typedef struct FFVkBuffer {
     size_t size;
     VkDeviceAddress address;
 
-    /* Local use only */
-    VkPipelineStageFlags2 stage;
-    VkAccessFlags2 access;
-
     /* Only valid when allocated via ff_vk_get_pooled_buffer with HOST_VISIBLE or
      * via ff_vk_host_map_buffer */
     uint8_t *mapped_mem;
@@ -301,6 +297,8 @@ typedef struct FFVulkanContext {
     VkPhysicalDeviceVulkan12Features feats_12;
     VkPhysicalDeviceFeatures2 feats;
 
+    VkMemoryPropertyFlagBits host_cached_flag;
+
     AVBufferRef           *device_ref;
     AVHWDeviceContext     *device;
     AVVulkanDeviceContext *hwctx;
@@ -504,6 +502,25 @@ int ff_vk_create_imageview(FFVulkanContext *s,
 int ff_vk_create_imageviews(FFVulkanContext *s, FFVkExecContext *e,
                             VkImageView views[AV_NUM_DATA_POINTERS],
                             AVFrame *f, enum FFVkShaderRepFormat rep_fmt);
+
+#define ff_vk_buf_barrier(dst, vkb, s_stage, s_access, s_access2,              \
+                          d_stage, d_access, d_access2, offs, bsz)             \
+    do {                                                                       \
+        dst = (VkBufferMemoryBarrier2) {                                       \
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,                \
+            .srcStageMask = VK_PIPELINE_STAGE_2_ ##s_stage,                    \
+            .srcAccessMask = VK_ACCESS_2_ ##s_access |                         \
+                             VK_ACCESS_2_ ##s_access2,                         \
+            .dstStageMask = VK_PIPELINE_STAGE_2_ ##d_stage,                    \
+            .dstAccessMask = VK_ACCESS_2_ ##d_access |                         \
+                             VK_ACCESS_2_ ##d_access2,                         \
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,                    \
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,                    \
+            .buffer = vkb->buf,                                                \
+            .offset = offs,                                                    \
+            .size = bsz                                                        \
+        };                                                                     \
+    } while(0)
 
 void ff_vk_frame_barrier(FFVulkanContext *s, FFVkExecContext *e,
                          AVFrame *pic, VkImageMemoryBarrier2 *bar, int *nb_bar,

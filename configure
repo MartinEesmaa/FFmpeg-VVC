@@ -283,6 +283,7 @@ External library support:
   --enable-libsrt          enable Haivision SRT protocol via libsrt [no]
   --enable-libssh          enable SFTP protocol via libssh [no]
   --enable-libsvtav1       enable AV1 encoding via SVT [no]
+  --enable-libsvtjpegxs    enable JPEGXS encoding/decoding via SVT [no]
   --enable-libtensorflow   enable TensorFlow as a DNN module backend
                            for DNN based filters like sr [no]
   --enable-libtesseract    enable Tesseract, needed for ocr filter [no]
@@ -351,7 +352,6 @@ External library support:
   --disable-xlib           disable xlib [autodetect]
   --disable-zlib           disable zlib [autodetect]
   --enable-libsvthevc      enable HEVC encoding via svt [no]
-  --enable-libsvtjpegxs    enable JPEGXS encoding/decoding via SVT [no]
 
   The following libraries provide various hardware acceleration features:
   --disable-amf            disable AMF video encoding code [autodetect]
@@ -486,6 +486,7 @@ Optimization options (experts only):
   --disable-i8mm           disable I8MM optimizations
   --disable-sve            disable SVE optimizations
   --disable-sve2           disable SVE2 optimizations
+  --disable-sme            disable SME optimizations
   --disable-inline-asm     disable use of inline assembly
   --disable-x86asm         disable use of standalone x86 assembly
   --disable-mipsdsp        disable MIPS DSP ASE R1 optimizations
@@ -1214,8 +1215,9 @@ check_archext_insn(){
     log check_archext_insn "$@"
     feature="$1"
     instr="$2"
+    instr2="$3"
     # Check if the assembly is accepted in inline assembly.
-    check_inline_asm ${feature}_inline "\"$instr\""
+    check_inline_asm ${feature}_inline "\"$instr \n\t $instr2\""
     # We don't check if the instruction is supported out of the box by the
     # external assembler (we don't try to set ${feature}_external) as we don't
     # need to use these instructions in non-runtime detected codepaths.
@@ -1237,6 +1239,7 @@ EOF
 $arch_directive
 $arch_extension_directive
 $instr
+$instr2
 EOF
 }
 
@@ -2022,6 +2025,7 @@ EXTERNAL_LIBRARY_LIST="
     libssh
     libsvtav1
     libsvthevc
+    libsvtjpegxs
     libtensorflow
     libtesseract
     libtheora
@@ -2056,7 +2060,6 @@ EXTERNAL_LIBRARY_LIST="
     vapoursynth
     vulkan_static
     whisper
-    libsvtjpegxs
 "
 
 HWACCEL_AUTODETECT_LIBRARY_LIST="
@@ -2240,6 +2243,7 @@ ARCH_EXT_LIST_ARM="
     setend
     sve
     sve2
+    sme
 "
 
 ARCH_EXT_LIST_MIPS="
@@ -2507,6 +2511,7 @@ TOOLCHAIN_FEATURES="
     as_archext_i8mm_directive
     as_archext_sve_directive
     as_archext_sve2_directive
+    as_archext_sme_directive
     as_dn_directive
     as_fpu_directive
     as_func
@@ -2633,6 +2638,7 @@ CONFIG_EXTRA="
     celp_math
     d3d12_intra_refresh
     d3d12va_encode
+    d3d12va_me_precision_eighth_pixel
     deflate_wrapper
     dirac_parse
     dnn
@@ -2839,6 +2845,7 @@ dotprod_deps="aarch64 neon"
 i8mm_deps="aarch64 neon"
 sve_deps="aarch64 neon"
 sve2_deps="aarch64 neon sve"
+sme_deps="aarch64 neon sve sve2"
 
 map 'eval ${v}_inline_deps=inline_asm' $ARCH_EXT_LIST_ARM
 
@@ -2970,7 +2977,7 @@ msmpeg4dec_select="h263_decoder"
 msmpeg4enc_select="h263_encoder"
 vc1dsp_select="h264chroma startcode"
 vvc_sei_select="atsc_a53 golomb"
-wmv2dsp_select="qpeldsp"
+wmv2dsp_select="idctdsp"
 
 # decoders / encoders
 aac_decoder_select="adts_header mpeg4audio sinewin"
@@ -3232,7 +3239,7 @@ wmav2_encoder_select="sinewin wma_freqs"
 wmavoice_decoder_select="lsp sinewin"
 wmv1_decoder_select="msmpeg4dec"
 wmv1_encoder_select="msmpeg4enc"
-wmv2_decoder_select="blockdsp error_resilience idctdsp intrax8 msmpeg4dec videodsp wmv2dsp"
+wmv2_decoder_select="blockdsp error_resilience idctdsp intrax8 msmpeg4dec qpeldsp videodsp wmv2dsp"
 wmv2_encoder_select="msmpeg4enc wmv2dsp"
 wmv3_decoder_select="vc1_decoder"
 wmv3image_decoder_select="wmv3_decoder"
@@ -3721,6 +3728,8 @@ libspeex_decoder_deps="libspeex"
 libspeex_encoder_deps="libspeex"
 libspeex_encoder_select="audio_frame_queue"
 libsvtav1_encoder_deps="libsvtav1"
+libsvtjpegxs_encoder_deps="libsvtjpegxs"
+libsvtjpegxs_decoder_deps="libsvtjpegxs"
 libsvtav1_encoder_select="dovi_rpuenc"
 libtheora_encoder_deps="libtheora"
 libtwolame_encoder_deps="libtwolame"
@@ -3759,8 +3768,6 @@ videotoolbox_suggest="coreservices"
 videotoolbox_deps="corefoundation coremedia corevideo VTDecompressionSessionDecodeFrame"
 videotoolbox_encoder_deps="videotoolbox VTCompressionSessionPrepareToEncodeFrames"
 libsvt_hevc_encoder_deps="libsvthevc"
-libsvtjpegxs_encoder_deps="libsvtjpegxs"
-libsvtjpegxs_decoder_deps="libsvtjpegxs"
 
 # demuxers / muxers
 ac3_demuxer_select="ac3_parser"
@@ -3799,7 +3806,7 @@ flv_muxer_select="aac_adtstoasc_bsf iso_writer"
 gxf_muxer_select="pcm_rechunk_bsf"
 hds_muxer_select="flv_muxer"
 hls_demuxer_select="aac_demuxer ac3_demuxer adts_header ac3_parser eac3_demuxer mov_demuxer mpegts_demuxer"
-hls_muxer_select="mov_muxer mpegts_muxer"
+hls_muxer_select="mov_muxer mpegts_muxer webvtt_muxer"
 hxvs_demuxer_select="h264_parser hevc_parser"
 iamf_demuxer_select="iamfdec"
 iamf_muxer_select="iamfenc"
@@ -3858,6 +3865,7 @@ spdif_muxer_select="adts_header"
 spx_muxer_select="ogg_muxer"
 swf_demuxer_suggest="zlib"
 tak_demuxer_select="tak_parser"
+tee_muxer_select="fifo_muxer"
 truehd_demuxer_select="mlp_parser"
 tg2_muxer_select="mov_muxer"
 tgp_muxer_select="mov_muxer"
@@ -3871,6 +3879,7 @@ webm_dash_manifest_demuxer_select="matroska_demuxer"
 whip_emuxer_deps="libdatachannel"
 whep_edemuxer_deps="libdatachannel"
 whip_muxer_deps_any="dtls_protocol"
+whip_muxer_select="rtp_muxer http_protocol"
 wtv_demuxer_select="mpegts_demuxer riffdec"
 wtv_muxer_select="mpegts_muxer riffenc"
 xmv_demuxer_select="riffdec"
@@ -4926,7 +4935,7 @@ fi
 
 exesuf() {
     case $1 in
-        mingw32*|mingw64*|msys*|win32|win64|cygwin*|*-dos|freedos|opendos|os/2*|symbian) echo .exe ;;
+        mingw32*|mingw64*|msys*|win32|win64|cygwin*|*-dos|freedos|opendos|os/2*|symbian|windows_nt) echo .exe ;;
     esac
 }
 
@@ -5183,7 +5192,6 @@ probe_cc(){
         _depflags='-MMD'
         _cflags_speed='-O3'
         _cflags_size='-Os'
-        _cflags_noopt='-O1'
         _flags_filter=icc_flags
     elif $_cc -v 2>&1 | grep -q xlc; then
         _type=xlc
@@ -5297,7 +5305,6 @@ probe_cc(){
         _DEPCXXFLAGS='$(CXXFLAGS)'
         _cflags_speed="-O2"
         _cflags_size="-O1"
-        _cflags_noopt="-O1"
         if $_cc -nologo- 2>&1 | grep -q Linker; then
             _ld_o='-out:$@'
             _flags_filter=msvc_flags_link
@@ -6115,7 +6122,7 @@ case $target_os in
         SLIBSUF=".dll"
         SLIBNAME_WITH_VERSION='$(SLIBPREF)$(FULLNAME)-$(LIBVERSION)$(SLIBSUF)'
         SLIBNAME_WITH_MAJOR='$(SLIBPREF)$(FULLNAME)-$(LIBMAJOR)$(SLIBSUF)'
-        SLIB_CREATE_DEF_CMD='EXTERN_PREFIX="$(EXTERN_PREFIX)" $(SRC_PATH)/compat/windows/makedef $(SUBDIR)lib$(NAME).ver $(OBJS) > $$(@:$(SLIBSUF)=.def)'
+        SLIB_CREATE_DEF_CMD='LDFLAGS="$(LDFLAGS)" EXTERN_PREFIX="$(EXTERN_PREFIX)" $(SRC_PATH)/compat/windows/makedef $(SUBDIR)lib$(NAME).ver $(OBJS) > $$(@:$(SLIBSUF)=.def)'
         SLIB_INSTALL_NAME='$(SLIBNAME_WITH_MAJOR)'
         SLIB_INSTALL_LINKS=
         SLIB_INSTALL_EXTRA_SHLIB='$(SLIBNAME:$(SLIBSUF)=.lib)'
@@ -6474,11 +6481,12 @@ if enabled aarch64; then
     # internal assembler in clang 3.3 does not support this instruction
     enabled neon && check_insn neon 'ext   v0.8B, v0.8B, v1.8B, #1'
 
-    archext_list="dotprod i8mm sve sve2"
+    archext_list="dotprod i8mm sve sve2 sme"
     enabled dotprod && check_archext_insn dotprod 'udot v0.4s, v0.16b, v0.16b'
     enabled i8mm    && check_archext_insn i8mm    'usdot v0.4s, v0.16b, v0.16b'
     enabled sve     && check_archext_insn sve     'whilelt p0.s, x0, x1'
     enabled sve2    && check_archext_insn sve2    'sqrdmulh z0.s, z0.s, z0.s'
+    enabled sme     && check_archext_insn sme     'smstart' 'cntb x0'
 
     # Disable the main feature (e.g. HAVE_NEON) if neither inline nor external
     # assembly support the feature out of the box. Skip this for the features
@@ -7003,6 +7011,7 @@ test_code cc "windows.h d3d12video.h" "D3D12_FEATURE_VIDEO feature = D3D12_FEATU
 test_code cc "windows.h d3d12video.h" "D3D12_FEATURE_DATA_VIDEO_ENCODER_RESOURCE_REQUIREMENTS req" && enable d3d12_encoder_feature
 test_code cc "windows.h d3d12video.h" "D3D12_VIDEO_ENCODER_CODEC c = D3D12_VIDEO_ENCODER_CODEC_AV1; (void)c;" && enable d3d12va_av1_headers
 test_code cc "windows.h d3d12video.h" "D3D12_FEATURE_DATA_VIDEO_ENCODER_INTRA_REFRESH_MODE check = { 0 };" && enable d3d12_intra_refresh
+test_code cc "windows.h d3d12video.h" "D3D12_VIDEO_ENCODER_MOTION_ESTIMATION_PRECISION_MODE m = D3D12_VIDEO_ENCODER_MOTION_ESTIMATION_PRECISION_MODE_EIGHTH_PIXEL; (void)m;" && enable d3d12va_me_precision_eighth_pixel
 check_type "windows.h" "DPI_AWARENESS_CONTEXT" -D_WIN32_WINNT=0x0A00
 check_type "windows.h security.h schnlsp.h" SecPkgContext_KeyingMaterialInfo -DSECURITY_WIN32
 check_type "d3d9.h dxva2api.h" DXVA2_ConfigPictureDecode -D_WIN32_WINNT=0x0602
@@ -7289,6 +7298,7 @@ enabled libspeex          && require_pkg_config libspeex speex speex/speex.h spe
 enabled libsrt            && require_pkg_config libsrt "srt >= 1.3.0" srt/srt.h srt_socket
 enabled libsvtav1         && require_pkg_config libsvtav1 "SvtAv1Enc >= 0.9.0" EbSvtAv1Enc.h svt_av1_enc_init_handle
 enabled libsvthevc        && require_pkg_config libsvthevc SvtHevcEnc EbApi.h EbInitHandle
+enabled libsvtjpegxs      && require_pkg_config libsvtjpegxs "SvtJpegxs >= 0.10.0" SvtJpegxsEnc.h svt_jpeg_xs_encoder_init
 enabled libtensorflow     && require libtensorflow tensorflow/c/c_api.h TF_Version -ltensorflow
 enabled libtesseract      && require_pkg_config libtesseract tesseract tesseract/capi.h TessBaseAPICreate
 enabled libtheora         && require libtheora theora/theoraenc.h th_info_init -ltheoraenc -ltheoradec -logg
@@ -7307,7 +7317,6 @@ enabled libvmaf           && check_pkg_config libvmaf_cuda "libvmaf >= 2.0.0" li
 enabled libvo_amrwbenc    && require libvo_amrwbenc vo-amrwbenc/enc_if.h E_IF_init -lvo-amrwbenc
 enabled libvorbis         && require_pkg_config libvorbis vorbis vorbis/codec.h vorbis_info_init &&
                              require_pkg_config libvorbisenc vorbisenc vorbis/vorbisenc.h vorbis_encode_init
-enabled libsvtjpegxs      && require_pkg_config libsvtjpegxs "SvtJpegxs >= 0.9.0" SvtJpegxsEnc.h svt_jpeg_xs_encoder_init
 
 enabled whisper           && require_pkg_config whisper "whisper >= 1.7.5" whisper.h whisper_init_from_file_with_params
 
@@ -8255,6 +8264,7 @@ if enabled aarch64; then
     echo "I8MM enabled              ${i8mm-no}"
     echo "SVE enabled               ${sve-no}"
     echo "SVE2 enabled              ${sve2-no}"
+    echo "SME enabled               ${sme-no}"
 fi
 if enabled arm; then
     echo "ARMv5TE enabled           ${armv5te-no}"

@@ -81,6 +81,7 @@ typedef struct VulkanDeviceFeatures {
     VkPhysicalDeviceTimelineSemaphoreFeatures timeline_semaphore;
     VkPhysicalDeviceShaderSubgroupRotateFeaturesKHR subgroup_rotate;
     VkPhysicalDeviceHostImageCopyFeaturesEXT host_image_copy;
+    VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR explicit_mem_layout;
 
 #ifdef VK_EXT_zero_initialize_device_memory
     VkPhysicalDeviceZeroInitializeDeviceMemoryFeaturesEXT zero_initialize;
@@ -259,6 +260,8 @@ static void device_features_init(AVHWDeviceContext *ctx, VulkanDeviceFeatures *f
                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT);
     FF_VK_STRUCT_EXT(s, &feats->device, &feats->atomic_float, FF_VK_EXT_ATOMIC_FLOAT,
                      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT);
+    FF_VK_STRUCT_EXT(s, &feats->device, &feats->explicit_mem_layout, FF_VK_EXT_EXPLICIT_MEM_LAYOUT,
+                     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR);
 
 #ifdef VK_KHR_shader_relaxed_extended_instruction
     FF_VK_STRUCT_EXT(s, &feats->device, &feats->relaxed_extended_instruction, FF_VK_EXT_RELAXED_EXTENDED_INSTR,
@@ -305,6 +308,7 @@ static void device_features_copy_needed(VulkanDeviceFeatures *dst, VulkanDeviceF
     COPY_VAL(vulkan_1_2.vulkanMemoryModelDeviceScope);
     COPY_VAL(vulkan_1_2.uniformBufferStandardLayout);
     COPY_VAL(vulkan_1_2.runtimeDescriptorArray);
+    COPY_VAL(vulkan_1_2.shaderSubgroupExtendedTypes);
 
     COPY_VAL(vulkan_1_3.dynamicRendering);
     COPY_VAL(vulkan_1_3.maintenance4);
@@ -344,6 +348,11 @@ static void device_features_copy_needed(VulkanDeviceFeatures *dst, VulkanDeviceF
 
     COPY_VAL(atomic_float.shaderBufferFloat32Atomics);
     COPY_VAL(atomic_float.shaderBufferFloat32AtomicAdd);
+
+    COPY_VAL(explicit_mem_layout.workgroupMemoryExplicitLayout);
+    COPY_VAL(explicit_mem_layout.workgroupMemoryExplicitLayoutScalarBlockLayout);
+    COPY_VAL(explicit_mem_layout.workgroupMemoryExplicitLayout8BitAccess);
+    COPY_VAL(explicit_mem_layout.workgroupMemoryExplicitLayout16BitAccess);
 
 #ifdef VK_KHR_shader_relaxed_extended_instruction
     COPY_VAL(relaxed_extended_instruction.shaderRelaxedExtendedInstruction);
@@ -654,6 +663,7 @@ static const VulkanOptExtension optional_device_exts[] = {
     { VK_EXT_SHADER_OBJECT_EXTENSION_NAME,                    FF_VK_EXT_SHADER_OBJECT          },
     { VK_KHR_SHADER_SUBGROUP_ROTATE_EXTENSION_NAME,           FF_VK_EXT_SUBGROUP_ROTATE        },
     { VK_EXT_HOST_IMAGE_COPY_EXTENSION_NAME,                  FF_VK_EXT_HOST_IMAGE_COPY        },
+    { VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME, FF_VK_EXT_EXPLICIT_MEM_LAYOUT    },
 #ifdef VK_EXT_zero_initialize_device_memory
     { VK_EXT_ZERO_INITIALIZE_DEVICE_MEMORY_EXTENSION_NAME,    FF_VK_EXT_ZERO_INITIALIZE        },
 #endif
@@ -693,6 +703,34 @@ static const VulkanOptExtension optional_device_exts[] = {
     { VK_KHR_VIDEO_DECODE_AV1_EXTENSION_NAME,                 FF_VK_EXT_VIDEO_DECODE_AV1       },
 };
 
+const char **av_vk_get_optional_instance_extensions(int *count)
+{
+    const char **exts = av_malloc_array(sizeof(*exts),
+                                        FF_ARRAY_ELEMS(optional_instance_exts));
+    if (!exts)
+        return NULL;
+
+    for (int i = 0; i < FF_ARRAY_ELEMS(optional_instance_exts); i++)
+        exts[i] = optional_instance_exts[i].name;
+
+    *count = FF_ARRAY_ELEMS(optional_instance_exts);
+    return exts;
+}
+
+const char **av_vk_get_optional_device_extensions(int *count)
+{
+    const char **exts = av_malloc_array(sizeof(*exts),
+                                        FF_ARRAY_ELEMS(optional_device_exts));
+    if (!exts)
+        return NULL;
+
+    for (int i = 0; i < FF_ARRAY_ELEMS(optional_device_exts); i++)
+        exts[i] = optional_device_exts[i].name;
+
+    *count = FF_ARRAY_ELEMS(optional_device_exts);
+    return exts;
+}
+
 static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
                                            VkDebugUtilsMessageTypeFlagsEXT messageType,
                                            const VkDebugUtilsMessengerCallbackDataEXT *data,
@@ -705,8 +743,6 @@ static VkBool32 VKAPI_CALL vk_dbg_callback(VkDebugUtilsMessageSeverityFlagBitsEX
     switch (data->messageIdNumber) {
     case 0x086974c1: /* BestPractices-vkCreateCommandPool-command-buffer-reset */
     case 0xfd92477a: /* BestPractices-vkAllocateMemory-small-allocation */
-    case 0x618ab1e7: /* VUID-VkImageViewCreateInfo-usage-02275 */
-    case 0x30f4ac70: /* VUID-VkImageCreateInfo-pNext-06811 */
         return VK_FALSE;
     default:
         break;
@@ -2929,6 +2965,9 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
     const struct FFVkFormatEntry *fmt;
     int disable_multiplane = p->disable_multiplane ||
                              (hwctx->flags & AV_VK_FRAME_FLAG_DISABLE_MULTIPLANE);
+    int is_lone_dpb = ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR) ||
+                       ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR) &&
+                        !(hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR)));
 
     /* Defaults */
     if (!hwctx->nb_layers)
@@ -2981,36 +3020,37 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
             return err;
     }
 
-    /* Image usage flags */
-    hwctx->usage |= supported_usage & (VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-                                       VK_IMAGE_USAGE_STORAGE_BIT      |
-                                       VK_IMAGE_USAGE_SAMPLED_BIT);
+    /* Lone DPB images do not need additional flags. */
+    if (!is_lone_dpb) {
+        /* Image usage flags */
+        hwctx->usage |= supported_usage & (VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                           VK_IMAGE_USAGE_STORAGE_BIT      |
+                                           VK_IMAGE_USAGE_SAMPLED_BIT);
 
-    if (p->vkctx.extensions & FF_VK_EXT_HOST_IMAGE_COPY &&
-        !(p->dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY))
-        hwctx->usage |= supported_usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
+        if (p->vkctx.extensions & FF_VK_EXT_HOST_IMAGE_COPY &&
+            !(p->dprops.driverID == VK_DRIVER_ID_NVIDIA_PROPRIETARY) &&
+            !(p->dprops.driverID == VK_DRIVER_ID_MOLTENVK))
+            hwctx->usage |= supported_usage & VK_IMAGE_USAGE_HOST_TRANSFER_BIT_EXT;
 
-    /* Enables encoding of images, if supported by format and extensions */
-    if ((supported_usage & VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR) &&
-        (p->vkctx.extensions & (FF_VK_EXT_VIDEO_ENCODE_QUEUE |
-                                FF_VK_EXT_VIDEO_MAINTENANCE_1)))
-        hwctx->usage |= VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
+        /* Enables encoding of images, if supported by format and extensions */
+        if ((supported_usage & VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR) &&
+            (p->vkctx.extensions & FF_VK_EXT_VIDEO_ENCODE_QUEUE) &&
+            (p->vkctx.extensions & FF_VK_EXT_VIDEO_MAINTENANCE_1))
+            hwctx->usage |= VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR;
 
-    /* Image creation flags.
-     * Only fill them in automatically if the image is not going to be used as
-     * a DPB-only image, and we have SAMPLED/STORAGE bits set. */
-    if (!hwctx->img_flags) {
-        int is_lone_dpb = ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR) ||
-                           ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR) &&
-                            !(hwctx->usage & VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR)));
-        int sampleable = hwctx->usage & (VK_IMAGE_USAGE_SAMPLED_BIT |
-                                         VK_IMAGE_USAGE_STORAGE_BIT);
-        hwctx->img_flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
-        if (sampleable && !is_lone_dpb) {
-            hwctx->img_flags |= VK_IMAGE_CREATE_ALIAS_BIT;
-            if ((fmt->vk_planes > 1) && (hwctx->format[0] == fmt->vkf))
-                hwctx->img_flags |= VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+        /* Image creation flags.
+         * Only fill them in automatically if the image is not going to be used as
+         * a DPB-only image, and we have SAMPLED/STORAGE bits set. */
+        if (!hwctx->img_flags) {
+            int sampleable = hwctx->usage & (VK_IMAGE_USAGE_SAMPLED_BIT |
+                                             VK_IMAGE_USAGE_STORAGE_BIT);
+            hwctx->img_flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT;
+            if (sampleable) {
+                hwctx->img_flags |= VK_IMAGE_CREATE_ALIAS_BIT;
+                if ((fmt->vk_planes > 1) && (hwctx->format[0] == fmt->vkf))
+                    hwctx->img_flags |= VK_IMAGE_CREATE_EXTENDED_USAGE_BIT;
+            }
         }
     }
 
@@ -3019,8 +3059,8 @@ static int vulkan_frames_init(AVHWFramesContext *hwfc)
      * If there's no profile list, or it has no encode operations,
      * then allow creating the image with no specific profile. */
     if ((hwctx->usage & VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR) &&
-        (p->vkctx.extensions & (FF_VK_EXT_VIDEO_ENCODE_QUEUE |
-                                FF_VK_EXT_VIDEO_MAINTENANCE_1))) {
+        (p->vkctx.extensions & FF_VK_EXT_VIDEO_ENCODE_QUEUE) &&
+        (p->vkctx.extensions & FF_VK_EXT_VIDEO_MAINTENANCE_1)) {
         const VkVideoProfileListInfoKHR *pl;
         pl = ff_vk_find_struct(hwctx->create_pnext, VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR);
         if (!pl) {
@@ -3488,7 +3528,7 @@ fail:
 }
 
 static int vulkan_map_from_drm_frame_sync(AVHWFramesContext *hwfc, AVFrame *dst,
-                                          const AVFrame *src, int flags)
+                                          const AVDRMFrameDescriptor *desc, int flags)
 {
     int err;
     VkResult ret;
@@ -3497,8 +3537,6 @@ static int vulkan_map_from_drm_frame_sync(AVHWFramesContext *hwfc, AVFrame *dst,
     VulkanFramesPriv *fp = hwfc->hwctx;
     AVVulkanDeviceContext *hwctx = &p->p;
     FFVulkanFunctions *vk = &p->vkctx.vkfn;
-
-    const AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor *)src->data[0];
 
 #ifdef DMA_BUF_IOCTL_EXPORT_SYNC_FILE
     if (p->vkctx.extensions & FF_VK_EXT_EXTERNAL_FD_SEM) {
@@ -3619,6 +3657,7 @@ static int vulkan_map_from_drm(AVHWFramesContext *hwfc, AVFrame *dst,
 {
     int err = 0;
     AVVkFrame *f;
+    const AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor *)src->data[0];
 
     if ((err = vulkan_map_from_drm_frame_desc(hwfc, &f, src, flags)))
         return err;
@@ -3633,7 +3672,7 @@ static int vulkan_map_from_drm(AVHWFramesContext *hwfc, AVFrame *dst,
     if (err < 0)
         goto fail;
 
-    err = vulkan_map_from_drm_frame_sync(hwfc, dst, src, flags);
+    err = vulkan_map_from_drm_frame_sync(hwfc, dst, desc, flags);
     if (err < 0)
         return err;
 
@@ -4037,6 +4076,10 @@ static void vulkan_unmap_to_drm(AVHWFramesContext *hwfc, HWMapDescriptor *hwmap)
 {
     AVDRMFrameDescriptor *drm_desc = hwmap->priv;
 
+    /* on unmap from DRM, make sure to import sync objects so that we are sync'd with any work that was
+     * done on the buffer while exported. We don't know if who used the dmabuf did reads or writes, so protect against both */
+    vulkan_map_from_drm_frame_sync(hwfc, hwmap->source, drm_desc, AV_HWFRAME_MAP_READ | AV_HWFRAME_MAP_WRITE);
+
     for (int i = 0; i < drm_desc->nb_objects; i++)
         close(drm_desc->objects[i].fd);
 
@@ -4308,7 +4351,7 @@ static int get_plane_buf(AVHWFramesContext *hwfc, AVBufferRef **dst,
     err = ff_vk_get_pooled_buffer(&p->vkctx, &fp->tmp, dst, buf_usage,
                                   NULL, buf_offset,
                                   VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                  VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+                                  p->vkctx.host_cached_flag);
     if (err < 0)
         return err;
 

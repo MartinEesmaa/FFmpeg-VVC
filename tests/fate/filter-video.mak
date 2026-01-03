@@ -175,7 +175,7 @@ FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC FORMAT CONCAT SCALE, LAVFI_INDEV FILE
 fate-filter-lavd-scalenorm: tests/data/filtergraphs/scalenorm
 fate-filter-lavd-scalenorm: CMD = framecrc -f lavfi -graph_file $(TARGET_PATH)/tests/data/filtergraphs/scalenorm -i dummy
 
-FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 FEEDBACK HFLIP) += fate-filter-feedback-hflip
+FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC2 FEEDBACK HFLIP, LAVFI_INDEV) += fate-filter-feedback-hflip
 fate-filter-feedback-hflip: CMD = framecrc -f lavfi -i testsrc2=d=1 -vf "[in][hflipin]feedback=x=0:y=0:w=100:h=100[out][hflipout];[hflipout]hflip[hflipin]"
 
 FATE_FILTER-$(call FILTERFRAMECRC, FRAMERATE TESTSRC2) += fate-filter-framerate-up fate-filter-framerate-down
@@ -835,6 +835,9 @@ fate-filter-refcmp-xpsnr-yuv: CMD = refcmp_metadata xpsnr yuv422p 0.0015
 FATE_FILTER-$(call ALLYES, TESTSRC2_FILTER SPLIT_FILTER AVGBLUR_FILTER        \
                            METADATA_FILTER WRAPPED_AVFRAME_ENCODER NULL_MUXER \
                            PIPE_PROTOCOL) += $(FATE_FILTER_REFCMP_METADATA-yes)
+
+FATE_FILTER-$(call FILTERFRAMECRC, TESTSRC SCALE PREMULTIPLY, LAVFI_INDEV) += fate-filter-scale-premultiply
+fate-filter-scale-premultiply: CMD = framecrc -auto_conversion_filters -lavfi "testsrc,format=rgba,setparams=alpha_mode=premultiplied,format=rgba:alpha_modes=straight" -frames:v 10
 
 FATE_SAMPLES_FFPROBE += $(FATE_METADATA_FILTER-yes)
 FATE_SAMPLES_FFMPEG += $(FATE_FILTER_SAMPLES-yes)

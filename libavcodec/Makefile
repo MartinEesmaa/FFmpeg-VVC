@@ -856,8 +856,8 @@ OBJS-$(CONFIG_WMAV2_ENCODER)           += wmaenc.o wma.o wma_common.o aactab.o
 OBJS-$(CONFIG_WMAVOICE_DECODER)        += wmavoice.o \
                                           celp_filters.o \
                                           acelp_vectors.o acelp_filters.o
-OBJS-$(CONFIG_WMV2_DECODER)            += wmv2dec.o wmv2.o wmv2data.o
-OBJS-$(CONFIG_WMV2_ENCODER)            += wmv2enc.o wmv2.o wmv2data.o
+OBJS-$(CONFIG_WMV2_DECODER)            += wmv2dec.o wmv2data.o
+OBJS-$(CONFIG_WMV2_ENCODER)            += wmv2enc.o wmv2data.o
 OBJS-$(CONFIG_WNV1_DECODER)            += wnv1.o
 OBJS-$(CONFIG_WRAPPED_AVFRAME_DECODER) += wrapped_avframe.o
 OBJS-$(CONFIG_WRAPPED_AVFRAME_ENCODER) += wrapped_avframe.o
@@ -1211,6 +1211,8 @@ OBJS-$(CONFIG_LIBSHINE_ENCODER)           += libshine.o
 OBJS-$(CONFIG_LIBSPEEX_DECODER)           += libspeexdec.o
 OBJS-$(CONFIG_LIBSPEEX_ENCODER)           += libspeexenc.o
 OBJS-$(CONFIG_LIBSVTAV1_ENCODER)          += libsvtav1.o
+OBJS-$(CONFIG_LIBSVTJPEGXS_DECODER)       += libsvtjpegxsdec.o
+OBJS-$(CONFIG_LIBSVTJPEGXS_ENCODER)       += libsvtjpegxsenc.o
 OBJS-$(CONFIG_LIBTHEORA_ENCODER)          += libtheoraenc.o
 OBJS-$(CONFIG_LIBTWOLAME_ENCODER)         += libtwolame.o
 OBJS-$(CONFIG_LIBUAVS3D_DECODER)          += libuavs3d.o
@@ -1283,6 +1285,7 @@ OBJS-$(CONFIG_HDR_PARSER)              += hdr_parser.o
 OBJS-$(CONFIG_IPU_PARSER)              += ipu_parser.o
 OBJS-$(CONFIG_JPEG2000_PARSER)         += jpeg2000_parser.o
 OBJS-$(CONFIG_JPEGXL_PARSER)           += jpegxl_parser.o jpegxl_parse.o
+OBJS-$(CONFIG_JPEGXS_PARSER)           += jpegxs_parser.o
 OBJS-$(CONFIG_MISC4_PARSER)            += misc4_parser.o
 OBJS-$(CONFIG_MJPEG_PARSER)            += mjpeg_parser.o
 OBJS-$(CONFIG_MLP_PARSER)              += mlp_parse.o mlp_parser.o mlp.o

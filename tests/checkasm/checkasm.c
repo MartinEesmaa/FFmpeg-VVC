@@ -115,6 +115,9 @@ static const struct {
     const char *name;
     void (*func)(void);
 } tests[] = {
+    /* NOTE: When adding a new test to this list here, it also needs to be
+     * added in tests/fate/checkasm.mak, otherwise it doesn't get executed
+     * as part of "make fate" or "make fate-checkasm". */
 #if CONFIG_AVCODEC
     #if CONFIG_AAC_DECODER
         { "aacpsdsp", checkasm_check_aacpsdsp },
@@ -207,7 +210,7 @@ static const struct {
         { "llviddsp", checkasm_check_llviddsp },
     #endif
     #if CONFIG_LLVIDENCDSP
-        { "llviddspenc", checkasm_check_llviddspenc },
+        { "llvidencdsp", checkasm_check_llvidencdsp },
     #endif
     #if CONFIG_LPC
         { "lpc", checkasm_check_lpc },
@@ -264,7 +267,11 @@ static const struct {
         { "vp8dsp", checkasm_check_vp8dsp },
     #endif
     #if CONFIG_VP9_DECODER
-        { "vp9dsp", checkasm_check_vp9dsp },
+        { "vp9dsp", checkasm_check_vp9dsp }, // all of the below
+        { "vp9_ipred", checkasm_check_vp9_ipred },
+        { "vp9_itxfm", checkasm_check_vp9_itxfm },
+        { "vp9_loopfilter", checkasm_check_vp9_loopfilter },
+        { "vp9_mc", checkasm_check_vp9_mc },
     #endif
     #if CONFIG_VIDEODSP
         { "videodsp", checkasm_check_videodsp },
@@ -343,6 +350,9 @@ static const struct {
         { "av_tx",     checkasm_check_av_tx },
 #endif
     { NULL }
+    /* NOTE: When adding a new test to this list here, it also needs to be
+     * added in tests/fate/checkasm.mak, otherwise it doesn't get executed
+     * as part of "make fate" or "make fate-checkasm". */
 };
 
 /* List of cpu flags to check */
@@ -358,6 +368,7 @@ static const struct {
     { "I8MM",     "i8mm",     AV_CPU_FLAG_I8MM },
     { "SVE",      "sve",      AV_CPU_FLAG_SVE },
     { "SVE2",     "sve2",     AV_CPU_FLAG_SVE2 },
+    { "SME",      "sme",      AV_CPU_FLAG_SME },
 #elif ARCH_ARM
     { "ARMV5TE",  "armv5te",  AV_CPU_FLAG_ARMV5TE },
     { "ARMV6",    "armv6",    AV_CPU_FLAG_ARMV6 },
@@ -386,8 +397,6 @@ static const struct {
 #elif ARCH_X86
     { "MMX",        "mmx",       AV_CPU_FLAG_MMX|AV_CPU_FLAG_CMOV },
     { "MMXEXT",     "mmxext",    AV_CPU_FLAG_MMXEXT },
-    { "3DNOW",      "3dnow",     AV_CPU_FLAG_3DNOW },
-    { "3DNOWEXT",   "3dnowext",  AV_CPU_FLAG_3DNOWEXT },
     { "SSE",        "sse",       AV_CPU_FLAG_SSE },
     { "SSE2",       "sse2",      AV_CPU_FLAG_SSE2|AV_CPU_FLAG_SSE2SLOW },
     { "SSE3",       "sse3",      AV_CPU_FLAG_SSE3|AV_CPU_FLAG_SSE3SLOW },
@@ -1037,7 +1046,13 @@ int main(int argc, char *argv[])
     if (have_sve(av_get_cpu_flags()))
         snprintf(arch_info_buf, sizeof(arch_info_buf),
                  "SVE %d bits, ", 8 * ff_aarch64_sve_length());
-#elif ARCH_RISCV && HAVE_RVV
+#endif
+#if ARCH_AARCH64 && HAVE_SME
+    if (have_sme(av_get_cpu_flags()))
+        av_strlcatf(arch_info_buf, sizeof(arch_info_buf),
+                    "SME %d bits, ", 8 * ff_aarch64_sme_length());
+#endif
+#if ARCH_RISCV && HAVE_RVV
     if (av_get_cpu_flags() & AV_CPU_FLAG_RVV_I32)
         snprintf(arch_info_buf, sizeof (arch_info_buf),
                  "%zu-bit vectors, ", 8 * ff_get_rv_vlenb());

@@ -49,13 +49,12 @@ static int alloc_base_frame(void *logctx, FFLCEVCContext *lcevc,
 {
     LCEVC_PictureDesc desc;
     LCEVC_ColorFormat fmt = map_format(frame->format);
-    LCEVC_PictureLockHandle lock;
-    uint8_t *data[4] = { NULL };
-    int linesizes[4] = { 0 };
-    uint32_t planes;
+    LCEVC_PicturePlaneDesc planes[AV_VIDEO_MAX_PLANES] = { 0 };
+    int width = frame->width - frame->crop_left - frame->crop_right;
+    int height = frame->height - frame->crop_top - frame->crop_bottom;
     LCEVC_ReturnCode res;
 
-    res = LCEVC_DefaultPictureDesc(&desc, fmt, frame->width, frame->height);
+    res = LCEVC_DefaultPictureDesc(&desc, fmt, width, height);
     if (res != LCEVC_Success)
         return AVERROR_EXTERNAL;
 
@@ -66,36 +65,16 @@ static int alloc_base_frame(void *logctx, FFLCEVCContext *lcevc,
     desc.sampleAspectRatioNum  = frame->sample_aspect_ratio.num;
     desc.sampleAspectRatioDen  = frame->sample_aspect_ratio.den;
 
+    for (int i = 0; i < AV_VIDEO_MAX_PLANES; i++) {
+        planes[i].firstSample = frame->data[i];
+        planes[i].rowByteStride = frame->linesize[i];
+    }
+
     /* Allocate LCEVC Picture */
-    res = LCEVC_AllocPicture(lcevc->decoder, &desc, picture);
+    res = LCEVC_AllocPictureExternal(lcevc->decoder, &desc, NULL, planes, picture);
     if (res != LCEVC_Success) {
         return AVERROR_EXTERNAL;
     }
-    res = LCEVC_LockPicture(lcevc->decoder, *picture, LCEVC_Access_Write, &lock);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
-
-    res = LCEVC_GetPicturePlaneCount(lcevc->decoder, *picture, &planes);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
-
-    for (unsigned i = 0; i < planes; i++) {
-        LCEVC_PicturePlaneDesc plane;
-
-        res = LCEVC_GetPictureLockPlaneDesc(lcevc->decoder, lock, i, &plane);
-        if (res != LCEVC_Success)
-            return AVERROR_EXTERNAL;
-
-        data[i] = plane.firstSample;
-        linesizes[i] = plane.rowByteStride;
-    }
-
-    av_image_copy2(data, linesizes, frame->data, frame->linesize,
-                   frame->format, frame->width, frame->height);
-
-    res = LCEVC_UnlockPicture(lcevc->decoder, lock);
-    if (res != LCEVC_Success)
-        return AVERROR_EXTERNAL;
 
     return 0;
 }
@@ -147,8 +126,10 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
         return ret;
 
     res = LCEVC_SendDecoderBase(lcevc->decoder, in->pts, 0, picture, -1, NULL);
-    if (res != LCEVC_Success)
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
         return AVERROR_EXTERNAL;
+    }
 
     memset(&picture, 0, sizeof(picture));
     ret = alloc_enhanced_frame(logctx, frame_ctx, &picture);
@@ -156,8 +137,10 @@ static int lcevc_send_frame(void *logctx, FFLCEVCFrame *frame_ctx, const AVFrame
         return ret;
 
     res = LCEVC_SendDecoderPicture(lcevc->decoder, picture);
-    if (res != LCEVC_Success)
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
         return AVERROR_EXTERNAL;
+    }
 
     return 0;
 }
@@ -175,8 +158,10 @@ static int generate_output(void *logctx, FFLCEVCFrame *frame_ctx, AVFrame *out)
         return AVERROR_EXTERNAL;
 
     res = LCEVC_GetPictureDesc(lcevc->decoder, picture, &desc);
-    if (res != LCEVC_Success)
+    if (res != LCEVC_Success) {
+        LCEVC_FreePicture(lcevc->decoder, picture);
         return AVERROR_EXTERNAL;
+    }
 
     out->crop_top = desc.cropTop;
     out->crop_bottom = desc.cropBottom;

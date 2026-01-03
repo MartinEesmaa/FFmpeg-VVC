@@ -26,12 +26,12 @@
 #include "libavutil/mem.h"
 
 extern const char *ff_source_common_comp;
+extern const char *ff_source_dct_comp;
 extern const char *ff_source_prores_raw_decode_comp;
 extern const char *ff_source_prores_raw_idct_comp;
 
 const FFVulkanDecodeDescriptor ff_vk_dec_prores_raw_desc = {
     .codec_id         = AV_CODEC_ID_PRORES_RAW,
-    .decode_extension = FF_VK_EXT_PUSH_DESCRIPTOR,
     .queue_flags      = VK_QUEUE_COMPUTE_BIT,
 };
 
@@ -114,7 +114,8 @@ static int vk_prores_raw_decode_slice(AVCodecContext *avctx,
 
     FFVkBuffer *frame_data_buf = (FFVkBuffer *)pp->frame_data_buf->data;
     TileData *td = (TileData *)frame_data_buf->mapped_mem;
-    FFVkBuffer *slices_buf = vp->slices_buf ? (FFVkBuffer *)vp->slices_buf->data : NULL;
+    FFVkBuffer *slices_buf = vp->slices_buf ?
+                             (FFVkBuffer *)vp->slices_buf->data : NULL;
 
     td[pp->nb_tiles].pos[0] = prr->tiles[pp->nb_tiles].x;
     td[pp->nb_tiles].pos[1] = prr->tiles[pp->nb_tiles].y;
@@ -292,19 +293,19 @@ static int add_common_data(AVCodecContext *avctx, FFVulkanContext *s,
     /* Common codec header */
     GLSLD(ff_source_common_comp);
 
-    GLSLC(0, struct TileData {                                                       );
-    GLSLC(1,    ivec2 pos;                                                           );
-    GLSLC(1,    uint offset;                                                         );
-    GLSLC(1,    uint size;                                                           );
-    GLSLC(0, };                                                                      );
-    GLSLC(0,                                                                         );
-    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {                   );
-    GLSLC(1,    u8buf pkt_data;                                                      );
-    GLSLC(1,    ivec2 frame_size;                                                    );
-    GLSLC(1,    ivec2 tile_size;                                                     );
-    GLSLC(1,    uint8_t qmat[64];                                                    );
-    GLSLC(0, };                                                                      );
-    GLSLC(0,                                                                         );
+    GLSLC(0, struct TileData {                                                );
+    GLSLC(1,    ivec2 pos;                                                    );
+    GLSLC(1,    uint offset;                                                  );
+    GLSLC(1,    uint size;                                                    );
+    GLSLC(0, };                                                               );
+    GLSLC(0,                                                                  );
+    GLSLC(0, layout(push_constant, scalar) uniform pushConstants {            );
+    GLSLC(1,    u8buf pkt_data;                                               );
+    GLSLC(1,    ivec2 frame_size;                                             );
+    GLSLC(1,    ivec2 tile_size;                                              );
+    GLSLC(1,    uint8_t qmat[64];                                             );
+    GLSLC(0, };                                                               );
+    GLSLC(0,                                                                  );
     ff_vk_shader_add_push_const(shd, 0, sizeof(DecodePushData),
                                 VK_SHADER_STAGE_COMPUTE_BIT);
 
@@ -384,6 +385,10 @@ static int init_idct_shader(AVCodecContext *avctx, FFVulkanContext *s,
                           0));
 
     RET(add_common_data(avctx, s, shd, 0));
+
+    GLSLC(0, #define NB_BLOCKS 16);
+    GLSLC(0, #define NB_COMPONENTS 4);
+    GLSLD(ff_source_dct_comp);
 
     GLSLD(ff_source_prores_raw_idct_comp);
 
@@ -473,8 +478,6 @@ const FFHWAccel ff_prores_raw_vulkan_hwaccel = {
     .frame_priv_data_size  = sizeof(ProResRAWVulkanDecodePicture),
     .init                  = &vk_decode_prores_raw_init,
     .update_thread_context = &ff_vk_update_thread_context,
-    .decode_params         = &ff_vk_params_invalidate,
-    .flush                 = &ff_vk_decode_flush,
     .uninit                = &ff_vk_decode_uninit,
     .frame_params          = &ff_vk_frame_params,
     .priv_data_size        = sizeof(FFVulkanDecodeContext),

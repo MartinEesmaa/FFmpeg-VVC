@@ -451,16 +451,18 @@ static int update_settings(AVFilterContext *ctx)
         .temperature = (s->temperature - 6500.0) / 3500.0,
     };
 
-    opts->peak_detect_params = *pl_peak_detect_params(
+    opts->peak_detect_params = (struct pl_peak_detect_params) {
+        PL_PEAK_DETECT_DEFAULTS
         .smoothing_period = s->smoothing,
         .scene_threshold_low = s->scene_low,
         .scene_threshold_high = s->scene_high,
 #if PL_API_VER >= 263
         .percentile = s->percentile,
 #endif
-    );
+    };
 
-    opts->color_map_params = *pl_color_map_params(
+    opts->color_map_params = (struct pl_color_map_params) {
+        PL_COLOR_MAP_DEFAULTS
         .tone_mapping_function = get_tonemapping_func(s->tonemapping),
         .tone_mapping_param = s->tonemapping_param,
         .inverse_tone_mapping = s->inverse_tonemapping,
@@ -469,7 +471,7 @@ static int update_settings(AVFilterContext *ctx)
         .contrast_recovery = s->contrast_recovery,
         .contrast_smoothness = s->contrast_smoothness,
 #endif
-    );
+    };
 
     set_gamut_mode(&opts->color_map_params, gamut_mode);
 
@@ -484,7 +486,8 @@ static int update_settings(AVFilterContext *ctx)
         .strength = s->cone_str,
     );
 
-    opts->params = *pl_render_params(
+    opts->params = (struct pl_render_params) {
+        PL_RENDER_DEFAULTS
         .antiringing_strength = s->antiringing,
         .background_transparency = 1.0f - (float) s->fillcolor[3] / UINT8_MAX,
         .background_color = {
@@ -513,7 +516,7 @@ static int update_settings(AVFilterContext *ctx)
         .disable_builtin_scalers = s->disable_builtin,
         .force_dither = s->force_dither,
         .disable_fbos = s->disable_fbos,
-    );
+    };
 
     RET(find_scaler(ctx, &opts->params.upscaler, s->upscaler, 0));
     RET(find_scaler(ctx, &opts->params.downscaler, s->downscaler, 0));
@@ -917,6 +920,15 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
         image->crop.x1 = image->crop.x0 + s->var_values[VAR_CROP_W];
         image->crop.y1 = image->crop.y0 + s->var_values[VAR_CROP_H];
 
+        const pl_rect2df crop_orig = image->crop;
+        pl_rotation rot_total = PL_ROTATION_360 + image->rotation - target->rotation;
+        if (rot_total % PL_ROTATION_180 == PL_ROTATION_90) {
+            /* Libplacebo expects the input crop relative to the actual frame
+             * dimensions, so un-transpose them here */
+            FFSWAP(float, image->crop.x0, image->crop.y0);
+            FFSWAP(float, image->crop.x1, image->crop.y1);
+        }
+
         if (src == ref) {
             /* Only update the target crop once, for the 'reference' frame */
             target->crop.x0 = av_expr_eval(s->pos_x_pexpr, s->var_values, NULL);
@@ -924,16 +936,13 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
             target->crop.x1 = target->crop.x0 + s->var_values[VAR_POS_W];
             target->crop.y1 = target->crop.y0 + s->var_values[VAR_POS_H];
 
-
             /* Effective visual crop */
             double sar_in = q2d_fallback(inlink->sample_aspect_ratio, 1.0);
             double sar_out = q2d_fallback(outlink->sample_aspect_ratio, 1.0);
-
-            pl_rotation rot_total = PL_ROTATION_360 + image->rotation - target->rotation;
             if (rot_total % PL_ROTATION_180 == PL_ROTATION_90)
                 sar_in = 1.0 / sar_in;
 
-            pl_rect2df fixed = image->crop;
+            pl_rect2df fixed = crop_orig;
             pl_rect2df_stretch(&fixed, sar_in / sar_out, 1.0);
 
             switch (s->fit_mode) {
@@ -955,13 +964,6 @@ static void update_crops(AVFilterContext *ctx, LibplaceboInput *in,
             }
             case FIT_SCALE_DOWN:
                 pl_rect2df_aspect_fit(&target->crop, &fixed, 0.0);
-            }
-
-            if (rot_total % PL_ROTATION_180 == PL_ROTATION_90) {
-                /* Libplacebo expects the input crop relative to the actual frame
-                 * dimensions, so un-transpose them here */
-                FFSWAP(float, image->crop.x0, image->crop.y0);
-                FFSWAP(float, image->crop.x1, image->crop.y1);
             }
         }
     }

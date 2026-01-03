@@ -186,6 +186,8 @@ static int init_input(AVFormatContext *s, const char *filename,
                                   s, 0, s->format_probesize);
 }
 
+static int codec_close(FFStream *sti);
+
 static int update_stream_avctx(AVFormatContext *s)
 {
     int ret;
@@ -195,6 +197,14 @@ static int update_stream_avctx(AVFormatContext *s)
 
         if (!sti->need_context_update)
             continue;
+
+        if (avcodec_is_open(sti->avctx)) {
+            av_log(s, AV_LOG_DEBUG, "Demuxer context update while decoder is open, closing and trying to re-open\n");
+            ret = codec_close(sti);
+            sti->info->found_decoder = 0;
+            if (ret < 0)
+                return ret;
+        }
 
         /* close parser, because it depends on the codec */
         if (sti->parser && sti->avctx->codec_id != st->codecpar->codec_id) {
@@ -752,8 +762,9 @@ static int has_decode_delay_been_guessed(AVStream *st)
     if (st->codecpar->codec_id != AV_CODEC_ID_H264) return 1;
     if (!sti->info) // if we have left find_stream_info then nb_decoded_frames won't increase anymore for stream copy
         return 1;
+    av_assert0(sti->avctx->codec_id == AV_CODEC_ID_H264);
 #if CONFIG_H264_DECODER
-    if (sti->avctx->has_b_frames &&
+    if (sti->avctx->has_b_frames && avcodec_is_open(sti->avctx) &&
         avpriv_h264_has_num_reorder_frames(sti->avctx) == sti->avctx->has_b_frames)
         return 1;
 #endif
@@ -2681,6 +2692,13 @@ int avformat_find_stream_info(AVFormatContext *ic, AVDictionary **options)
             av_log(ic, AV_LOG_DEBUG, "interrupted\n");
             break;
         }
+
+        /* read_frame_internal() in a previous iteration of this loop may
+         * have made changes to streams without returning a packet for them.
+         * Handle that here. */
+        ret = update_stream_avctx(ic);
+        if (ret < 0)
+            goto unref_then_goto_end;
 
         /* check if one codec still needs to be handled */
         for (i = 0; i < ic->nb_streams; i++) {

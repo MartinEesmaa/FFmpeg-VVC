@@ -574,9 +574,11 @@ static struct rendition *new_rendition(HLSContext *c, struct rendition_info *inf
     return rend;
 }
 
-static void handle_rendition_args(struct rendition_info *info, const char *key,
+static void handle_rendition_args(void *vinfo, const char *key,
                                   int key_len, char **dest, int *dest_len)
 {
+    struct rendition_info *info = vinfo;
+
     if (!strncmp(key, "TYPE=", key_len)) {
         *dest     =        info->type;
         *dest_len = sizeof(info->type);
@@ -975,6 +977,10 @@ static int parse_playlist(HLSContext *c, const char *url,
             ptr = strchr(ptr, '@');
             if (ptr)
                 seg_offset = strtoll(ptr+1, NULL, 10);
+            if (seg_size < 0 || seg_offset > INT64_MAX - seg_size) {
+                ret = AVERROR_INVALIDDATA;
+                goto fail;
+            }
         } else if (av_strstart(line, "#", NULL)) {
             av_log(c->ctx, AV_LOG_VERBOSE, "Skip ('%s')\n", line);
             continue;
