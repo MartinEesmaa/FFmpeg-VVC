@@ -849,8 +849,6 @@ extern const FFCodec ff_libxavs2_encoder;
 extern const FFCodec ff_libxvid_encoder;
 extern const FFCodec ff_libzvbi_teletext_decoder;
 extern const FFCodec ff_libsvt_hevc_encoder;
-extern const FFCodec ff_libsvtjpegxs_encoder;
-extern const FFCodec ff_libsvtjpegxs_decoder;
 
 /* text */
 extern const FFCodec ff_bintext_decoder;
