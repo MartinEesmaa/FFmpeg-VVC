@@ -1,7 +1,5 @@
-GEN_CLEANSUFFIXES = *.o *.c *.d
-
 clean::
-	$(RM) $(GEN_CLEANSUFFIXES:%=libavcodec/vulkan/%)
+	$(RM) $(CLEANSUFFIXES:%=libavcodec/vulkan/%)
 
 OBJS-$(CONFIG_FFV1_VULKAN_ENCODER)  +=  vulkan/common.o \
 					vulkan/rangecoder.o vulkan/ffv1_vlc.o \
@@ -14,17 +12,14 @@ OBJS-$(CONFIG_FFV1_VULKAN_HWACCEL)  +=  vulkan/common.o \
 					vulkan/ffv1_common.o vulkan/ffv1_reset.o \
 					vulkan/ffv1_dec_setup.o vulkan/ffv1_dec.o
 
-OBJS-$(CONFIG_PRORES_RAW_VULKAN_HWACCEL) += vulkan/common.o vulkan/dct.o \
-                                            vulkan/prores_raw_decode.o \
-                                            vulkan/prores_raw_idct.o
+OBJS-$(CONFIG_PRORES_RAW_VULKAN_HWACCEL) += vulkan/prores_raw_decode.comp.spv.o \
+                                            vulkan/prores_raw_idct.comp.spv.o
 
-OBJS-$(CONFIG_PRORES_VULKAN_HWACCEL) += vulkan/common.o vulkan/dct.o \
-                                        vulkan/prores_vld.o \
-                                        vulkan/prores_idct.o
+OBJS-$(CONFIG_PRORES_VULKAN_HWACCEL) += vulkan/prores_vld.comp.spv.o \
+                                        vulkan/prores_idct.comp.spv.o
 
-OBJS-$(CONFIG_DPX_VULKAN_HWACCEL) += vulkan/common.o \
-                                     vulkan/dpx_unpack.o \
-                                     vulkan/dpx_copy.o
+OBJS-$(CONFIG_DPX_VULKAN_HWACCEL) += vulkan/dpx_unpack.comp.spv.o \
+                                     vulkan/dpx_copy.comp.spv.o
 
 VULKAN = $(subst $(SRC_PATH)/,,$(wildcard $(SRC_PATH)/libavcodec/vulkan/*.comp))
 .SECONDARY: $(VULKAN:.comp=.c)

@@ -5858,8 +5858,11 @@ static int mov_write_sidx_tags(AVIOContext *pb, MOVMuxContext *mov,
             total_size -= mov_write_sidx_tag(avio_buf, track, ref_size,
                                              total_size);
         }
-        if (round == 0)
+        if (round == 0) {
             total_size = ffio_close_null_buf(avio_buf);
+            if (total_size < 0)
+                return total_size;
+        }
     }
     return 0;
 }
@@ -5924,6 +5927,8 @@ static int mov_write_moof_tag(AVIOContext *pb, MOVMuxContext *mov, int tracks,
         return ret;
     mov_write_moof_tag_internal(avio_buf, mov, tracks, 0);
     moof_size = ffio_close_null_buf(avio_buf);
+    if (moof_size < 0)
+        return moof_size;
 
     if (mov->flags & FF_MOV_FLAG_DASH &&
         !(mov->flags & (FF_MOV_FLAG_GLOBAL_SIDX | FF_MOV_FLAG_SKIP_SIDX)))
@@ -7214,9 +7219,11 @@ static int mov_write_single_packet(AVFormatContext *s, AVPacket *pkt)
         uint8_t *side = av_packet_get_side_data(pkt, AV_PKT_DATA_NEW_EXTRADATA, &side_size);
         /* Overwrite extradata only on flush packets or when no extradata was available during init */
         if (side_size > 0 && (!pkt->size || !trk->extradata_size[trk->last_stsd_index])) {
-            void *newextra = av_memdup(side, side_size);
+            void *newextra = av_malloc(side_size + AV_INPUT_BUFFER_PADDING_SIZE);
             if (!newextra)
                 return AVERROR(ENOMEM);
+            memset((uint8_t*)newextra + side_size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+            memcpy(newextra, side, side_size);
             av_free(trk->extradata[trk->last_stsd_index]);
             trk->extradata[trk->last_stsd_index] = newextra;
             trk->extradata_size[trk->last_stsd_index] = side_size;

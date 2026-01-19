@@ -484,6 +484,7 @@ Muxers/Demuxers:
   webrtc*                               Michael Riedl
   webvtt*                               Matthew J Heaney
   westwood.c                            Mike Melanson
+  whip.c                            [2] Jack Lau
   wtv.c                                 Peter Ross
 
 Protocols:

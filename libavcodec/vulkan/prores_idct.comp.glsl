@@ -16,22 +16,52 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#include "common.comp"
+#include "dct.glsl"
+
+layout (constant_id = 0) const bool interlaced = false;
+
+layout (set = 0, binding = 0) readonly buffer quant_idx_buf {
+    uint8_t quant_idx[];
+};
+layout (set = 0, binding = 1) readonly buffer qmat_buf {
+    uint8_t qmat[];
+};
+layout (set = 0, binding = 2) uniform uimage2D dst[];
+
+layout (push_constant, scalar) uniform pushConstants {
+   u8buf    slice_data;
+   uint     bitstream_size;
+
+   uint16_t width;
+   uint16_t height;
+   uint16_t mb_width;
+   uint16_t mb_height;
+   uint16_t slice_width;
+   uint16_t slice_height;
+   uint8_t  log2_slice_width;
+   uint8_t  log2_chroma_w;
+   uint8_t  depth;
+   uint8_t  alpha_info;
+   uint8_t  bottom_field;
+};
+
 uint get_px(uint tex_idx, ivec2 pos)
 {
-#ifndef INTERLACED
-    return imageLoad(dst[tex_idx], pos).x;
-#else
-    return imageLoad(dst[tex_idx], ivec2(pos.x, (pos.y << 1) + bottom_field)).x;
-#endif
+    if (interlaced)
+        pos = ivec2(pos.x, (pos.y << 1) + bottom_field);
+    return uint(imageLoad(dst[nonuniformEXT(tex_idx)], pos).x);
 }
 
 void put_px(uint tex_idx, ivec2 pos, uint v)
 {
-#ifndef INTERLACED
-    imageStore(dst[tex_idx], pos, uvec4(v));
-#else
-    imageStore(dst[tex_idx], ivec2(pos.x, (pos.y << 1) + bottom_field), uvec4(v));
-#endif
+    if (interlaced)
+        pos = ivec2(pos.x, (pos.y << 1) + bottom_field);
+    imageStore(dst[nonuniformEXT(tex_idx)], pos, uvec4(v));
 }
 
 void main(void)
@@ -49,21 +79,14 @@ void main(void)
 
     /* Coalesced load of DCT coeffs in shared memory, inverse quantization */
     if (act) {
-        /**
-         * According to the VK spec indexing an array in push constant memory with
-         * a non-dynamically uniform value is illegal ($15.9.1 in v1.4.326),
-         * so copy the whole matrix locally.
-         */
-        uint8_t[64] qmat = comp == 0 ? qmat_luma : qmat_chroma;
-
         /* Table 15 */
         uint8_t qidx = quant_idx[(gid.y >> 1) * mb_width + (gid.x >> (4 - chroma_shift))];
-        int qscale = qidx > 128 ? (qidx - 96) << 2 : qidx;
+        int qscale = qidx > 128 ? (qidx - 96) << 2 : qidx, mat = int(gid.z != 0) << 6;
 
         [[unroll]] for (uint i = 0; i < 8; ++i) {
             uint cidx = (i << 3) + idx;
             int   c = sign_extend(int(get_px(comp, ivec2(gid.x, (gid.y << 3) + i))), 16);
-            float v = float(c * qscale * int(qmat[cidx])) * norm;
+            float v = float(c * qscale * int(qmat[mat + cidx])) * norm;
             blocks[block][i * 9 + idx] = v * idct_scale[cidx];
         }
     }

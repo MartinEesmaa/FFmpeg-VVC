@@ -20,6 +20,30 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#version 460
+#pragma shader_stage(compute)
+#extension GL_GOOGLE_include_directive : require
+
+#include "common.comp"
+#include "dct.glsl"
+
+struct TileData {
+   ivec2 pos;
+   uint offset;
+   uint size;
+};
+
+layout (set = 0, binding = 0) uniform uimage2D dst;
+layout (set = 0, binding = 1, scalar) readonly buffer frame_data_buf {
+    TileData tile_data[];
+};
+
+layout (push_constant, scalar) uniform pushConstants {
+   u8buf pkt_data;
+   ivec2 tile_size;
+   uint8_t qmat[64];
+};
+
 #define COMP_ID (gl_LocalInvocationID.z)
 #define BLOCK_ID (gl_LocalInvocationID.y)
 #define ROW_ID (gl_LocalInvocationID.x)
@@ -48,7 +72,8 @@ void main(void)
     const uint tile_idx = gl_WorkGroupID.y*gl_NumWorkGroups.x + gl_WorkGroupID.x;
     TileData td = tile_data[tile_idx];
 
-    if (expectEXT(td.pos.x >= frame_size.x, false))
+    int width = imageSize(dst).x;
+    if (expectEXT(td.pos.x >= width, false))
         return;
 
     uint64_t pkt_offset = uint64_t(pkt_data) + td.offset;
@@ -56,8 +81,8 @@ void main(void)
     int qscale = pack16(hdr_data[0].v.yx);
 
     const ivec2 offs = td.pos + ivec2(COMP_ID & 1, COMP_ID >> 1);
-    const uint w = min(tile_size.x, frame_size.x - td.pos.x) / 2;
-    const uint nb_blocks = w / 8;
+    const uint w = min(tile_size.x, width - td.pos.x) >> 1;
+    const uint nb_blocks = w >> 3;
 
     /* We have to do non-uniform access, so copy it */
     uint8_t qmat_buf[64] = qmat;

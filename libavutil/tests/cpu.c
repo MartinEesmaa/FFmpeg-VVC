@@ -49,6 +49,7 @@ static const struct {
     { AV_CPU_FLAG_SVE,       "sve"        },
     { AV_CPU_FLAG_SVE2,      "sve2"       },
     { AV_CPU_FLAG_SME,       "sme"        },
+    { AV_CPU_FLAG_ARM_CRC,   "crc"        },
 #elif ARCH_ARM
     { AV_CPU_FLAG_ARMV5TE,   "armv5te"    },
     { AV_CPU_FLAG_ARMV6,     "armv6"      },
@@ -89,6 +90,7 @@ static const struct {
     { AV_CPU_FLAG_BMI1,      "bmi1"       },
     { AV_CPU_FLAG_BMI2,      "bmi2"       },
     { AV_CPU_FLAG_AESNI,     "aesni"      },
+    { AV_CPU_FLAG_CLMUL,     "clmul"      },
     { AV_CPU_FLAG_AVX512,    "avx512"     },
     { AV_CPU_FLAG_AVX512ICL, "avx512icl"  },
     { AV_CPU_FLAG_SLOW_GATHER, "slowgather" },
