@@ -94,6 +94,7 @@ libavcodec/x86/vpx.* @rbultje
 
 # avfilter
 # =======
+libavfilter/af_loudnorm.* @kylophone
 libavfilter/af_whisper.* @vpalmisano
 libavfilter/.*_amf* @OvchinnikovDmitrii @ArazIusubov
 libavfilter/avfiltergraph.* @haasn
@@ -107,6 +108,7 @@ libavfilter/.*drawvg.* @ayosec
 libavfilter/vf_find_rect.* @michaelni
 libavfilter/vf_icc.* @haasn
 libavfilter/vf_libplacebo.* @haasn
+libavfilter/vf_libvmaf.* @kylophone
 libavfilter/vf_premultiply.* @haasn
 libavfilter/vf_scale.* @haasn
 libavfilter/vf_scale_vt.* @quink
@@ -226,3 +228,11 @@ doc/.* @GyanD
 tests/checkasm/riscv/.* @Courmisch
 tests/ref/.*drawvg.* @ayosec
 tests/ref/fate/sub-mcc.* @programmerjake
+
+# Forgejo
+# =======
+.forgejo/CODEOWNERS @michaelni
+
+# /
+# =
+MAINTAINERS @michaelni

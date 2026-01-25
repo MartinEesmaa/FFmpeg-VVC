@@ -1123,7 +1123,6 @@ check_glslc(){
     log check_glslc "$@"
     name=$1
     shift 1
-    disabled $name && return
     disable $name
     test_glslc "$@" <<EOF && enable $name
 #version 460
@@ -4210,7 +4209,7 @@ zoompan_filter_deps="swscale"
 zscale_filter_deps="libzimg const_nan"
 scale_vaapi_filter_deps="vaapi"
 scale_vt_filter_deps="videotoolbox VTPixelTransferSessionCreate"
-scale_vulkan_filter_deps="vulkan spirv_compiler"
+scale_vulkan_filter_deps="vulkan spirv_compiler spirv_library"
 vpp_qsv_filter_deps="libmfx"
 vpp_qsv_filter_select="qsvvpp"
 xfade_opencl_filter_deps="opencl"

@@ -299,8 +299,6 @@ typedef struct WHIPContext {
      */
     uint8_t dtls_srtp_materials[(DTLS_SRTP_KEY_LEN + DTLS_SRTP_SALT_LEN) * 2];
 
-    char ssl_error_message[256];
-
     /* TODO: Use AVIOContext instead of URLContext */
     URLContext *dtls_uc;
 
@@ -338,11 +336,15 @@ typedef struct WHIPContext {
 /**
  * Whether the packet is a DTLS packet.
  */
-static int is_dtls_packet(uint8_t *b, int size) {
-    uint16_t version = AV_RB16(&b[1]);
-    return size > DTLS_RECORD_LAYER_HEADER_LEN &&
-        b[0] >= DTLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC &&
-        (version == DTLS_VERSION_10 || version == DTLS_VERSION_12);
+static int is_dtls_packet(uint8_t *b, int size)
+{
+    int ret = 0;
+    if (size > DTLS_RECORD_LAYER_HEADER_LEN) {
+        uint16_t version = AV_RB16(&b[1]);
+        ret = b[0] >= DTLS_CONTENT_TYPE_CHANGE_CIPHER_SPEC &&
+            (version == DTLS_VERSION_10 || version == DTLS_VERSION_12);
+    }
+    return ret;
 }
 
 
@@ -380,15 +382,37 @@ static av_cold int certificate_key_init(AVFormatContext *s)
 
 static av_cold int dtls_initialize(AVFormatContext *s)
 {
+    int ret = 0;
     WHIPContext *whip = s->priv_data;
+    int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
+    AVDictionary *opts = NULL;
+    char buf[256];
+
+    ff_url_join(buf, sizeof(buf), "dtls", NULL, whip->ice_host, whip->ice_port, NULL);
+    av_dict_set_int(&opts, "mtu", whip->pkt_size, 0);
+    if (whip->cert_file) {
+        av_dict_set(&opts, "cert_file", whip->cert_file, 0);
+    } else
+        av_dict_set(&opts, "cert_pem", whip->cert_buf, 0);
+
+    if (whip->key_file) {
+        av_dict_set(&opts, "key_file", whip->key_file, 0);
+    } else
+        av_dict_set(&opts, "key_pem", whip->key_buf, 0);
+    av_dict_set_int(&opts, "external_sock", 1, 0);
+    av_dict_set_int(&opts, "use_srtp", 1, 0);
+    av_dict_set_int(&opts, "listen", is_dtls_active ? 0 : 1, 0);
+    ret = ffurl_open_whitelist(&whip->dtls_uc, buf, AVIO_FLAG_READ_WRITE, &s->interrupt_callback,
+        &opts, s->protocol_whitelist, s->protocol_blacklist, NULL);
+    av_dict_free(&opts);
+    if (ret < 0) {
+        av_log(whip, AV_LOG_ERROR, "Failed to open DTLS url:%s\n", buf);
+        goto end;
+    }
     /* reuse the udp created by whip */
     ff_tls_set_external_socket(whip->dtls_uc, whip->udp);
-
-    /* Make the socket non-blocking */
-    ff_socket_nonblock(ffurl_get_file_handle(whip->dtls_uc), 1);
-    whip->dtls_uc->flags |= AVIO_FLAG_NONBLOCK;
-
-    return 0;
+end:
+    return ret;
 }
 
 /**
@@ -578,6 +602,8 @@ static int generate_sdp_offer(AVFormatContext *s)
 {
     int ret = 0, profile_idc = 0, level, profile_iop = 0;
     const char *acodec_name = NULL, *vcodec_name = NULL;
+    char bundle[4];
+    int bundle_index = 0;
     AVBPrint bp;
     WHIPContext *whip = s->priv_data;
     int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
@@ -605,16 +631,27 @@ static int generate_sdp_offer(AVFormatContext *s)
     whip->video_payload_type = WHIP_RTP_PAYLOAD_TYPE_H264;
     whip->video_rtx_payload_type = WHIP_RTP_PAYLOAD_TYPE_VIDEO_RTX;
 
+    if (whip->audio_par) {
+        bundle[bundle_index++] = '0';
+        bundle[bundle_index++] = ' ';
+    }
+    if (whip->video_par) {
+        bundle[bundle_index++] = '1';
+        bundle[bundle_index++] = ' ';
+    }
+    bundle[bundle_index - 1] = '\0';
+
     av_bprintf(&bp, ""
         "v=0\r\n"
         "o=FFmpeg %s 2 IN IP4 %s\r\n"
         "s=FFmpegPublishSession\r\n"
         "t=0 0\r\n"
-        "a=group:BUNDLE 0 1\r\n"
+        "a=group:BUNDLE %s\r\n"
         "a=extmap-allow-mixed\r\n"
         "a=msid-semantic: WMS\r\n",
         WHIP_SDP_SESSION_ID,
-        WHIP_SDP_CREATOR_IP);
+        WHIP_SDP_CREATOR_IP,
+        bundle);
 
     if (whip->audio_par) {
         if (whip->audio_par->codec_id == AV_CODEC_ID_OPUS)
@@ -1235,8 +1272,6 @@ static int ice_dtls_handshake(AVFormatContext *s)
     int64_t starttime = av_gettime_relative(), now;
     WHIPContext *whip = s->priv_data;
     int is_dtls_active = whip->flags & WHIP_DTLS_ACTIVE;
-    AVDictionary *opts = NULL;
-    char buf[256];
 
     if (whip->state < WHIP_STATE_UDP_CONNECTED || !whip->udp) {
         av_log(whip, AV_LOG_ERROR, "UDP not connected, state=%d, udp=%p\n", whip->state, whip->udp);
@@ -1297,32 +1332,6 @@ next_packet:
             if (whip->state < WHIP_STATE_ICE_CONNECTED) {
                 if (whip->is_peer_ice_lite)
                     whip->state = WHIP_STATE_ICE_CONNECTED;
-                whip->whip_ice_time = av_gettime_relative();
-                av_log(whip, AV_LOG_VERBOSE, "ICE STUN ok, state=%d, url=udp://%s:%d, location=%s, username=%s:%s, res=%dB, elapsed=%.2fms\n",
-                    whip->state, whip->ice_host, whip->ice_port, whip->whip_resource_url ? whip->whip_resource_url : "",
-                    whip->ice_ufrag_remote, whip->ice_ufrag_local, ret, ELAPSED(whip->whip_starttime, av_gettime_relative()));
-
-                ff_url_join(buf, sizeof(buf), "dtls", NULL, whip->ice_host, whip->ice_port, NULL);
-                av_dict_set_int(&opts, "mtu", whip->pkt_size, 0);
-                if (whip->cert_file) {
-                    av_dict_set(&opts, "cert_file", whip->cert_file, 0);
-                } else
-                    av_dict_set(&opts, "cert_pem", whip->cert_buf, 0);
-
-                if (whip->key_file) {
-                    av_dict_set(&opts, "key_file", whip->key_file, 0);
-                } else
-                    av_dict_set(&opts, "key_pem", whip->key_buf, 0);
-                av_dict_set_int(&opts, "external_sock", 1, 0);
-                av_dict_set_int(&opts, "use_srtp", 1, 0);
-                av_dict_set_int(&opts, "listen", is_dtls_active ? 0 : 1, 0);
-                /* If got the first binding response, start DTLS handshake. */
-                ret = ffurl_open_whitelist(&whip->dtls_uc, buf, AVIO_FLAG_READ_WRITE, &s->interrupt_callback,
-                    &opts, s->protocol_whitelist, s->protocol_blacklist, NULL);
-                av_dict_free(&opts);
-                if (ret < 0)
-                    goto end;
-                dtls_initialize(s);
             }
             goto next_packet;
         }
@@ -1336,13 +1345,21 @@ next_packet:
 
         /* Handle DTLS handshake */
         if (is_dtls_packet(whip->buf, ret) || is_dtls_active) {
+            whip->whip_ice_time = av_gettime_relative();
             /* Start consent timer when ICE selected */
-            whip->whip_last_consent_tx_time = whip->whip_last_consent_rx_time = av_gettime_relative();
+            whip->whip_last_consent_tx_time = whip->whip_last_consent_rx_time = whip->whip_ice_time;
             whip->state = WHIP_STATE_ICE_CONNECTED;
+            av_log(whip, AV_LOG_VERBOSE, "ICE STUN ok, state=%d, url=udp://%s:%d, location=%s, username=%s:%s, res=%dB, elapsed=%.2fms\n",
+                whip->state, whip->ice_host, whip->ice_port, whip->whip_resource_url ? whip->whip_resource_url : "",
+                whip->ice_ufrag_remote, whip->ice_ufrag_local, ret, ELAPSED(whip->whip_starttime, whip->whip_ice_time));
+
+            ret = dtls_initialize(s);
+            if (ret < 0)
+                goto end;
             ret = ffurl_handshake(whip->dtls_uc);
             if (ret < 0) {
                 whip->state = WHIP_STATE_FAILED;
-                av_log(whip, AV_LOG_VERBOSE, "DTLS session failed\n");
+                av_log(whip, AV_LOG_ERROR, "DTLS session failed\n");
                 goto end;
             }
             if (!ret) {
@@ -1619,8 +1636,11 @@ static int create_rtp_muxer(AVFormatContext *s)
         ELAPSED(whip->whip_dtls_time,   whip->whip_srtp_time));
 
 end:
-    if (rtp_ctx)
+    if (rtp_ctx) {
+        if (!rtp_ctx->pb)
+            av_freep(&buffer);
         avio_context_free(&rtp_ctx->pb);
+    }
     avformat_free_context(rtp_ctx);
     av_dict_free(&opts);
     return ret;
@@ -1910,7 +1930,7 @@ write_packet:
     if (now - whip->whip_last_consent_rx_time > WHIP_ICE_CONSENT_EXPIRED_TIMER * WHIP_US_PER_MS) {
         av_log(whip, AV_LOG_ERROR,
             "Consent Freshness expired after %.2fms (limited %dms), terminate session\n",
-            ELAPSED(now, whip->whip_last_consent_rx_time), WHIP_ICE_CONSENT_EXPIRED_TIMER);
+            ELAPSED(whip->whip_last_consent_rx_time, now), WHIP_ICE_CONSENT_EXPIRED_TIMER);
         ret = AVERROR(ETIMEDOUT);
         goto end;
     }
