@@ -68,6 +68,8 @@ typedef struct SnowEncContext {
 
     uint64_t encoding_error[SNOW_MAX_PLANES];
 
+    uint8_t *emu_edge_buffer;
+
     IDWTELEM obmc_scratchpad[MB_SIZE * MB_SIZE * 12 * 2];
 } SnowEncContext;
 
@@ -285,6 +287,10 @@ static av_cold int encode_init(AVCodecContext *avctx)
 
     if ((ret = get_encode_buffer(s, s->input_picture)) < 0)
         return ret;
+
+    enc->emu_edge_buffer = av_calloc(avctx->width + 128, 2 * (2 * MB_SIZE + HTAPS_MAX - 1));
+    if (!enc->emu_edge_buffer)
+        return AVERROR(ENOMEM);
 
     if (enc->motion_est == FF_ME_ITER) {
         int size= s->b_width * s->b_height << 2*s->block_max_depth;
@@ -770,7 +776,7 @@ static int get_block_rd(SnowEncContext *enc, int mb_x, int mb_y,
     const uint8_t *src = s->input_picture->data[plane_index];
     IDWTELEM *pred = enc->obmc_scratchpad + plane_index * block_size * block_size * 4;
     uint8_t *cur = s->scratchbuf;
-    uint8_t *tmp = s->emu_edge_buffer;
+    uint8_t *tmp = enc->emu_edge_buffer;
     const int b_stride = s->b_width << s->block_max_depth;
     const int b_height = s->b_height<< s->block_max_depth;
     const int w= p->width;
@@ -1700,6 +1706,7 @@ static int ratecontrol_1pass(SnowEncContext *enc, AVFrame *pict)
                     coef_sum+= abs(buf[x+y*stride]) * qdiv >> 16;
         }
     }
+    emms_c();
 
     /* ugly, ratecontrol just takes a sqrt again */
     av_assert0(coef_sum < INT_MAX);
@@ -1786,7 +1793,6 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                                 EDGE_TOP | EDGE_BOTTOM);
 
     }
-    emms_c();
     pic = s->input_picture;
     pic->pict_type = pict->pict_type;
     pic->quality = pict->quality;
@@ -1831,7 +1837,6 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                                       s->current_picture->linesize[2], w>>s->chroma_h_shift, h>>s->chroma_v_shift,
                                       EDGE_WIDTH>>s->chroma_h_shift, EDGE_WIDTH>>s->chroma_v_shift, EDGE_TOP | EDGE_BOTTOM);
         }
-        emms_c();
     }
 
     ff_snow_frames_prepare(s);
@@ -2057,8 +2062,6 @@ redo_frame:
         ff_write_pass1_stats(&enc->m);
     enc->m.last_pict_type = mpv->c.pict_type;
 
-    emms_c();
-
     ff_encode_add_stats_side_data(pkt, s->current_picture->quality,
                                   enc->encoding_error,
                                   (s->avctx->flags&AV_CODEC_FLAG_PSNR) ? SNOW_MAX_PLANES : 0,
@@ -2091,6 +2094,7 @@ static av_cold int encode_end(AVCodecContext *avctx)
 
     enc->m.s.me.temp = NULL;
     av_freep(&enc->m.s.me.scratchpad);
+    av_freep(&enc->emu_edge_buffer);
 
     av_freep(&avctx->stats_out);
 

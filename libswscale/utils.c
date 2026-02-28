@@ -63,6 +63,10 @@
 #include "swscale_internal.h"
 #include "graph.h"
 
+#if CONFIG_VULKAN
+#include "vulkan/ops.h"
+#endif
+
 /**
  * Allocate and return an SwsContext without performing initialization.
  */
@@ -388,7 +392,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
     if (dstFilter)
         filter2Size += dstFilter->length - 1;
     av_assert0(filter2Size > 0);
-    filter2 = av_malloc_array(dstW, filter2Size * sizeof(*filter2));
+    filter2 = av_calloc(dstW, filter2Size * sizeof(*filter2));
     if (!filter2)
         goto nomem;
     for (i = 0; i < dstW; i++) {
@@ -557,7 +561,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
 
     // Note the +1 is for the MMX scaler which reads over the end
     /* align at 16 for AltiVec (needed by hScale_altivec_real) */
-    *outFilter = av_malloc_array(dstW + 3, *outFilterSize * sizeof(**outFilter));
+    *outFilter = av_calloc(dstW + 3, *outFilterSize * sizeof(**outFilter));
     if (!*outFilter)
         goto nomem;
 
@@ -766,7 +770,7 @@ av_cold int ff_sws_fill_xyztables(SwsInternal *c)
     return 0;
 }
 
-static int handle_jpeg(enum AVPixelFormat *format)
+static int handle_jpeg(/* enum AVPixelFormat */ int *format)
 {
     switch (*format) {
     case AV_PIX_FMT_YUVJ420P:
@@ -804,7 +808,7 @@ static int handle_jpeg(enum AVPixelFormat *format)
     }
 }
 
-static int handle_0alpha(enum AVPixelFormat *format)
+static int handle_0alpha(/* enum AVPixelFormat */ int *format)
 {
     switch (*format) {
     case AV_PIX_FMT_0BGR    : *format = AV_PIX_FMT_ABGR   ; return 1;
@@ -815,7 +819,7 @@ static int handle_0alpha(enum AVPixelFormat *format)
     }
 }
 
-static int handle_xyz(enum AVPixelFormat *format)
+static int handle_xyz(/* enum AVPixelFormat */ int *format)
 {
     switch (*format) {
     case AV_PIX_FMT_XYZ12BE : *format = AV_PIX_FMT_RGB48BE; return 1;
@@ -2258,6 +2262,10 @@ void sws_freeContext(SwsContext *sws)
     int i;
     if (!c)
         return;
+
+#if CONFIG_VULKAN
+    ff_sws_vk_uninit(sws);
+#endif
 
     for (i = 0; i < FF_ARRAY_ELEMS(c->graph); i++)
         ff_sws_graph_free(&c->graph[i]);

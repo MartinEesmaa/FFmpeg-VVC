@@ -48,27 +48,6 @@ typedef    float f32block_t[SWS_BLOCK_SIZE];
 # include "ops_tmpl_float.c"
 #undef BIT_DEPTH
 
-static void process(const SwsOpExec *exec, const void *priv,
-                    const int bx_start, const int y_start, int bx_end, int y_end)
-{
-    const SwsOpChain *chain = priv;
-    const SwsOpImpl *impl = chain->impl;
-    SwsOpIter iter;
-
-    for (iter.y = y_start; iter.y < y_end; iter.y++) {
-        for (int i = 0; i < 4; i++) {
-            iter.in[i]  = exec->in[i]  + (iter.y - y_start) * exec->in_stride[i];
-            iter.out[i] = exec->out[i] + (iter.y - y_start) * exec->out_stride[i];
-        }
-
-        for (int block = bx_start; block < bx_end; block++) {
-            iter.x = block * SWS_BLOCK_SIZE;
-            ((void (*)(SwsOpIter *, const SwsOpImpl *)) impl->cont)
-                (&iter, &impl[1]);
-        }
-    }
-}
-
 static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
 {
     int ret;
@@ -76,6 +55,9 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
     SwsOpChain *chain = ff_sws_op_chain_alloc();
     if (!chain)
         return AVERROR(ENOMEM);
+
+    av_assert0(ops->num_ops > 0);
+    const SwsPixelType read_type = ops->ops[0].type;
 
     static const SwsOpTable *const tables[] = {
         &bitfn(op_table_int,    u8),
@@ -94,16 +76,26 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
     }
 
     *out = (SwsCompiledOp) {
-        .func       = process,
-        .block_size = SWS_BLOCK_SIZE,
-        .cpu_flags  = chain->cpu_flags,
-        .priv       = chain,
-        .free       = ff_sws_op_chain_free_cb,
+        .slice_align = 1,
+        .block_size  = SWS_BLOCK_SIZE,
+        .cpu_flags   = chain->cpu_flags,
+        .priv        = chain,
+        .free        = ff_sws_op_chain_free_cb,
     };
+
+    switch (read_type) {
+    case SWS_PIXEL_U8:  out->func = process_u8;  break;
+    case SWS_PIXEL_U16: out->func = process_u16; break;
+    case SWS_PIXEL_U32: out->func = process_u32; break;
+    case SWS_PIXEL_F32: out->func = process_f32; break;
+    default: av_unreachable("Invalid pixel type!");
+    }
+
     return 0;
 }
 
 const SwsOpBackend backend_c = {
     .name       = "c",
     .compile    = compile,
+    .hw_format  = AV_PIX_FMT_NONE,
 };

@@ -100,7 +100,7 @@ static int x509_fingerprint(X509 *cert, char **fingerprint)
     if (X509_digest(cert, EVP_sha256(), md, &n) != 1) {
         av_log(NULL, AV_LOG_ERROR, "TLS: Failed to generate fingerprint, %s\n",
                ERR_error_string(ERR_get_error(), NULL));
-        return AVERROR(ENOMEM);
+        return AVERROR(EINVAL);
     }
 
     av_bprint_init(&buf, n*3, n*3);
@@ -267,7 +267,6 @@ static int openssl_gen_certificate(EVP_PKEY *pkey, X509 **cert, char **fingerpri
         goto enomem_end;
     }
 
-    // TODO: Support non-self-signed certificate, for example, load from a file.
     subject = X509_NAME_new();
     if (!subject) {
         goto enomem_end;
@@ -313,7 +312,7 @@ static int openssl_gen_certificate(EVP_PKEY *pkey, X509 **cert, char **fingerpri
         goto einval_end;
     }
 
-    if (!X509_sign(*cert, pkey, EVP_sha1())) {
+    if (!X509_sign(*cert, pkey, EVP_sha256())) {
         av_log(NULL, AV_LOG_ERROR, "TLS: Failed to sign certificate, %s\n", ERR_error_string(ERR_get_error(), NULL));
         goto einval_end;
     }
@@ -399,17 +398,16 @@ static EVP_PKEY *pkey_from_pem_string(const char *pem_str, int is_priv)
  */
 static X509 *cert_from_pem_string(const char *pem_str)
 {
+    X509 *cert = NULL;
     BIO *mem = BIO_new_mem_buf(pem_str, -1);
     if (!mem) {
         av_log(NULL, AV_LOG_ERROR, "BIO_new_mem_buf failed\n");
         return NULL;
     }
 
-    X509 *cert = PEM_read_bio_X509(mem, NULL, NULL, NULL);
-    if (!cert) {
+    cert = PEM_read_bio_X509(mem, NULL, NULL, NULL);
+    if (!cert)
         av_log(NULL, AV_LOG_ERROR, "Failed to parse certificate from string\n");
-        return NULL;
-    }
 
     BIO_free(mem);
     return cert;
@@ -812,17 +810,7 @@ static int dtls_start(URLContext *h, const char *url, int flags, AVDictionary **
     else
         SSL_set_connect_state(c->ssl);
 
-    /**
-     * During initialization, we only need to call SSL_do_handshake once because SSL_read consumes
-     * the handshake message if the handshake is incomplete.
-     * To simplify maintenance, we initiate the handshake for both the DTLS server and client after
-     * sending out the ICE response in the start_active_handshake function. It's worth noting that
-     * although the DTLS server may receive the ClientHello immediately after sending out the ICE
-     * response, this shouldn't be an issue as the handshake function is called before any DTLS
-     * packets are received.
-     *
-     * The SSL_do_handshake can't be called if DTLS hasn't prepare for udp.
-     */
+    /* The SSL_do_handshake can't be called if DTLS hasn't prepare for udp. */
     if (!c->tls_shared.external_sock) {
         ret = dtls_handshake(h);
         // Fatal SSL error, for example, no available suite when peer is DTLS 1.0 while we are DTLS 1.2.
@@ -933,7 +921,7 @@ static int tls_write(URLContext *h, const uint8_t *buf, int size)
     URLContext *uc = s->is_dtls ? s->udp : s->tcp;
     int ret;
 
-    // Set or clear the AVIO_FLAG_NONBLOCK on c->tls_shared.tcp
+    // Set or clear the AVIO_FLAG_NONBLOCK on the underlying socket
     uc->flags &= ~AVIO_FLAG_NONBLOCK;
     uc->flags |= h->flags & AVIO_FLAG_NONBLOCK;
 

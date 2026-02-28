@@ -424,6 +424,14 @@ static int execute_model_th(THRequestItem *request, Queue *lltask_queue)
         }
         th_model->cond->notify_one();
         return 0;
+    } else {
+        // Synchronous execution path
+        ret = th_start_inference((void *)(request));
+        if (ret != 0) {
+            goto err;
+        }
+        infer_completion_callback(request);
+        return (task->inference_done == task->inference_todo) ? 0 : DNN_GENERIC_ERROR;
     }
 
 err:
@@ -507,7 +515,11 @@ static DNNModel *dnn_load_model_th(DnnContext *ctx, DNNFunctionType func_type, A
             av_log(ctx, AV_LOG_ERROR, "No XPU device found\n");
             goto fail;
         }
+#if TORCH_VERSION_MAJOR > 2 || (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR >= 6)
+        at::detail::getXPUHooks().init();
+#else
         at::detail::getXPUHooks().initXPU();
+#endif
     } else if (!device.is_cpu()) {
         av_log(ctx, AV_LOG_ERROR, "Not supported device:\"%s\"\n", device_name);
         goto fail;
