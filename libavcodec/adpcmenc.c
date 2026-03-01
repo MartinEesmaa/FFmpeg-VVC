@@ -1102,4 +1102,4 @@ ADPCM_ENCODER(ADPCM_IMA_WS,  adpcm_ima_ws,  sample_fmts,   AV_CODEC_CAP_SMALL_LA
 ADPCM_ENCODER(ADPCM_MS,      adpcm_ms,      sample_fmts,   0,                             "ADPCM Microsoft",                        MONO_STEREO, AVCLASS)
 ADPCM_ENCODER(ADPCM_SWF,     adpcm_swf,     sample_fmts,   0,                             "ADPCM Shockwave Flash",                  MONO_STEREO, CODEC_SAMPLERATES(11025, 22050, 44100))
 ADPCM_ENCODER(ADPCM_YAMAHA,  adpcm_yamaha,  sample_fmts,   0,                             "ADPCM Yamaha",                           MONO_STEREO, AVCLASS)
-ADPCM_ENCODER(ADPCM_IMA_SMJPEG, adpcm_ima_smjpeg, sample_fmts, 0,                         "ADPCM IMA Loki SDL SMJPEG"               MONO_STEREO, AVCLASS)
+ADPCM_ENCODER(ADPCM_IMA_SMJPEG, adpcm_ima_smjpeg, sample_fmts, 0,                         "ADPCM IMA Loki SDL SMJPEG"               MONO_STEREO)
