@@ -542,6 +542,16 @@ DECL_FUNCS_16(32, _m2_avx2, AVX2)
 
 DECL_FUNCS_32(16, _avx2, AVX2)
 
+static const SwsOpTable *const tables[] = {
+    &ops8_m1_sse4,
+    &ops8_m1_avx2,
+    &ops8_m2_sse4,
+    &ops8_m2_avx2,
+    &ops16_m1_avx2,
+    &ops16_m2_avx2,
+    &ops32_avx2,
+};
+
 static av_const int get_mmsize(const int cpu_flags)
 {
     if (cpu_flags & AV_CPU_FLAG_AVX512)
@@ -669,9 +679,9 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
     if (mmsize < 0)
         return mmsize;
 
-    av_assert1(ops->num_ops > 0);
-    const SwsOp *read = ops->ops[0].op == SWS_OP_READ ? &ops->ops[0] : NULL;
-    const SwsOp *write = &ops->ops[ops->num_ops - 1];
+    const SwsOp *read  = ff_sws_op_list_input(ops);
+    const SwsOp *write = ff_sws_op_list_output(ops);
+    av_assert1(write);
     int ret;
 
     /* Special fast path for in-place packed shuffle */
@@ -698,19 +708,12 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
     if (write->rw.packed && write->rw.elems == 3)
         out->over_write = sizeof(uint32_t);
 
-    static const SwsOpTable *const tables[] = {
-        &ops8_m1_sse4,
-        &ops8_m1_avx2,
-        &ops8_m2_sse4,
-        &ops8_m2_avx2,
-        &ops16_m1_avx2,
-        &ops16_m2_avx2,
-        &ops32_avx2,
-    };
 
+    /* Make on-stack copy of `ops` to iterate over */
+    SwsOpList rest = *ops;
     do {
         int op_block_size = out->block_size;
-        SwsOp *op = &ops->ops[0];
+        SwsOp *op = &rest.ops[0];
 
         if (op_is_type_invariant(op)) {
             if (op->op == SWS_OP_CLEAR)
@@ -719,11 +722,16 @@ static int compile(SwsContext *ctx, SwsOpList *ops, SwsCompiledOp *out)
             op->type = SWS_PIXEL_U8;
         }
 
-        ret = ff_sws_op_compile_tables(tables, FF_ARRAY_ELEMS(tables), ops,
+        ret = ff_sws_op_compile_tables(tables, FF_ARRAY_ELEMS(tables), &rest,
                                        op_block_size, chain);
     } while (ret == AVERROR(EAGAIN));
+
     if (ret < 0) {
         ff_sws_op_chain_free(chain);
+        if (rest.num_ops < ops->num_ops) {
+            av_log(ctx, AV_LOG_TRACE, "Uncompiled remainder:\n");
+            ff_sws_op_list_print(ctx, AV_LOG_TRACE, AV_LOG_TRACE, &rest);
+        }
         return ret;
     }
 

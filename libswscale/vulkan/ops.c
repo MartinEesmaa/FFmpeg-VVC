@@ -18,17 +18,17 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/mem.h"
+#include "libavutil/refstruct.h"
+
 #include "../ops_internal.h"
 #include "../swscale_internal.h"
-#include "libavutil/mem.h"
+
 #include "ops.h"
 
-void ff_sws_vk_uninit(SwsContext *sws)
+static void ff_sws_vk_uninit(AVRefStructOpaque opaque, void *obj)
 {
-    SwsInternal *c = sws_internal(sws);
-    FFVulkanOpsCtx *s = c->hw_priv;
-    if (!s)
-        return;
+    FFVulkanOpsCtx *s = obj;
 
 #if CONFIG_LIBSHADERC || CONFIG_LIBGLSLANG
     if (s->spvc)
@@ -36,7 +36,6 @@ void ff_sws_vk_uninit(SwsContext *sws)
 #endif
     ff_vk_exec_pool_free(&s->vkctx, &s->e);
     ff_vk_uninit(&s->vkctx);
-    av_freep(&c->hw_priv);
 }
 
 int ff_sws_vk_init(SwsContext *sws, AVBufferRef *dev_ref)
@@ -45,7 +44,8 @@ int ff_sws_vk_init(SwsContext *sws, AVBufferRef *dev_ref)
     SwsInternal *c = sws_internal(sws);
 
     if (!c->hw_priv) {
-        c->hw_priv = av_mallocz(sizeof(FFVulkanOpsCtx));
+        c->hw_priv = av_refstruct_alloc_ext(sizeof(FFVulkanOpsCtx), 0, NULL,
+                                            ff_sws_vk_uninit);
         if (!c->hw_priv)
             return AVERROR(ENOMEM);
     }
@@ -100,8 +100,8 @@ static void process(const SwsOpExec *exec, const void *priv,
     FFVulkanFunctions *vk = &p->s->vkctx.vkfn;
     ff_vk_exec_start(&p->s->vkctx, ec);
 
-    AVFrame *src_f = (AVFrame *)exec->src_frame_ptr;
-    AVFrame *dst_f = (AVFrame *)exec->dst_frame_ptr;
+    AVFrame *src_f = (AVFrame *) exec->in_frame->avframe;
+    AVFrame *dst_f = (AVFrame *) exec->out_frame->avframe;
     ff_vk_exec_add_dep_frame(&p->s->vkctx, ec, src_f,
                              VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
                              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
@@ -167,7 +167,7 @@ static int add_ops_glsl(VulkanPriv *p, FFVulkanOpsCtx *s,
     void *spv_opaque = NULL;
 
     /* Interlaced formats are not currently supported */
-    if (ops->src.interlaced || ops->src.interlaced)
+    if (ops->src.interlaced || ops->dst.interlaced)
         return AVERROR(ENOTSUP);
 
     err = ff_vk_shader_init(&s->vkctx, shd, "sws_pass",

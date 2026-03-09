@@ -88,13 +88,51 @@
 #define DISABLE_SME
 #endif
 
+#if HAVE_AS_ARCHEXT_SME_I16I64_DIRECTIVE
+#define ENABLE_SME_I16I64  .arch_extension sme-i16i64
+#define DISABLE_SME_I16I64 .arch_extension nosme-i16i64
+#else
+#define ENABLE_SME_I16I64
+#define DISABLE_SME_I16I64
+#endif
+
+#if HAVE_AS_ARCHEXT_SME2_DIRECTIVE
+#define ENABLE_SME2   .arch_extension sme2
+#define DISABLE_SME2  .arch_extension nosme2
+#else
+#define ENABLE_SME2
+#define DISABLE_SME2
+#endif
+
 DISABLE_ARM_CRC
 DISABLE_DOTPROD
 DISABLE_I8MM
 DISABLE_SVE
 DISABLE_SVE2
 DISABLE_SME
+DISABLE_SME_I16I64
+DISABLE_SME2
 
+#if HAVE_SME
+.macro sme_entry
+        stp             x29, x30, [sp, #-80]!
+        mov             x29, sp
+        stp             d8, d9, [sp, #16]
+        stp             d10, d11, [sp, #32]
+        stp             d12, d13, [sp, #48]
+        stp             d14, d15, [sp, #64]
+        smstart
+.endm
+
+.macro sme_exit
+        smstop
+        ldp             d8, d9, [sp, #16]
+        ldp             d10, d11, [sp, #32]
+        ldp             d12, d13, [sp, #48]
+        ldp             d14, d15, [sp, #64]
+        ldp             x29, x30, [sp], #80
+.endm
+#endif
 
 /* Support macros for
  *   - Armv8.3-A Pointer Authentication and

@@ -49,7 +49,9 @@ static const struct {
     { AV_CPU_FLAG_SVE,       "sve"        },
     { AV_CPU_FLAG_SVE2,      "sve2"       },
     { AV_CPU_FLAG_SME,       "sme"        },
+    { AV_CPU_FLAG_SME_I16I64, "sme_i16i64" },
     { AV_CPU_FLAG_ARM_CRC,   "crc"        },
+    { AV_CPU_FLAG_SME2,      "sme2"       },
 #elif ARCH_ARM
     { AV_CPU_FLAG_ARMV5TE,   "armv5te"    },
     { AV_CPU_FLAG_ARMV6,     "armv6"      },

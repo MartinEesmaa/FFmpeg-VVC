@@ -2,6 +2,9 @@ Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
 version <next>:
+
+
+version 8.1:
 - ffprobe -codec option
 - EXIF Metadata Parsing
 - gfxcapture: Windows.Graphics.Capture based window/monitor capture
@@ -24,6 +27,12 @@ version <next>:
 - Remove the old HLS protocol handler
 - Vulkan compute codec optimizations
 - swscale Vulkan support
+- LCEVC metadata bitstream filter
+- Add vf_deinterlace_d3d12 filter
+- ffprobe: only show refs field in stream section when reading frames
+- ProRes Vulkan encoder
+- LCEVC parser
+- LCEVC enhancement layer exporting in MPEG-TS
 
 
 version 8.0:
